@@ -1,3 +1,0 @@
-import { HoyPage } from '@/pages/Hoy';
-// ...
-<Route path="/" element={<HoyPage />} />
