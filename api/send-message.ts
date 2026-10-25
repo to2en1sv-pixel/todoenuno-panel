@@ -2,11 +2,7 @@ export default async function handler(req: any, res: any) {
   try {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-    const { conversationId, text, instanceId } = req.body;
-
-    if (!conversationId || !text || !instanceId) {
-      return res.status(400).json({ error: 'Faltan parámetros' });
-    }
+    const { conversationId, text, instanceId, contactPhone } = req.body; // Volvemos a usar contactPhone (que contiene el LID)
 
     let bbKey = '';
     let botId = ''; 
@@ -21,7 +17,19 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'Instancia no reconocida' });
     }
 
-    // Usamos el conversationId (que es el LID) como "number" en la API V2
+    // PASO 1: Preguntarle a BuilderBot el número real usando el LID (contactPhone)
+    const contactRes = await fetch(`https://app.builderbot.cloud/api/v2/${botId}/contacts/${contactPhone}`, {
+      headers: { 'x-api-builderbot': bbKey }
+    });
+    
+    let realPhone = contactPhone; // Si falla, usamos el LID por defecto
+    if (contactRes.ok) {
+      const contactData = await contactRes.json();
+      // BuilderBot devuelve el número en 'phone' o 'wa_id'
+      realPhone = contactData.phone || contactData.wa_id || contactData.data?.phone || contactPhone;
+    }
+
+    // PASO 2: Enviar el mensaje al número real
     const bbResponse = await fetch(`https://app.builderbot.cloud/api/v2/${botId}/messages`, {
       method: 'POST',
       headers: {
@@ -30,11 +38,9 @@ export default async function handler(req: any, res: any) {
       },
       body: JSON.stringify({ 
         messages: { content: text },
-        number: conversationId, 
+        number: realPhone, 
         checkIfExists: false
-      }),
-      // Esto evita que Vercel tire el error de Timeout
-      signal: AbortSignal.timeout(8000) 
+      })
     });
 
     const responseText = await bbResponse.text();
