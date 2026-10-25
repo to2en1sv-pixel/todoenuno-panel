@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Send, Bot, User } from 'lucide-react';
+import { Send, Bot, User, Loader2 } from 'lucide-react';
 
 type Conversation = {
   id: string;
@@ -24,11 +24,18 @@ export function UniChatPage() {
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isUpdating, setIsUpdating] = useState(false);
+  
+  // Estado temporal para el input (lo usaremos en la Opción 2)
+  const [inputText, setInputText] = useState('');
 
   // 1. Cargar conversaciones iniciales y escuchar nuevas
   useEffect(() => {
     async function loadConversations() {
-      const { data } = await supabase.from('bb_conversations').select('*').order('updated_at', { ascending: false });
+      const { data } = await supabase
+        .from('bb_conversations')
+        .select('*')
+        .order('updated_at', { ascending: false });
       if (data) setConversations(data);
       setLoading(false);
     }
@@ -36,45 +43,79 @@ export function UniChatPage() {
 
     // Suscripción en tiempo real
     const channel = supabase.channel('crm_updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bb_conversations' }, (payload) => {
-        loadConversations(); // Simplificado: recarga la lista cuando hay cambios
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bb_conversations' }, () => {
+        loadConversations(); 
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bb_messages' }, (payload) => {
         const newMsg = payload.new as Message;
-        if (selectedConv && newMsg.conversation_id === selectedConv.id) {
-          setMessages((prev) => [...prev, newMsg]);
-        }
+        // Usamos una función de actualización de estado para evitar dependencias circulares
+        setSelectedConv((current) => {
+          if (current && newMsg.conversation_id === current.id) {
+            setMessages((prev) => {
+              // Evitar duplicados si Supabase Realtime dispara doble
+              if (prev.some(m => m.id === newMsg.id)) return prev;
+              return [...prev, newMsg];
+            });
+          }
+          return current;
+        });
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [selectedConv]);
+  }, []);
 
   // 2. Cargar mensajes al seleccionar un chat
   useEffect(() => {
     if (!selectedConv) return;
+    
     async function loadMessages() {
       const { data } = await supabase
         .from('bb_messages')
         .select('*')
-        .eq('conversation_id', selectedConv.id)
+        .eq('conversation_id', selectedConv?.id)
         .order('created_at', { ascending: true });
       if (data) setMessages(data);
     }
     loadMessages();
-  }, [selectedConv]);
+  }, [selectedConv?.id]);
 
   // 3. Función para cambiar entre Bot y Humano
   const toggleStatus = async () => {
-    if (!selectedConv) return;
+    if (!selectedConv || isUpdating) return;
+    
+    setIsUpdating(true);
     const newStatus = selectedConv.status === 'bot' ? 'human' : 'bot';
     
-    // Actualizamos en Supabase (para que se refleje en el panel)
-    await supabase.from('bb_conversations').update({ status: newStatus }).eq('id', selectedConv.id);
-    setSelectedConv({ ...selectedConv, status: newStatus });
+    try {
+      // Llamamos a nuestra API Serverless en Vercel
+      const res = await fetch('/api/toggle-bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: selectedConv.id,
+          action: newStatus,
+          instanceId: selectedConv.instance_id
+        })
+      });
 
-    // Aquí luego conectaremos con la API de BuilderBot (PATCH /conversations/:id)
-    console.log(`Asignar chat a: ${newStatus}`);
+      if (!res.ok) throw new Error('Error al actualizar en BuilderBot');
+
+      // Actualizamos la vista local inmediatamente
+      const updatedConv = { ...selectedConv, status: newStatus };
+      setSelectedConv(updatedConv);
+      
+      // Actualizamos también la lista de la izquierda
+      setConversations(prev => 
+        prev.map(c => c.id === selectedConv.id ? updatedConv : c)
+      );
+
+    } catch (error) {
+      console.error(error);
+      alert('No se pudo cambiar el modo. Revisa que las variables de entorno en Vercel estén bien configuradas.');
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   return (
@@ -90,7 +131,7 @@ export function UniChatPage() {
             <div 
               key={conv.id} 
               onClick={() => setSelectedConv(conv)}
-              className={`p-3 border-b border-[var(--bd)] cursor-pointer hover:bg-sf ${selectedConv?.id === conv.id ? 'bg-sf' : ''}`}
+              className={`p-3 border-b border-[var(--bd)] cursor-pointer hover:bg-sf transition-colors ${selectedConv?.id === conv.id ? 'bg-sf border-l-4 border-l-[var(--ac)]' : ''}`}
             >
               <div className="flex justify-between items-start mb-1">
                 <span className="font-semibold text-sm">{conv.contact_name || conv.contact_phone}</span>
@@ -115,36 +156,21 @@ export function UniChatPage() {
                 <h3 className="font-bold">{selectedConv.contact_name}</h3>
                 <p className="text-xs tx-mu">{selectedConv.contact_phone}</p>
               </div>
+              
+              {/* BOTÓN DE MODO HUMANO/BOT */}
               <button 
                 onClick={toggleStatus}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 ${selectedConv.status === 'bot' ? 'bg-sf border border-[var(--bd)]' : 'bg-[var(--ac)] text-white'}`}
+                disabled={isUpdating}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
+                  selectedConv.status === 'bot' 
+                    ? 'bg-sf border border-[var(--bd)] hover:bg-gray-200 text-gray-700' 
+                    : 'bg-[var(--ac)] text-white hover:opacity-90'
+                } ${isUpdating ? 'opacity-50 cursor-wait' : ''}`}
               >
-                {selectedConv.status === 'bot' ? <><Bot size={14}/> Bot Activado</> : <><User size={14}/> Modo Humano</>}
-              </button>
-            </div>
-
-            {/* Mensajes */}
-            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 bg-cd">
-              {messages.map((msg) => (
-                <div key={msg.id} className={`max-w-[70%] p-2.5 rounded-xl text-sm ${msg.from_me ? 'self-end bg-[var(--tx)] text-[var(--cd)]' : 'self-start bg-sf border border-[var(--bd)]'}`}>
-                  {msg.body}
-                </div>
-              ))}
-            </div>
-
-            {/* Input (Para responder manualmente) */}
-            <div className="p-3 bg-cd border-t border-[var(--bd)] flex gap-2">
-              <input type="text" placeholder="Escribe como humano..." className="flex-1 bg-sf bd rounded-lg px-3 py-2 text-sm outline-none" />
-              <button className="bg-[var(--tx)] text-[var(--cd)] p-2 rounded-lg"><Send size={16}/></button>
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-sm tx-mu bg-cd">
-            Selecciona un chat para comenzar
-          </div>
-        )}
-      </div>
-
-    </div>
-  );
-}
+                {isUpdating ? (
+                  <><Loader2 size={14} className="animate-spin" /> Cambiando...</>
+                ) : selectedConv.status === 'bot' ? (
+                  <><Bot size={14}/> Bot Activado</>
+                ) : (
+                  <><User size={14}/> Modo Humano</>
+                )}
