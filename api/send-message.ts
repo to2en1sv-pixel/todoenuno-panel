@@ -2,17 +2,13 @@ export default async function handler(req: any, res: any) {
   try {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-    const { conversationId, text, instanceId, contactPhone } = req.body;
-
-    if (!conversationId || !text || !instanceId || !contactPhone) {
-      return res.status(400).json({ error: 'Faltan parámetros' });
-    }
+    const { conversationId, text, instanceId } = req.body;
 
     let bbKey = '';
     let botId = ''; 
 
     if (instanceId === 'builderbot-principal') {
-      bbKey = process.env.BB_CRM1_KEY!;
+      bbKey = process.env.BB_CRM1_KEY!; 
       botId = process.env.BB_CRM1_TENANT!; 
     } else if (instanceId === 'ventas') {
       bbKey = process.env.BB_CRM2_KEY!;
@@ -21,29 +17,24 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'Instancia no reconocida' });
     }
 
-    // Limpiamos el número por si trae el @s.whatsapp.net
-    const formattedPhone = contactPhone.replace('@s.whatsapp.net', '').replace('+', '');
-
-    const bbResponse = await fetch(`https://app.builderbot.cloud/api/v2/${botId}/messages`, {
+    // Usamos el endpoint de V1 que toma el conversationId
+    const bbResponse = await fetch(`https://app.builderbot.cloud/api/v1/conversations/${conversationId}/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-builderbot': bbKey
       },
       body: JSON.stringify({ 
-        messages: { content: text }, // Formato V2
-        number: formattedPhone,      // Requiere número
-        checkIfExists: false
+        content: text,
+        message_type: 'TEXT', 
+        sender: 'AGENT'
       })
     });
 
     const responseText = await bbResponse.text();
 
     if (!bbResponse.ok) {
-      return res.status(bbResponse.status).json({ 
-        error: 'BuilderBot rechazó el mensaje', 
-        details: responseText.substring(0, 100) 
-      });
+      return res.status(bbResponse.status).json({ error: 'BuilderBot rechazó el mensaje', details: responseText });
     }
 
     return res.status(200).json({ success: true });
