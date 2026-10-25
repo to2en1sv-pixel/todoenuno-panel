@@ -29,7 +29,7 @@ export function UniChatPage() {
   const [isSending, setIsSending] = useState(false);
   const [inputText, setInputText] = useState('');
 
-  // 1. Cargar conversaciones
+  // 1. Cargar conversaciones iniciales y escuchar nuevas
   useEffect(() => {
     async function loadConversations() {
       const { data } = await supabase
@@ -62,7 +62,7 @@ export function UniChatPage() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // 2. Cargar mensajes
+  // 2. Cargar mensajes al seleccionar un chat
   useEffect(() => {
     if (!selectedConv) return;
     
@@ -77,7 +77,7 @@ export function UniChatPage() {
     loadMessages();
   }, [selectedConv?.id]);
 
-  // 3. Cambiar entre Bot y Humano (Solo requiere ID, acción e instancia)
+  // 3. Cambiar entre Bot y Humano
   const toggleStatus = async () => {
     if (!selectedConv || isUpdating) return;
     
@@ -110,7 +110,7 @@ export function UniChatPage() {
     }
   };
 
-  // 4. Enviar mensaje (Requiere el teléfono del cliente)
+  // 4. Enviar mensaje (Sin contactPhone, usando V1)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || !selectedConv || isSending) return;
@@ -126,8 +126,7 @@ export function UniChatPage() {
         body: JSON.stringify({
           conversationId: selectedConv.id,
           text: textToSend,
-          instanceId: selectedConv.instance_id,
-          contactPhone: selectedConv.contact_phone
+          instanceId: selectedConv.instance_id
         })
       });
 
@@ -182,6 +181,7 @@ export function UniChatPage() {
                 <p className="text-xs tx-mu">{selectedConv.contact_phone}</p>
               </div>
               
+              {/* BOTÓN DE MODO HUMANO/BOT */}
               <button 
                 onClick={toggleStatus}
                 disabled={isUpdating}
