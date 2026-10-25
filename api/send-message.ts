@@ -26,7 +26,6 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    // Enviar el mensaje a BuilderBot
     const bbResponse = await fetch(`${bbUrl}/api/v1/conversations/${conversationId}/messages`, {
       method: 'POST',
       headers: {
@@ -36,9 +35,8 @@ export default async function handler(req: any, res: any) {
       },
       body: JSON.stringify({ 
         content: text,
-        // CORRECCIÓN: BuilderBot exige estos campos exactos
         message_type: 'TEXT', 
-        sender: 'HUMAN' 
+        sender: 'AGENT' // ¡CORREGIDO!
       })
     });
 
