@@ -127,7 +127,6 @@ export function UniChatPage() {
           conversationId: selectedConv.id,
           text: textToSend,
           instanceId: selectedConv.instance_id,
-          contactPhone: selectedConv.contact_phone // AQUÍ VA EL TELÉFONO
         })
       });
 
