@@ -15,32 +15,65 @@ export default async function handler(req: any, res: any) {
 
     if (instanceId === 'builderbot-principal') {
       bbKey = process.env.BB_CRM1_KEY!;
-      botId = process.env.BB_CRM1_TENANT!; // Usamos el UUID cb5063...
+      botId = process.env.BB_CRM1_TENANT!;
     } else if (instanceId === 'ventas') {
       bbKey = process.env.BB_CRM2_KEY!;
-      botId = process.env.BB_CRM2_TENANT!; // Usamos el UUID de ventas
+      botId = process.env.BB_CRM2_TENANT!;
     } else {
       return res.status(400).json({ error: 'Instancia no reconocida' });
     }
 
-    // Formatear teléfono (sin +, sin espacios)
-    const formattedPhone = contactPhone.replace('+', '').replace('@s.whatsapp.net', '');
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-api-builderbot': bbKey
+    };
 
-    // URL exacta de la API v2
+    let telefonoReal = contactPhone;
+
+    // Si el teléfono es un ID (empieza con letras o tiene más de 15 caracteres)
+    if (!telefonoReal.startsWith('+') && telefonoReal.length > 15) {
+      try {
+        // 1. Preguntamos a BuilderBot por los datos del contacto (usando API v1)
+        const contactRes = await fetch(`https://app.builderbot.cloud/api/v1/contacts/${contactPhone}`, {
+          method: 'GET',
+          headers
+        });
+
+        if (contactRes.ok) {
+          const contactData = await contactRes.json();
+          
+          // 🔍 ESTO IMPRIMIRÁ EN LOS LOGS DE VERCEL LO QUE DEVUELVE BUILDERBOT
+          console.log('--- DATOS DEL CONTACTO ---', JSON.stringify(contactData));
+
+          // Buscamos el número en todas las posibles respuestas
+          telefonoReal = 
+            contactData.phone || 
+            contactData.number || 
+            contactData.data?.phone || 
+            contactData.data?.number || 
+            contactData.data?.id || 
+            contactPhone;
+        }
+      } catch (e) {
+        console.error('Error buscando contacto:', e);
+      }
+    }
+
+    // Limpiamos el número (quitamos +, espacios y @s.whatsapp.net)
+    const formattedPhone = telefonoReal.replace('+', '').replace(/\s/g, '').replace('@s.whatsapp.net', '');
+
+    console.log('--- ENVIANDO A NÚMERO ---', formattedPhone);
+
+    // 2. Enviamos el mensaje con el número correcto
     const bbResponse = await fetch(`https://app.builderbot.cloud/api/v2/${botId}/messages`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-builderbot': bbKey
-      },
+      headers,
       body: JSON.stringify({ 
-        // FORMATO EXACTO DEL cURL
-        messages: {
-          content: text
-        },
+        messages: { content: text },
         number: formattedPhone,
         checkIfExists: false
-      })
+      }),
+      signal: AbortSignal.timeout(8000) // 8 segundos máximo de espera
     });
 
     const responseText = await bbResponse.text();
