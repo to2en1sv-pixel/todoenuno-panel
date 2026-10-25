@@ -93,6 +93,7 @@ export function UniChatPage() {
           conversationId: selectedConv.id,
           action: newStatus,
           instanceId: selectedConv.instance_id
+          contactPhone: selectedConv.contact_phone
         })
       });
 
