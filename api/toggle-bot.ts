@@ -13,7 +13,6 @@ export default async function handler(req: any, res: any) {
   let bbTenant = '';
   let bbKey = '';
 
-  // Configurar credenciales
   if (instanceId === 'builderbot-principal') {
     bbUrl = process.env.BB_CRM1_URL!;
     bbTenant = process.env.BB_CRM1_TENANT!;
@@ -27,9 +26,11 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    // Pausar el bot (is_muted: true) o reanudarlo (is_muted: false)
     const isMuted = action === 'human';
 
+    // Solo enviamos is_muted. Si BuilderBot requiere assignee_id, 
+    // tendríamos que buscar el ID real del usuario, pero mutearlo 
+    // es suficiente para detener al bot.
     const bbResponse = await fetch(`${bbUrl}/api/v1/conversations/${conversationId}`, {
       method: 'PATCH',
       headers: {
@@ -38,8 +39,7 @@ export default async function handler(req: any, res: any) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ 
-        is_muted: isMuted,
-        assignee_id: isMuted ? 'humano' : null 
+        is_muted: isMuted
       })
     });
 
@@ -49,7 +49,7 @@ export default async function handler(req: any, res: any) {
       return res.status(500).json({ error: 'BuilderBot rechazó la petición', details: errorData });
     }
 
-    // Actualizar Supabase
+    // Si funcionó en BuilderBot, actualizamos Supabase
     const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     await supabase
       .from('bb_conversations')
