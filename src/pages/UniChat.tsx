@@ -25,8 +25,6 @@ export function UniChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
-  
-  // Estado temporal para el input (lo usaremos en la Opción 2)
   const [inputText, setInputText] = useState('');
 
   // 1. Cargar conversaciones iniciales y escuchar nuevas
@@ -41,18 +39,15 @@ export function UniChatPage() {
     }
     loadConversations();
 
-    // Suscripción en tiempo real
     const channel = supabase.channel('crm_updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bb_conversations' }, () => {
         loadConversations(); 
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bb_messages' }, (payload) => {
         const newMsg = payload.new as Message;
-        // Usamos una función de actualización de estado para evitar dependencias circulares
         setSelectedConv((current) => {
           if (current && newMsg.conversation_id === current.id) {
             setMessages((prev) => {
-              // Evitar duplicados si Supabase Realtime dispara doble
               if (prev.some(m => m.id === newMsg.id)) return prev;
               return [...prev, newMsg];
             });
@@ -80,7 +75,7 @@ export function UniChatPage() {
     loadMessages();
   }, [selectedConv?.id]);
 
-  // 3. Función para cambiar entre Bot y Humano
+  // 3. Cambiar entre Bot y Humano
   const toggleStatus = async () => {
     if (!selectedConv || isUpdating) return;
     
@@ -88,7 +83,6 @@ export function UniChatPage() {
     const newStatus = selectedConv.status === 'bot' ? 'human' : 'bot';
     
     try {
-      // Llamamos a nuestra API Serverless en Vercel
       const res = await fetch('/api/toggle-bot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -101,11 +95,9 @@ export function UniChatPage() {
 
       if (!res.ok) throw new Error('Error al actualizar en BuilderBot');
 
-      // Actualizamos la vista local inmediatamente
       const updatedConv = { ...selectedConv, status: newStatus };
       setSelectedConv(updatedConv);
       
-      // Actualizamos también la lista de la izquierda
       setConversations(prev => 
         prev.map(c => c.id === selectedConv.id ? updatedConv : c)
       );
@@ -115,6 +107,33 @@ export function UniChatPage() {
       alert('No se pudo cambiar el modo. Revisa que las variables de entorno en Vercel estén bien configuradas.');
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  // 4. Enviar mensaje desde el panel
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputText.trim() || !selectedConv) return;
+
+    const textToSend = inputText;
+    setInputText('');
+
+    try {
+      const res = await fetch('/api/send-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: selectedConv.id,
+          text: textToSend,
+          instanceId: selectedConv.instance_id
+        })
+      });
+
+      if (!res.ok) throw new Error('Error al enviar');
+      
+    } catch (error) {
+      console.error(error);
+      alert('No se pudo enviar el mensaje.');
     }
   };
 
@@ -174,3 +193,39 @@ export function UniChatPage() {
                 ) : (
                   <><User size={14}/> Modo Humano</>
                 )}
+              </button>
+            </div>
+
+            {/* Mensajes */}
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 bg-cd">
+              {messages.map((msg) => (
+                <div key={msg.id} className={`max-w-[70%] p-2.5 rounded-xl text-sm ${msg.from_me ? 'self-end bg-[var(--tx)] text-[var(--cd)]' : 'self-start bg-sf border border-[var(--bd)]'}`}>
+                  {msg.body}
+                </div>
+              ))}
+            </div>
+
+            {/* Input (Para responder manualmente) */}
+            <form onSubmit={handleSendMessage} className="p-3 bg-cd border-t border-[var(--bd)] flex gap-2">
+              <input 
+                type="text" 
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                placeholder="Escribe como humano..." 
+                className="flex-1 bg-sf bd rounded-lg px-3 py-2 text-sm outline-none focus:border-[var(--ac)]" 
+              />
+              <button type="submit" className="bg-[var(--tx)] text-[var(--cd)] p-2 rounded-lg hover:opacity-80 transition-opacity">
+                <Send size={16}/>
+              </button>
+            </form>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-sm tx-mu bg-cd">
+            Selecciona un chat para comenzar
+          </div>
+        )}
+      </div>
+
+    </div>
+  );
+}
