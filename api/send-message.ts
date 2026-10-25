@@ -13,7 +13,6 @@ export default async function handler(req: any, res: any) {
   let bbTenant = '';
   let bbKey = '';
 
-  // Configurar credenciales según la instancia (Igual que en toggle-bot)
   if (instanceId === 'builderbot-principal') {
     bbUrl = process.env.BB_CRM1_URL!;
     bbTenant = process.env.BB_CRM1_TENANT!;
@@ -37,7 +36,9 @@ export default async function handler(req: any, res: any) {
       },
       body: JSON.stringify({ 
         content: text,
-        type: 'text' 
+        // CORRECCIÓN: BuilderBot exige estos campos exactos
+        message_type: 'TEXT', 
+        sender: 'HUMAN' 
       })
     });
 
