@@ -110,7 +110,7 @@ export function UniChatPage() {
     }
   };
 
-  // 4. Enviar mensaje (Sin contactPhone, usando V1)
+  // 4. Enviar mensaje (Usando contactPhone para la traducción en Vercel)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || !selectedConv || isSending) return;
@@ -126,8 +126,8 @@ export function UniChatPage() {
         body: JSON.stringify({
           conversationId: selectedConv.id,
           text: textToSend,
-          instanceId: selectedConv.instance_id
-          contactphone: selectedConv.contact_phone
+          instanceId: selectedConv.instance_id,
+          contactPhone: selectedConv.contact_phone // <-- ENVIAMOS EL LID PARA TRADUCIR
         })
       });
 
@@ -182,7 +182,6 @@ export function UniChatPage() {
                 <p className="text-xs tx-mu">{selectedConv.contact_phone}</p>
               </div>
               
-              {/* BOTÓN DE MODO HUMANO/BOT */}
               <button 
                 onClick={toggleStatus}
                 disabled={isUpdating}
