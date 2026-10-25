@@ -1,7 +1,6 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { conversationId, action, instanceId } = req.body;
@@ -10,11 +9,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Faltan parámetros' });
   }
 
-  // 1. Configurar credenciales de BuilderBot según la instancia
   let bbUrl = '';
   let bbTenant = '';
   let bbKey = '';
 
+  // Configurar credenciales
   if (instanceId === 'builderbot-principal') {
     bbUrl = process.env.BB_CRM1_URL!;
     bbTenant = process.env.BB_CRM1_TENANT!;
@@ -28,9 +27,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // 2. Hablar con la API de BuilderBot
-    // Si action es 'human', asignamos un ID de humano (ej. 'admin'). Si es 'bot', lo dejamos en null.
-    const assignee = action === 'human' ? 'admin' : null;
+    // Pausar el bot (is_muted: true) o reanudarlo (is_muted: false)
+    const isMuted = action === 'human';
 
     const bbResponse = await fetch(`${bbUrl}/api/v1/conversations/${conversationId}`, {
       method: 'PATCH',
@@ -39,16 +37,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Authorization': `Bearer ${bbKey}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ assignee_id: assignee })
+      body: JSON.stringify({ 
+        is_muted: isMuted,
+        assignee_id: isMuted ? 'humano' : null 
+      })
     });
 
     if (!bbResponse.ok) {
       const errorData = await bbResponse.text();
       console.error('Error de BuilderBot:', errorData);
-      return res.status(500).json({ error: 'BuilderBot rechazó la petición' });
+      return res.status(500).json({ error: 'BuilderBot rechazó la petición', details: errorData });
     }
 
-    // 3. Actualizar Supabase para que el panel se entere
+    // Actualizar Supabase
     const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     await supabase
       .from('bb_conversations')
@@ -57,8 +58,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({ success: true, status: action });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error en toggle-bot:', error);
-    return res.status(500).json({ error: 'Error interno del servidor' });
+    return res.status(500).json({ error: 'Error interno', details: error.message });
   }
 }
