@@ -4,11 +4,15 @@ export default async function handler(req: any, res: any) {
 
     const { conversationId, text, instanceId } = req.body;
 
+    if (!conversationId || !text || !instanceId) {
+      return res.status(400).json({ error: 'Faltan parámetros' });
+    }
+
     let bbKey = '';
     let botId = ''; 
 
     if (instanceId === 'builderbot-principal') {
-      bbKey = process.env.BB_CRM1_KEY!; 
+      bbKey = process.env.BB_CRM1_KEY!;
       botId = process.env.BB_CRM1_TENANT!; 
     } else if (instanceId === 'ventas') {
       bbKey = process.env.BB_CRM2_KEY!;
@@ -17,18 +21,20 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'Instancia no reconocida' });
     }
 
-    // Usamos el endpoint de V1 que toma el conversationId
-    const bbResponse = await fetch(`https://app.builderbot.cloud/api/v1/conversations/${conversationId}/messages`, {
+    // Usamos el conversationId (que es el LID) como "number" en la API V2
+    const bbResponse = await fetch(`https://app.builderbot.cloud/api/v2/${botId}/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-builderbot': bbKey
       },
       body: JSON.stringify({ 
-        content: text,
-        message_type: 'TEXT', 
-        sender: 'AGENT'
-      })
+        messages: { content: text },
+        number: conversationId, 
+        checkIfExists: false
+      }),
+      // Esto evita que Vercel tire el error de Timeout
+      signal: AbortSignal.timeout(8000) 
     });
 
     const responseText = await bbResponse.text();
