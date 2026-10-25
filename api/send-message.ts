@@ -1,7 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req: any, res: any) {
-  // Envolvemos TODO en un try/catch para que Vercel nunca devuelva un error HTML
   try {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -16,38 +15,41 @@ export default async function handler(req: any, res: any) {
 
     if (instanceId === 'builderbot-principal') {
       bbKey = process.env.BB_CRM1_KEY!;
-      botId = process.env.BB_CRM1_TENANT!; 
+      botId = process.env.BB_CRM1_TENANT!; // Usamos el UUID cb5063...
     } else if (instanceId === 'ventas') {
       bbKey = process.env.BB_CRM2_KEY!;
-      botId = process.env.BB_CRM2_TENANT!; 
+      botId = process.env.BB_CRM2_TENANT!; // Usamos el UUID de ventas
     } else {
       return res.status(400).json({ error: 'Instancia no reconocida' });
     }
 
-    // BuilderBot prefiere el teléfono sin el "+" y sin el "@s.whatsapp.net"
+    // Formatear teléfono (sin +, sin espacios)
     const formattedPhone = contactPhone.replace('+', '').replace('@s.whatsapp.net', '');
 
-    const bbResponse = await fetch(`https://app.builderbot.cloud/api/v1/bot/${botId}/messages`, {
+    // URL exacta de la API v2
+    const bbResponse = await fetch(`https://app.builderbot.cloud/api/v2/${botId}/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-builderbot': bbKey // El header exacto que dice tu captura
+        'x-api-builderbot': bbKey
       },
       body: JSON.stringify({ 
-        phone: formattedPhone,        
-        message: text                 
+        // FORMATO EXACTO DEL cURL
+        messages: {
+          content: text
+        },
+        number: formattedPhone,
+        checkIfExists: false
       })
     });
 
-    // Leemos como texto primero para evitar que HTML rompa el JSON
     const responseText = await bbResponse.text();
 
     if (!bbResponse.ok) {
       console.error('Error de BuilderBot:', responseText);
-      const safeText = responseText.substring(0, 100).replace(/</g, '&lt;');
       return res.status(bbResponse.status).json({ 
         error: 'BuilderBot rechazó el mensaje', 
-        details: safeText 
+        details: responseText.substring(0, 100) 
       });
     }
 
