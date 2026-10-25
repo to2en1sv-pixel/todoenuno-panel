@@ -25,12 +25,11 @@ export function UniChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Estados para los botones de acción
   const [isUpdating, setIsUpdating] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [inputText, setInputText] = useState('');
 
-  // 1. Cargar conversaciones iniciales y escuchar nuevas
+  // 1. Cargar conversaciones
   useEffect(() => {
     async function loadConversations() {
       const { data } = await supabase
@@ -63,7 +62,7 @@ export function UniChatPage() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // 2. Cargar mensajes al seleccionar un chat
+  // 2. Cargar mensajes
   useEffect(() => {
     if (!selectedConv) return;
     
@@ -78,7 +77,7 @@ export function UniChatPage() {
     loadMessages();
   }, [selectedConv?.id]);
 
-  // 3. Cambiar entre Bot y Humano
+  // 3. Cambiar entre Bot y Humano (Solo requiere ID, acción e instancia)
   const toggleStatus = async () => {
     if (!selectedConv || isUpdating) return;
     
@@ -93,20 +92,15 @@ export function UniChatPage() {
           conversationId: selectedConv.id,
           action: newStatus,
           instanceId: selectedConv.instance_id
-          contactPhone: selectedConv.contact_phone
         })
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.details || data.error || 'Error al actualizar');
 
-      // Actualizamos la vista local si la API respondió OK
       const updatedConv = { ...selectedConv, status: newStatus };
       setSelectedConv(updatedConv);
-      
-      setConversations(prev => 
-        prev.map(c => c.id === selectedConv.id ? updatedConv : c)
-      );
+      setConversations(prev => prev.map(c => c.id === selectedConv.id ? updatedConv : c));
 
     } catch (error: any) {
       console.error(error);
@@ -116,7 +110,7 @@ export function UniChatPage() {
     }
   };
 
-  // 4. Enviar mensaje desde el panel
+  // 4. Enviar mensaje (Requiere el teléfono del cliente)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || !selectedConv || isSending) return;
@@ -132,20 +126,16 @@ export function UniChatPage() {
         body: JSON.stringify({
           conversationId: selectedConv.id,
           text: textToSend,
-          instanceId: selectedConv.instance_id
+          instanceId: selectedConv.instance_id,
+          contactPhone: selectedConv.contact_phone // AQUÍ VA EL TELÉFONO
         })
       });
 
       const data = await res.json();
-      
-      if (!res.ok) {
-        // Esto capturará el error exacto que devuelva Vercel/BuilderBot
-        throw new Error(data.details || data.error || 'Error en el servidor');
-      }
+      if (!res.ok) throw new Error(data.details || data.error || 'Error en el servidor');
       
     } catch (error: any) {
       console.error('Error al enviar:', error);
-      // Si falla, devolvemos el texto al input para que no lo pierdas
       setInputText(textToSend); 
       alert(`No se pudo enviar el mensaje: ${error.message}`);
     } finally {
@@ -192,7 +182,6 @@ export function UniChatPage() {
                 <p className="text-xs tx-mu">{selectedConv.contact_phone}</p>
               </div>
               
-              {/* BOTÓN DE MODO HUMANO/BOT */}
               <button 
                 onClick={toggleStatus}
                 disabled={isUpdating}
@@ -221,7 +210,7 @@ export function UniChatPage() {
               ))}
             </div>
 
-            {/* Input (Para responder manualmente) */}
+            {/* Input */}
             <form onSubmit={handleSendMessage} className="p-3 bg-cd border-t border-[var(--bd)] flex gap-2">
               <input 
                 type="text" 
