@@ -24,7 +24,10 @@ export function UniChatPage() {
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Estados para los botones de acción
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [inputText, setInputText] = useState('');
 
   // 1. Cargar conversaciones iniciales y escuchar nuevas
@@ -93,8 +96,10 @@ export function UniChatPage() {
         })
       });
 
-      if (!res.ok) throw new Error('Error al actualizar en BuilderBot');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.details || data.error || 'Error al actualizar');
 
+      // Actualizamos la vista local si la API respondió OK
       const updatedConv = { ...selectedConv, status: newStatus };
       setSelectedConv(updatedConv);
       
@@ -102,9 +107,9 @@ export function UniChatPage() {
         prev.map(c => c.id === selectedConv.id ? updatedConv : c)
       );
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert('No se pudo cambiar el modo. Revisa que las variables de entorno en Vercel estén bien configuradas.');
+      alert(`No se pudo cambiar el modo: ${error.message}`);
     } finally {
       setIsUpdating(false);
     }
@@ -113,10 +118,11 @@ export function UniChatPage() {
   // 4. Enviar mensaje desde el panel
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim() || !selectedConv) return;
+    if (!inputText.trim() || !selectedConv || isSending) return;
 
     const textToSend = inputText;
     setInputText('');
+    setIsSending(true);
 
     try {
       const res = await fetch('/api/send-message', {
@@ -129,11 +135,20 @@ export function UniChatPage() {
         })
       });
 
-      if (!res.ok) throw new Error('Error al enviar');
+      const data = await res.json();
       
-    } catch (error) {
-      console.error(error);
-      alert('No se pudo enviar el mensaje.');
+      if (!res.ok) {
+        // Esto capturará el error exacto que devuelva Vercel/BuilderBot
+        throw new Error(data.details || data.error || 'Error en el servidor');
+      }
+      
+    } catch (error: any) {
+      console.error('Error al enviar:', error);
+      // Si falla, devolvemos el texto al input para que no lo pierdas
+      setInputText(textToSend); 
+      alert(`No se pudo enviar el mensaje: ${error.message}`);
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -212,10 +227,15 @@ export function UniChatPage() {
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 placeholder="Escribe como humano..." 
-                className="flex-1 bg-sf bd rounded-lg px-3 py-2 text-sm outline-none focus:border-[var(--ac)]" 
+                disabled={isSending}
+                className="flex-1 bg-sf bd rounded-lg px-3 py-2 text-sm outline-none focus:border-[var(--ac)] disabled:opacity-50" 
               />
-              <button type="submit" className="bg-[var(--tx)] text-[var(--cd)] p-2 rounded-lg hover:opacity-80 transition-opacity">
-                <Send size={16}/>
+              <button 
+                type="submit" 
+                disabled={isSending || !inputText.trim()}
+                className="bg-[var(--tx)] text-[var(--cd)] p-2 rounded-lg hover:opacity-80 transition-opacity disabled:opacity-50 flex items-center justify-center w-10"
+              >
+                {isSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16}/>}
               </button>
             </form>
           </>
