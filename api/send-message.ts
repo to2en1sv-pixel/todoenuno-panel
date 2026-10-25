@@ -2,18 +2,17 @@ export default async function handler(req: any, res: any) {
   try {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-    const { conversationId, text, instanceId } = req.body;
+    const { conversationId, text, instanceId, contactPhone } = req.body;
 
-    if (!conversationId || !text || !instanceId) {
+    if (!conversationId || !text || !instanceId || !contactPhone) {
       return res.status(400).json({ error: 'Faltan parámetros' });
     }
 
     let bbKey = '';
     let botId = ''; 
 
-    // Aquí usamos la llave del proyecto (bb-...) que es la que funcionó en V1
     if (instanceId === 'builderbot-principal') {
-      bbKey = process.env.BB_CRM1_KEY!; 
+      bbKey = process.env.BB_CRM1_KEY!;
       botId = process.env.BB_CRM1_TENANT!; 
     } else if (instanceId === 'ventas') {
       bbKey = process.env.BB_CRM2_KEY!;
@@ -22,17 +21,19 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'Instancia no reconocida' });
     }
 
-    // Usamos V1 pasando el conversationId (No requiere teléfono)
-    const bbResponse = await fetch(`https://app.builderbot.cloud/api/v1/conversations/${conversationId}/messages`, {
+    // Limpiamos el número por si trae el @s.whatsapp.net
+    const formattedPhone = contactPhone.replace('@s.whatsapp.net', '').replace('+', '');
+
+    const bbResponse = await fetch(`https://app.builderbot.cloud/api/v2/${botId}/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-builderbot': bbKey
       },
       body: JSON.stringify({ 
-        content: text,
-        message_type: 'TEXT',
-        sender: 'AGENT'
+        messages: { content: text }, // Formato V2
+        number: formattedPhone,      // Requiere número
+        checkIfExists: false
       })
     });
 
