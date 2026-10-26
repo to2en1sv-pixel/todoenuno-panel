@@ -22,9 +22,19 @@ export function SistemaPage() {
     setError('');
     try {
       const res = await fetch('/api/cron-status');
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setJobs(data.jobs);
+      
+      // Leer como texto para evitar errores si Vercel devuelve un 404 en HTML
+      const textResponse = await res.text();
+      let data;
+      
+      try {
+        data = JSON.parse(textResponse);
+      } catch (e) {
+        throw new Error(`Vercel devolvió HTML en lugar de JSON. Revisa que la ruta /api/cron-status exista.`);
+      }
+
+      if (!res.ok) throw new Error(data.details || data.error || 'Error en el servidor');
+      setJobs(data.jobs || []);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -36,7 +46,6 @@ export function SistemaPage() {
     checkCrons();
   }, []);
 
-  // Formatear fecha UNIX
   const fmtTime = (ts: number) => {
     if (!ts) return '—';
     return new Date(ts * 1000).toLocaleString('es-SV', { dateStyle: 'short', timeStyle: 'short' });
@@ -45,7 +54,6 @@ export function SistemaPage() {
   return (
     <div className="max-w-6xl mx-auto flex flex-col gap-4 pb-10">
       
-      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2"><Server size={20} className="text-[var(--ac)]"/> Estado del Sistema</h1>
@@ -63,14 +71,14 @@ export function SistemaPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         
-        {/* Columna Izquierda: Crons */}
+        {/* COLUMNA IZQUIERDA: Crons */}
         <div className="lg:col-span-2 flex flex-col gap-4">
           <section className="bg-cd border border-[var(--bd)] rounded-2xl p-5">
             <h2 className="text-xs font-bold tx-mu uppercase tracking-wider mb-4 flex items-center gap-2">
               <Activity size={14} /> Tareas Programadas (cron-job.org)
             </h2>
             
-            {error && <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg mb-4">{error}</div>}
+            {error && <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg mb-4 border border-red-200">{error}</div>}
             
             <div className="flex flex-col gap-3">
               {jobs.map(job => (
@@ -98,7 +106,7 @@ export function SistemaPage() {
           </section>
         </div>
 
-        {/* Columna Derecha: Base de datos */}
+        {/* COLUMNA DERECHA: Base de Datos y Seguridad */}
         <div className="lg:col-span-1 flex flex-col gap-4">
           <section className="bg-cd border border-[var(--bd)] rounded-2xl p-5">
             <h2 className="text-xs font-bold tx-mu uppercase tracking-wider mb-4 flex items-center gap-2">
