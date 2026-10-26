@@ -5,7 +5,7 @@ import { usePostQueue } from '@/hooks/usePostQueue';
 import { useInventory, useProductos, useVariantes } from '@/hooks/useCatalog';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { fmtAgo } from '@/lib/format';
-import { Package, AlertTriangle, CircleDot, DollarSign } from 'lucide-react';
+import { Package, AlertTriangle, CircleDot, DollarSign, ServerCrash, CheckCircle2 } from 'lucide-react';
 
 export function HoyPage() {
   const queue = usePostQueue();
@@ -14,7 +14,7 @@ export function HoyPage() {
   const variantes = useVariantes();
   const now = new Date();
 
-  // --- NUEVO ESTADO PARA ALERTA DE PAGOS ---
+  // --- ESTADO PARA ALERTA DE PAGOS ---
   const [pagosProximos, setPagosProximos] = useState<any[]>([]);
 
   useEffect(() => {
@@ -28,23 +28,28 @@ export function HoyPage() {
           const f = new Date(p.fecha_vencimiento + 'T00:00:00');
           const diff = f.getTime() - hoy.getTime();
           const dias = Math.ceil(diff / (1000 * 60 * 60 * 24));
-          return dias >= 0 && dias <= 5; // Alerta si vence en 5 días o menos
+          return dias >= 0 && dias <= 5;
         });
         setPagosProximos(proximos);
       }
     }
     checkPagos();
   }, []);
-  // -----------------------------------------
 
   const lastPost = useMemo(() => (queue.data ?? []).filter(x => x.status === 'posted' && x.posted_at).sort((a, b) => new Date(b.posted_at!).getTime() - new Date(a.posted_at!).getTime())[0], [queue.data]);
   const pending = useMemo(() => (queue.data ?? []).filter(x => x.status === 'pending'), [queue.data]);
   const todayPosts = useMemo(() => (queue.data ?? []).filter(x => x.status === 'posted' && x.posted_at && new Date(x.posted_at).toDateString() === now.toDateString()), [queue.data, now]);
   const lowStock = useMemo(() => (inv.data ?? []).filter(x => x.qty <= 5).sort((a, b) => a.qty - b.qty), [inv.data]);
+  
+  // NUEVO: Buscar errores en la cola de posts
+  const queueErrors = useMemo(() => (queue.data ?? []).filter(x => x.status === 'error'), [queue.data]);
 
   const lastPostMin = lastPost ? Math.floor((now.getTime() - new Date(lastPost.posted_at!).getTime()) / 60000) : null;
   const systemAlive = lastPostMin !== null && lastPostMin < 1440 && pending.length > 0;
   const greeting = now.getHours() < 12 ? 'Buenos días' : now.getHours() < 19 ? 'Buenas tardes' : 'Buenas noches';
+
+  // Verificamos si hay alguna alerta en general
+  const hasAlerts = pagosProximos.length > 0 || lowStock.length > 0 || queueErrors.length > 0;
 
   return (
     <div className="max-w-3xl mx-auto flex flex-col gap-4 pb-10">
@@ -65,21 +70,51 @@ export function HoyPage() {
         </div>
       </div>
 
-      {/* ALERTA DE PAGOS PRÓXIMOS */}
-      {pagosProximos.length > 0 && (
-        <div className="rounded-2xl p-4 flex flex-col gap-2" style={{ background: 'var(--kb)', border: '1px solid color-mix(in srgb, var(--ac) 40%, transparent)' }}>
-          <div className="flex items-center gap-2 font-bold text-sm" style={{ color: 'var(--ac)' }}>
-            <AlertTriangle size={18} /> ¡Atención a tus pagos!
+      {/* CENTRO DE ALERTAS UNIFICADO */}
+      {hasAlerts && (
+        <div className="rounded-2xl p-5 bg-cd bd shadow-sm border-l-4 border-l-orange-400">
+          <div className="flex items-center gap-2 mb-4">
+            <AlertTriangle size={18} className="text-orange-500" />
+            <h2 className="text-sm font-bold text-orange-600">Centro de Alertas</h2>
           </div>
-          <div className="flex flex-col gap-1">
+          
+          <div className="flex flex-col gap-3">
+            {/* Alertas de Pagos */}
             {pagosProximos.map(p => (
-              <div key={p.id} className="flex justify-between items-center text-xs">
-                <span className="font-medium">{p.nombre}</span>
-                <span className="font-bold" style={{ color: 'var(--ac)' }}>${p.monto.toFixed(2)} - Vence pronto</span>
+              <div key={p.id} className="flex items-center justify-between text-sm pb-2 border-b border-[var(--bd)] last:border-0 last:pb-0">
+                <div className="flex items-center gap-2">
+                  <DollarSign size={14} className="text-orange-500" />
+                  <span className="font-medium text-[var(--tx)]">Pago próximo: {p.nombre}</span>
+                </div>
+                <Link to="/pagos" className="text-xs font-bold text-orange-600 hover:underline">${p.monto.toFixed(2)}</Link>
               </div>
             ))}
+
+            {/* Alertas de Stock */}
+            {lowStock.slice(0, 3).map(x => (
+              <div key={x.sku} className="flex items-center justify-between text-sm pb-2 border-b border-[var(--bd)] last:border-0 last:pb-0">
+                <div className="flex items-center gap-2">
+                  <Package size={14} className="text-orange-500" />
+                  <span className="font-medium text-[var(--tx)]">Stock bajo: {x.sku}</span>
+                </div>
+                <Link to="/catalogo" className="text-xs font-bold text-orange-600 hover:underline">{x.qty} uds</Link>
+              </div>
+            ))}
+            {lowStock.length > 3 && (
+              <div className="text-xs text-[var(--mu)] pl-6">+ {lowStock.length - 3} productos más con stock bajo...</div>
+            )}
+
+            {/* Alertas de Sistema (Cron/Queue) */}
+            {queueErrors.length > 0 && (
+              <div className="flex items-center justify-between text-sm pb-2 border-b border-[var(--bd)] last:border-0 last:pb-0">
+                <div className="flex items-center gap-2">
+                  <ServerCrash size={14} className="text-red-500" />
+                  <span className="font-medium text-red-600">Error al publicar productos</span>
+                </div>
+                <Link to="/cola" className="text-xs font-bold text-red-600 hover:underline">{queueErrors.length} fallos</Link>
+              </div>
+            )}
           </div>
-          <Link to="/pagos" className="text-[11px] font-semibold text-orange-700 underline mt-1">Ir a la página de pagos &rarr;</Link>
         </div>
       )}
 
@@ -93,22 +128,11 @@ export function HoyPage() {
             <div key={p.id} className="flex items-center gap-3 py-2" style={{ borderBottom: '1px solid var(--bd)' }}>
               {p.image_url ? <img src={p.image_url} className="w-12 h-12 rounded-lg object-cover bg-sf" /> : <div className="w-12 h-12 rounded-lg bg-sf grid place-items-center text-lg">📦</div>}
               <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate">{p.nombre ?? p.sku ?? '—'}</div><div className="text-[11px] tx-mu mono">{fmtAgo(p.posted_at)}</div></div>
+              <CheckCircle2 size={16} className="text-green-500" />
             </div>
           ))}
         </div>
       </section>
-
-      {/* STOCK CRÍTICO */}
-      {!inv.isLoading && lowStock.length > 0 && (
-        <section className="rounded-2xl p-5" style={{ background: 'var(--kb)', border: '1px solid color-mix(in srgb, var(--ac) 40%, transparent)' }}>
-          <div className="flex items-center gap-2 mb-3"><AlertTriangle size={16} style={{ color: 'var(--ac)' }} /><h2 className="text-sm font-semibold" style={{ color: 'var(--ac)' }}>Stock crítico ({lowStock.length})</h2></div>
-          {lowStock.slice(0, 5).map(x => (
-            <div key={x.sku} className="flex items-center justify-between py-1.5 text-sm">
-              <div className="mono text-xs">{x.sku}</div><div className="font-semibold" style={{ color: x.qty === 0 ? 'var(--er)' : 'var(--ac)' }}>{x.qty === 0 ? 'agotado' : `${x.qty} uds`}</div>
-            </div>
-          ))}
-        </section>
-      )}
 
       {/* CATÁLOGO */}
       <section className="bg-cd bd rounded-2xl p-5">
