@@ -7,6 +7,7 @@ type CronJob = {
   title: string;
   url: string;
   lastStatus: number;
+  lastStatusText: string;
   lastExecution: number;
   nextExecution: number;
 };
@@ -23,7 +24,6 @@ export function SistemaPage() {
     try {
       const res = await fetch('/api/cron-status');
       
-      // Leer como texto para evitar errores si Vercel devuelve un 404 en HTML
       const textResponse = await res.text();
       let data;
       
@@ -89,12 +89,16 @@ export function SistemaPage() {
                   </div>
                   <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2">
                     {job.lastStatus >= 200 && job.lastStatus < 300 ? (
-                      <span className="text-[10px] text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><CheckCircle2 size={10}/> ÉXITO ({job.lastStatus})</span>
+                      <span className="text-[10px] text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                        <CheckCircle2 size={10}/> ÉXITO
+                      </span>
                     ) : (
-                      <span className="text-[10px] text-red-700 bg-red-100 px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><XCircle size={10}/> FALLÓ ({job.lastStatus})</span>
+                      <span className="text-[10px] text-red-700 bg-red-100 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                        <XCircle size={10}/> {job.lastStatusText}
+                      </span>
                     )}
                     <div className="text-[10px] tx-mu flex items-center gap-1">
-                      <Clock size={10} /> Última: {fmtTime(job.lastExecution)}
+                      <Clock size={10} /> Ejecutado: {fmtTime(job.lastExecution)}
                     </div>
                   </div>
                 </div>
