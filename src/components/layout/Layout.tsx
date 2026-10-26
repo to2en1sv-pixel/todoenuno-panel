@@ -1,12 +1,14 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { MessageSquare } from 'lucide-react'; // Importamos un icono de chat
+import { MessageSquare, Wallet } from 'lucide-react';
 
-// Agregamos UniChat a la lista de enlaces
+// AQUÍ ESTÁ LA MAGIA: El arreglo de links. 
+// Cada {} es un botón en tu menú.
 const links = [
   { to: '/', label: 'Hoy' },
   { to: '/unichat', label: 'UniChat', icon: MessageSquare }, 
   { to: '/catalogo', label: 'Catálogo' }, 
   { to: '/cola', label: 'Cola' }, 
+  { to: '/pagos', label: 'Pagos', icon: Wallet }, // <-- NUEVO BOTÓN
   { to: '/sistema', label: 'Sistema' }
 ];
 
