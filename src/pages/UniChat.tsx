@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Send, Bot, User, Loader2 } from 'lucide-react';
+import { Send, Bot, User, Loader2, ChevronLeft } from 'lucide-react';
 
 type Conversation = {
   id: string;
@@ -110,7 +110,7 @@ export function UniChatPage() {
     }
   };
 
-  // 4. Enviar mensaje (Usando contactPhone para la traducción en Vercel)
+  // 4. Enviar mensaje
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || !selectedConv || isSending) return;
@@ -126,8 +126,7 @@ export function UniChatPage() {
         body: JSON.stringify({
           conversationId: selectedConv.id,
           text: textToSend,
-          instanceId: selectedConv.instance_id,
-          contactPhone: selectedConv.contact_phone // <-- ENVIAMOS EL LID PARA TRADUCIR
+          instanceId: selectedConv.instance_id
         })
       });
 
@@ -144,10 +143,10 @@ export function UniChatPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-100px)] bg-cd bd rounded-2xl overflow-hidden">
+    <div className="flex flex-col lg:flex-row h-[calc(100vh-120px)] lg:h-[calc(100vh-100px)] bg-cd bd rounded-2xl overflow-hidden">
       
       {/* Lista de Chats (Izquierda) */}
-      <div className="w-[300px] border-r border-[var(--bd)] flex flex-col">
+      <div className={`w-full lg:w-[300px] border-r border-[var(--bd)] flex-col ${selectedConv ? 'hidden lg:flex' : 'flex'}`}>
         <div className="p-4 border-b border-[var(--bd)] bg-sf">
           <h2 className="font-bold">UniChat</h2>
         </div>
@@ -172,16 +171,26 @@ export function UniChatPage() {
       </div>
 
       {/* Ventana de Chat (Derecha) */}
-      <div className="flex-1 flex flex-col bg-sf">
+      <div className={`flex-1 flex-col bg-sf ${selectedConv ? 'flex' : 'hidden lg:flex'}`}>
         {selectedConv ? (
           <>
             {/* Header del Chat */}
             <div className="p-4 border-b border-[var(--bd)] bg-cd flex justify-between items-center">
-              <div>
-                <h3 className="font-bold">{selectedConv.contact_name}</h3>
-                <p className="text-xs tx-mu">{selectedConv.contact_phone}</p>
+              <div className="flex items-center gap-2">
+                {/* BOTÓN VOLVER PARA MÓVIL */}
+                <button 
+                  onClick={() => setSelectedConv(null)} 
+                  className="lg:hidden p-1.5 bg-sf border border-[var(--bd)] rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <div>
+                  <h3 className="font-bold">{selectedConv.contact_name}</h3>
+                  <p className="text-xs tx-mu">{selectedConv.contact_phone}</p>
+                </div>
               </div>
               
+              {/* BOTÓN DE MODO HUMANO/BOT */}
               <button 
                 onClick={toggleStatus}
                 disabled={isUpdating}
@@ -192,11 +201,11 @@ export function UniChatPage() {
                 } ${isUpdating ? 'opacity-50 cursor-wait' : ''}`}
               >
                 {isUpdating ? (
-                  <><Loader2 size={14} className="animate-spin" /> Cambiando...</>
+                  <><Loader2 size={14} className="animate-spin" /> <span className="hidden sm:inline">Cambiando...</span></>
                 ) : selectedConv.status === 'bot' ? (
-                  <><Bot size={14}/> Bot Activado</>
+                  <><Bot size={14}/> <span className="hidden sm:inline">Bot Activado</span></>
                 ) : (
-                  <><User size={14}/> Modo Humano</>
+                  <><User size={14}/> <span className="hidden sm:inline">Modo Humano</span></>
                 )}
               </button>
             </div>
@@ -204,7 +213,7 @@ export function UniChatPage() {
             {/* Mensajes */}
             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 bg-cd">
               {messages.map((msg) => (
-                <div key={msg.id} className={`max-w-[70%] p-2.5 rounded-xl text-sm ${msg.from_me ? 'self-end bg-[var(--tx)] text-[var(--cd)]' : 'self-start bg-sf border border-[var(--bd)]'}`}>
+                <div key={msg.id} className={`max-w-[85%] sm:max-w-[70%] p-2.5 rounded-xl text-sm ${msg.from_me ? 'self-end bg-[var(--tx)] text-[var(--cd)]' : 'self-start bg-sf border border-[var(--bd)]'}`}>
                   {msg.body}
                 </div>
               ))}
@@ -223,14 +232,14 @@ export function UniChatPage() {
               <button 
                 type="submit" 
                 disabled={isSending || !inputText.trim()}
-                className="bg-[var(--tx)] text-[var(--cd)] p-2 rounded-lg hover:opacity-80 transition-opacity disabled:opacity-50 flex items-center justify-center w-10"
+                className="bg-[var(--tx)] text-[var(--cd)] p-2 rounded-lg hover:opacity-80 transition-opacity disabled:opacity-50 flex items-center justify-center w-10 shrink-0"
               >
                 {isSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16}/>}
               </button>
             </form>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-sm tx-mu bg-cd">
+          <div className="flex-1 flex items-center justify-center text-sm tx-mu bg-cd h-full">
             Selecciona un chat para comenzar
           </div>
         )}
