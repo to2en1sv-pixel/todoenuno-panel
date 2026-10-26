@@ -1,11 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useProductos } from '@/hooks/useCatalog';
-import { CheckCircle2, XCircle, RefreshCw, AlertCircle, MessageSquare } from 'lucide-react';
+import { 
+  CheckCircle2, 
+  XCircle, 
+  RefreshCw, 
+  ShieldCheck, 
+  MessageSquare, 
+  Database, 
+  Activity, 
+  Globe, 
+  Facebook,
+  Server
+} from 'lucide-react';
 
 type EndpointStatus = 'idle' | 'loading' | 'ok' | 'error';
 
 interface EndpointState {
   status: EndpointStatus;
+  latency?: number;
   errorMsg?: string;
 }
 
@@ -20,174 +32,162 @@ export function SistemaPage() {
     whatsapp_webhook: { status: 'idle' },
   });
 
+  const [isChecking, setIsChecking] = useState(false);
+
   const checkEndpoints = async () => {
-    // Inicializar todos en "cargando"
+    setIsChecking(true);
     const initialState: Record<string, EndpointState> = {};
     Object.keys(endpoints).forEach(k => initialState[k] = { status: 'loading' });
     setEndpoints(initialState);
 
-    // Definición de URLs (Ajusta los dominios si es necesario)
+    // 🔥 PING SEGURO: Sin el secret para evitar ejecutar acciones
     const urls = {
-      // Endpoints de todoenuno-feed (Vercel)
-      odoo_feed: 'https://todoenuno-feed.vercel.app/api/sync-odoo-to-supabase?secret=123456',
-      post_feed: 'https://todoenuno-feed.vercel.app/api/post-auto?secret=123456',
-      cron_feed: 'https://todoenuno-feed.vercel.app/api/cron?secret=123456',
-      
-      // Endpoints de todoenuno-os (Storefront en Vercel)
-      // NOTA: Si tu dominio es diferente, cámbialo aquí.
+      odoo_feed: 'https://todoenuno-feed.vercel.app/api/sync-odoo-to-supabase',
+      post_feed: 'https://todoenuno-feed.vercel.app/api/post-auto',
+      cron_feed: 'https://todoenuno-feed.vercel.app/api/cron',
       odoo_storefront: 'https://www.to2en1.app/api/sync-odoo-supabase',
       whatsapp_webhook: 'https://www.to2en1.app/api/webhook/whatsapp',
     };
 
-    // Revisar todos en paralelo para que sea rápido
     const promises = Object.entries(urls).map(async ([key, url]) => {
+      const start = performance.now();
       try {
-        const res = await fetch(url, { method: 'GET' }); // Algunos endpoints pueden requerir POST, pero un GET nos dice si están vivos
-        const text = await res.text();
-        
-        let data;
-        try { data = JSON.parse(text); } catch (e) { data = {}; }
+        const res = await fetch(url, { method: 'GET' });
+        const latency = Math.round(performance.now() - start);
 
-        // Si el endpoint devuelve error, lo marcamos en rojo
-        if (!res.ok || data.error) {
-          return { key, state: { status: 'error' as const, errorMsg: data.error?.message || data.error || 'Error en la respuesta' } };
+        if (res.status === 401 || res.status === 403 || res.ok) {
+          return { key, state: { status: 'ok' as const, latency } };
         }
-        return { key, state: { status: 'ok' as const } };
 
+        return { key, state: { status: 'error' as const, latency, errorMsg: `HTTP ${res.status}` } };
       } catch (err) {
-        return { key, state: { status: 'error' as const, errorMsg: 'No se pudo conectar (CORS o red)' } };
+        return { key, state: { status: 'error' as const, errorMsg: 'Sin conexión' } };
       }
     });
 
     const results = await Promise.all(promises);
-    
     const newState: Record<string, EndpointState> = {};
-    results.forEach(res => {
-      newState[res.key] = res.state;
-    });
+    results.forEach(res => { newState[res.key] = res.state; });
+    
     setEndpoints(newState);
+    setIsChecking(false);
   };
 
-  useEffect(() => {
-    checkEndpoints();
-  }, []);
-
-  const renderLight = (state: EndpointState) => {
-    if (state.status === 'loading') return <span className="text-[11px] text-yellow-500 animate-pulse">Revisando...</span>;
-    if (state.status === 'idle') return <span className="text-[11px] text-gray-500">En espera</span>;
-    if (state.status === 'ok') return <span className="text-[11px] text-green-500 flex items-center gap-1"><CheckCircle2 size={14}/> Online</span>;
-    return <span className="text-[11px] text-red-500 flex items-center gap-1"><XCircle size={14}/> Falló</span>;
-  };
+  // Componente visual para cada Endpoint
+  const EndpointRow = ({ name, path, icon: Icon, state }: { name: string, path: string, icon: any, state: EndpointState }) => (
+    <div className="flex items-center justify-between p-3 bg-sf rounded-xl border border-[var(--bd)] hover:border-[var(--ac)] transition-colors group">
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-cd border border-[var(--bd)] rounded-lg text-[var(--mu)] group-hover:text-[var(--ac)] transition-colors">
+          <Icon size={16} />
+        </div>
+        <div>
+          <div className="font-semibold text-sm text-[var(--tx)]">{name}</div>
+          <div className="text-[10px] tx-mu mono">{path}</div>
+        </div>
+      </div>
+      
+      <div className="text-right flex flex-col items-end">
+        {state.status === 'loading' && <span className="text-[10px] text-yellow-500 animate-pulse font-medium">Ping...</span>}
+        {state.status === 'idle' && <span className="text-[10px] text-gray-500 font-medium">En espera</span>}
+        {state.status === 'ok' && (
+          <>
+            <span className="text-[10px] text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><CheckCircle2 size={10}/> ONLINE</span>
+            <span className="text-[9px] text-[var(--mu)] mt-1">{state.latency}ms</span>
+          </>
+        )}
+        {state.status === 'error' && (
+          <>
+            <span className="text-[10px] text-red-700 bg-red-100 px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><XCircle size={10}/> FALLÓ</span>
+            <span className="text-[9px] text-red-500 mt-1 max-w-[80px] truncate">{state.errorMsg}</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
 
   return (
-    <div className="max-w-3xl mx-auto flex flex-col gap-4 pb-10">
+    <div className="max-w-6xl mx-auto flex flex-col gap-4 pb-10">
       
-      <div className="bg-cd bd rounded-2xl p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold">Semáforo de Endpoints</h2>
-          <button 
-            onClick={checkEndpoints}
-            className="px-3 py-1.5 bg-sf border border-[var(--bd)] rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-gray-100 transition-colors"
-          >
-            <RefreshCw size={14} /> Revisar ahora
-          </button>
+      {/* Header del Panel */}
+      <div className="flex flex-col sm:flex-row justify-between items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
+        <div>
+          <h1 className="text-xl font-bold flex items-center gap-2"><Server size={20} className="text-[var(--ac)]"/> Estado del Sistema</h1>
+          <p className="text-xs text-[var(--mu)] mt-1">Monitoreo de infraestructura y endpoints seguros.</p>
         </div>
+        <button 
+          onClick={checkEndpoints}
+          disabled={isChecking}
+          className="w-full sm:w-auto px-5 py-2.5 bg-[var(--tx)] text-[var(--cd)] rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-80 transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={16} className={isChecking ? 'animate-spin' : ''} /> 
+          {isChecking ? 'Probando...' : 'Probar Conexiones'}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         
-        <div className="flex flex-col gap-3">
-          {/* SECCIÓN 1: TODOENUNO-FEED */}
-          <div className="text-[10px] font-bold tx-mu uppercase tracking-wider mt-2 mb-1">TodoEnUno-Feed (Vercel)</div>
+        {/* COLUMNA IZQUIERDA (Endpoints) */}
+        <div className="lg:col-span-2 flex flex-col gap-4">
           
-          <div className="flex items-start justify-between p-3 bg-sf rounded-xl border border-[var(--bd)]">
-            <div>
-              <div className="font-semibold text-sm">Sync Odoo → Supabase</div>
-              <div className="text-[11px] tx-mu mono mt-1">/api/sync-odoo-to-supabase</div>
+          <section className="bg-cd border border-[var(--bd)] rounded-2xl p-5">
+            <h2 className="text-xs font-bold tx-mu uppercase tracking-wider mb-4 flex items-center gap-2">
+              <Activity size={14} /> TodoEnUno-Feed (Vercel)
+            </h2>
+            <div className="flex flex-col gap-2">
+              <EndpointRow name="Sync Odoo → Supabase" path="/api/sync-odoo-to-supabase" icon={RefreshCw} state={endpoints.odoo_feed} />
+              <EndpointRow name="Auto-Post Facebook" path="/api/post-auto" icon={Facebook} state={endpoints.post_feed} />
+              <EndpointRow name="Feed Catálogo Meta" path="/api/cron" icon={Globe} state={endpoints.cron_feed} />
             </div>
-            <div className="text-right">
-              {renderLight(endpoints.odoo_feed)}
-              {endpoints.odoo_feed.errorMsg && <div className="text-[10px] text-red-400 mt-1 max-w-[200px] truncate">{endpoints.odoo_feed.errorMsg}</div>}
-            </div>
-          </div>
+          </section>
 
-          <div className="flex items-start justify-between p-3 bg-sf rounded-xl border border-[var(--bd)]">
-            <div>
-              <div className="font-semibold text-sm">Auto-Post Facebook</div>
-              <div className="text-[11px] tx-mu mono mt-1">/api/post-auto</div>
+          <section className="bg-cd border border-[var(--bd)] rounded-2xl p-5">
+            <h2 className="text-xs font-bold tx-mu uppercase tracking-wider mb-4 flex items-center gap-2">
+              <Activity size={14} /> TodoEnUno-OS (Storefront)
+            </h2>
+            <div className="flex flex-col gap-2">
+              <EndpointRow name="Sync Odoo (Storefront)" path="/api/sync-odoo-supabase" icon={RefreshCw} state={endpoints.odoo_storefront} />
+              <EndpointRow name="Webhook WhatsApp" path="/api/webhook/whatsapp" icon={MessageSquare} state={endpoints.whatsapp_webhook} />
             </div>
-            <div className="text-right">
-              {renderLight(endpoints.post_feed)}
-              {endpoints.post_feed.errorMsg && <div className="text-[10px] text-red-400 mt-1 max-w-[200px] truncate">{endpoints.post_feed.errorMsg}</div>}
-            </div>
-          </div>
+          </section>
 
-          <div className="flex items-start justify-between p-3 bg-sf rounded-xl border border-[var(--bd)]">
-            <div>
-              <div className="font-semibold text-sm">Feed Catálogo Meta</div>
-              <div className="text-[11px] tx-mu mono mt-1">/api/cron</div>
-            </div>
-            <div className="text-right">
-              {renderLight(endpoints.cron_feed)}
-              {endpoints.cron_feed.errorMsg && <div className="text-[10px] text-red-400 mt-1 max-w-[250px] truncate" title={endpoints.cron_feed.errorMsg}>{endpoints.cron_feed.errorMsg}</div>}
-            </div>
-          </div>
+        </div>
 
-          {/* SECCIÓN 2: TODOENUNO-OS */}
-          <div className="text-[10px] font-bold tx-mu uppercase tracking-wider mt-4 mb-1">TodoEnUno-OS (Storefront)</div>
-
-          <div className="flex items-start justify-between p-3 bg-sf rounded-xl border border-[var(--bd)]">
-            <div>
-              <div className="font-semibold text-sm">Sync Odoo (Storefront)</div>
-              <div className="text-[11px] tx-mu mono mt-1">/api/sync-odoo-supabase</div>
-            </div>
-            <div className="text-right">
-              {renderLight(endpoints.odoo_storefront)}
-              {endpoints.odoo_storefront.errorMsg && <div className="text-[10px] text-red-400 mt-1 max-w-[200px] truncate">{endpoints.odoo_storefront.errorMsg}</div>}
-            </div>
-          </div>
-
-          <div className="flex items-start justify-between p-3 bg-sf rounded-xl border border-[var(--bd)]">
-            <div>
-              <div className="font-semibold text-sm flex items-center gap-1">
-                <MessageSquare size={14} /> Webhook WhatsApp
+        {/* COLUMNA DERECHA (Base de datos e Info) */}
+        <div className="lg:col-span-1 flex flex-col gap-4">
+          
+          <section className="bg-cd border border-[var(--bd)] rounded-2xl p-5">
+            <h2 className="text-xs font-bold tx-mu uppercase tracking-wider mb-4 flex items-center gap-2">
+              <Database size={14} /> Base de Datos
+            </h2>
+            <div className="flex items-center justify-between p-4 bg-sf rounded-xl border border-[var(--bd)]">
+              <div>
+                <div className="font-bold text-sm">Supabase API</div>
+                <div className="text-[10px] tx-mu mt-1">Conexión Frontend</div>
               </div>
-              <div className="text-[11px] tx-mu mono mt-1">/api/webhook/whatsapp</div>
+              {productos.isLoading ? (
+                <span className="text-[10px] text-yellow-500 animate-pulse font-medium">...</span>
+              ) : productos.error ? (
+                <span className="text-[10px] text-red-700 bg-red-100 px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><XCircle size={10}/> ERROR</span>
+              ) : (
+                <div className="text-right">
+                  <span className="text-[10px] text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><CheckCircle2 size={10}/> OK</span>
+                  <div className="text-[9px] tx-mu mt-1">{productos.data?.length} registros</div>
+                </div>
+              )}
             </div>
-            <div className="text-right">
-              {renderLight(endpoints.whatsapp_webhook)}
-              {endpoints.whatsapp_webhook.errorMsg && <div className="text-[10px] text-red-400 mt-1 max-w-[200px] truncate">{endpoints.whatsapp_webhook.errorMsg}</div>}
-            </div>
+          </section>
+
+          <div className="rounded-2xl p-5" style={{ background: 'var(--kb)', border: '1px solid color-mix(in srgb, var(--ac) 40%, transparent)' }}>
+            <h3 className="font-bold text-sm mb-2 flex items-center gap-2" style={{ color: 'var(--ac)' }}>
+              <ShieldCheck size={18} /> Ping Seguro Activado
+            </h3>
+            <p className="text-[11px] tx-mu leading-relaxed">
+              Para evitar publicaciones o sincronizaciones accidentales, este panel consulta los endpoints <b>sin la clave secreta</b>. Un error <b>401 o 403</b> confirma que el servidor está en línea y protegido.
+            </p>
           </div>
 
         </div>
       </div>
-
-      {/* Tarjeta de Supabase */}
-      <div className="bg-cd bd rounded-2xl p-6">
-        <h2 className="text-lg font-bold mb-4">Estado de Supabase (Frontend)</h2>
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between p-3 bg-sf rounded-xl border border-[var(--bd)]">
-            <div>
-              <div className="font-semibold text-sm">Conexión y Variables</div>
-            </div>
-            {productos.isLoading ? (
-              <span className="text-[11px] tx-mu animate-pulse">Probando...</span>
-            ) : productos.error ? (
-              <span className="text-[11px] text-red-500 flex items-center gap-1"><XCircle size={14}/> Error</span>
-            ) : (
-              <span className="text-[11px] text-green-500 flex items-center gap-1"><CheckCircle2 size={14}/> OK ({productos.data?.length} rows)</span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-2xl p-5" style={{ background: 'var(--kb)', border: '1px solid color-mix(in srgb, var(--ac) 40%, transparent)' }}>
-        <h3 className="font-bold text-sm mb-1 flex items-center gap-2" style={{ color: 'var(--ac)' }}>
-          <AlertCircle size={16} /> Nota sobre los endpoints de OS
-        </h3>
-        <p className="text-xs tx-mu leading-relaxed">
-          Los endpoints del storefront pueden requerir el método <b>POST</b> y no <b>GET</b>. Si ves un error de método, el semáforo igual confirmará que el servidor está vivo y respondiendo.
-        </p>
-      </div>
-
     </div>
   );
 }
