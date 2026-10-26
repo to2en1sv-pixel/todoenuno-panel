@@ -4,16 +4,18 @@ import { HoyPage } from '@/pages/Hoy';
 import { CatalogoPage } from '@/pages/Catalogo';
 import { ColaPage } from '@/pages/Cola';
 import { SistemaPage } from '@/pages/Sistema';
-import { UniChatPage } from '@/pages/UniChat'; // <-- Importamos la nueva página
+import { UniChatPage } from '@/pages/UniChat';
+import { PagosPage } from '@/pages/Pagos'; // <-- NUEVA PÁGINA
 
 export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<HoyPage />} />
-        <Route path="/unichat" element={<UniChatPage />} /> {/* <-- Agregamos la ruta */}
+        <Route path="/unichat" element={<UniChatPage />} />
         <Route path="/catalogo" element={<CatalogoPage />} />
         <Route path="/cola" element={<ColaPage />} />
+        <Route path="/pagos" element={<PagosPage />} /> {/* <-- NUEVA RUTA */}
         <Route path="/sistema" element={<SistemaPage />} />
       </Route>
     </Routes>
