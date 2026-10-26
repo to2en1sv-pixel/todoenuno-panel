@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Plus, Trash2, Calendar as CalendarIcon, DollarSign, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Plus, Trash2, Calendar as CalendarIcon, DollarSign, AlertCircle, CheckCircle2, Pencil } from 'lucide-react';
 
 type Pago = {
   id: string;
@@ -16,6 +16,7 @@ export function PagosPage() {
   const [pagos, setPagos] = useState<Pago[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null); // <-- NUEVO
 
   // Formulario
   const [nombre, setNombre] = useState('');
@@ -38,16 +39,28 @@ export function PagosPage() {
     e.preventDefault();
     if (!nombre || !monto || !fecha) return;
 
-    const { error } = await supabase.from('panel_pagos').insert({
+    const dataToSave = {
       nombre,
       monto: parseFloat(monto),
       fecha_vencimiento: fecha,
       categoria,
       frecuencia
-    });
+    };
+
+    let error;
+    if (editingId) {
+      // Si hay un ID, actualizamos
+      const res = await supabase.from('panel_pagos').update(dataToSave).eq('id', editingId);
+      error = res.error;
+    } else {
+      // Si no, insertamos
+      const res = await supabase.from('panel_pagos').insert(dataToSave);
+      error = res.error;
+    }
 
     if (!error) {
       setShowForm(false);
+      setEditingId(null);
       setNombre(''); setMonto(''); setFecha('');
       loadPagos();
     }
@@ -59,9 +72,7 @@ export function PagosPage() {
     loadPagos();
   };
 
-  // NUEVA FUNCIÓN: Avanzar la fecha al siguiente periodo
   const handlePagar = async (pago: Pago) => {
-    // Usamos T12:00:00 para evitar problemas de zona horaria al convertir a string
     let nuevaFecha = new Date(pago.fecha_vencimiento + 'T12:00:00');
 
     if (pago.frecuencia === 'mensual') {
@@ -80,16 +91,30 @@ export function PagosPage() {
     if (!error) {
       alert(`✅ ¡Pago de ${pago.nombre} registrado!\nPróximo vencimiento: ${nuevaFecha.toLocaleDateString('es-SV')}`);
       loadPagos();
-    } else {
-      alert('Error al actualizar el pago.');
     }
   };
 
+  // Abrir formulario para editar
+  const handleEdit = (pago: Pago) => {
+    setEditingId(pago.id);
+    setNombre(pago.nombre);
+    setMonto(pago.monto.toString());
+    setFecha(pago.fecha_vencimiento);
+    setCategoria(pago.categoria);
+    setFrecuencia(pago.frecuencia);
+    setShowForm(true);
+  };
+
+  // Cancelar edición
+  const cancelForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setNombre(''); setMonto(''); setFecha('');
+  }
+
   // Cálculos
   const totalMes = pagos.filter(p => p.frecuencia === 'mensual').reduce((acc, p) => acc + p.monto, 0);
-  
-  const hoy = new Date();
-  hoy.setHours(0,0,0,0);
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
   
   const pagosProximos = pagos.filter(p => {
     const f = new Date(p.fecha_vencimiento + 'T00:00:00');
@@ -131,14 +156,15 @@ export function PagosPage() {
       {/* Botón Nuevo Pago */}
       <div className="flex justify-between items-center mt-4">
         <h2 className="text-lg font-bold">Calendario de Pagos</h2>
-        <button onClick={() => setShowForm(!showForm)} className="bg-[var(--tx)] text-[var(--cd)] px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 hover:opacity-80 transition-opacity">
+        <button onClick={showForm ? cancelForm : () => setShowForm(true)} className="bg-[var(--tx)] text-[var(--cd)] px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 hover:opacity-80 transition-opacity">
           <Plus size={16} /> {showForm ? 'Cancelar' : 'Nuevo Pago'}
         </button>
       </div>
 
-      {/* Formulario (Oculto por defecto) */}
+      {/* Formulario */}
       {showForm && (
-        <form onSubmit={handleAdd} className="bg-cd bd rounded-xl p-4 flex flex-col gap-3 shadow-sm">
+        <form onSubmit={handleAdd} className="bg-cd bd rounded-xl p-4 flex flex-col gap-3 shadow-sm border-l-4 border-l-[var(--ac)]">
+          <h3 className="text-sm font-bold mb-1">{editingId ? 'Editar Pago' : 'Nuevo Pago'}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <input placeholder="Nombre (Ej. DigitalOcean)" value={nombre} onChange={e=>setNombre(e.target.value)} className="bg-sf bd rounded-lg px-3 py-2 text-sm outline-none focus:border-[var(--ac)]" required />
             <input placeholder="Monto ($)" type="number" step="0.01" value={monto} onChange={e=>setMonto(e.target.value)} className="bg-sf bd rounded-lg px-3 py-2 text-sm outline-none focus:border-[var(--ac)]" required />
@@ -155,7 +181,9 @@ export function PagosPage() {
               <option value="otro">Otro</option>
             </select>
           </div>
-          <button type="submit" className="bg-[var(--ac)] text-white py-2 rounded-lg font-semibold text-sm hover:opacity-90 transition-opacity">Guardar Pago</button>
+          <button type="submit" className="bg-[var(--ac)] text-white py-2 rounded-lg font-semibold text-sm hover:opacity-90 transition-opacity">
+            {editingId ? 'Guardar Cambios' : 'Guardar Pago'}
+          </button>
         </form>
       )}
 
@@ -198,16 +226,14 @@ export function PagosPage() {
                 </div>
                 
                 <div className="flex items-center gap-2">
-                  {/* BOTÓN DE PAGADO */}
-                  <button 
-                    onClick={() => handlePagar(pago)} 
-                    className="bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 border border-green-200"
-                    title="Marcar como pagado y avanzar fecha"
-                  >
+                  <button onClick={() => handlePagar(pago)} className="bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 border border-green-200" title="Marcar como pagado">
                     <CheckCircle2 size={14} /> Pagar
                   </button>
+                  
+                  <button onClick={() => handleEdit(pago)} className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Editar">
+                    <Pencil size={16} />
+                  </button>
 
-                  {/* BOTÓN DE BORRAR */}
                   <button onClick={() => handleDelete(pago.id)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Eliminar">
                     <Trash2 size={16} />
                   </button>
