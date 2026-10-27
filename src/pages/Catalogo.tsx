@@ -12,10 +12,12 @@ export function CatalogoPage() {
   const [filterStock, setFilterStock] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
-  // 1. Lógica para filtrar productos
+  // 1. FILTRO DE PRODUCTOS (Filtra por nombre_base)
   const filteredProductos = useMemo(() => {
     let list = productos.data ?? [];
-        list = list.filter(p => {
+    
+    // Filtro Anti-FEE
+    list = list.filter(p => {
       const nombre = (p.nombre_base || '').toLowerCase();
       return !nombre.includes('fee') && !nombre.includes('servicio') && !nombre.includes('envio');
     });
@@ -28,15 +30,6 @@ export function CatalogoPage() {
       );
     }
     
-    if (search) {
-      const q = search.toLowerCase();
-      list = list.filter(p => 
-        (p.nombre_base || '').toLowerCase().includes(q) || 
-        p.template_id.toString().includes(q)
-      );
-    }
-    
-    // Si el filtro de stock está activo, solo mostramos productos con variantes en alerta
     if (filterStock) {
       const lowStockSkus = new Set(inv.data?.filter(i => i.qty <= 5).map(i => i.sku));
       const productosConAlerta = new Set(
@@ -48,9 +41,13 @@ export function CatalogoPage() {
     return list;
   }, [productos.data, variantes.data, inv.data, search, filterStock]);
 
-  // 2. Lógica para el inventario (buscador)
+  // 2. FILTRO DE INVENTARIO (Filtra por sku)
   const filteredInventory = useMemo(() => {
     let list = inv.data ?? [];
+    
+    // Filtro Anti-FEE para inventario
+    list = list.filter(i => !i.sku.toLowerCase().includes('fee'));
+
     if (search) {
       const q = search.toLowerCase();
       list = list.filter(i => i.sku.toLowerCase().includes(q));
