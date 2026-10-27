@@ -56,8 +56,11 @@ export function HoyPage() {
 
   const lastPost = useMemo(() => (queue.data ?? []).filter(x => x.status === 'posted' && x.posted_at).sort((a, b) => new Date(b.posted_at!).getTime() - new Date(a.posted_at!).getTime())[0], [queue.data]);
   const pending = useMemo(() => (queue.data ?? []).filter(x => x.status === 'pending'), [queue.data]);
-  const todayPosts = useMemo(() => (queue.data ?? []).filter(x => x.status === 'posted' && x.posted_at && new Date(x.posted_at).toDateString() === now.toDateString()), [queue.data, now]);
-  const lowStock = useMemo(() => (inv.data ?? []).filter(x => x.qty <= 5).sort((a, b) => a.qty - b.qty), [inv.data]);
+  const todayPosts = useMemo(() => (queue.data ?? []).filter(x => x.status === 'posted' && x.posted_at && new Date(x.posted_at).toDateString() === now.toDateString()), [queue.data, now])
+  const lowStock = useMemo(() => (inv.data ?? [])
+  .filter(x => x.qty <= 5)
+  .filter(x => !x.sku.toLowerCase().includes('fee')) // <-- Filtro Anti-FEE
+  .sort((a, b) => a.qty - b.qty), [inv.data]);
   const queueErrors = useMemo(() => (queue.data ?? []).filter(x => x.status === 'error'), [queue.data]);
 
   const lastPostMin = lastPost ? Math.floor((now.getTime() - new Date(lastPost.posted_at!).getTime()) / 60000) : null;
