@@ -15,6 +15,18 @@ export function CatalogoPage() {
   // 1. Lógica para filtrar productos
   const filteredProductos = useMemo(() => {
     let list = productos.data ?? [];
+        list = list.filter(p => {
+      const nombre = (p.nombre_base || '').toLowerCase();
+      return !nombre.includes('fee') && !nombre.includes('servicio') && !nombre.includes('envio');
+    });
+    
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(p => 
+        (p.nombre_base || '').toLowerCase().includes(q) || 
+        p.template_id.toString().includes(q)
+      );
+    }
     
     if (search) {
       const q = search.toLowerCase();
