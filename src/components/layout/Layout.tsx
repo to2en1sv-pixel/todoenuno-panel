@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { MessageSquare, Wallet, Menu, X, Moon, Sun } from 'lucide-react';
 import { MessageSquare, Wallet, Menu, X, Moon, Sun, Store } from 'lucide-react';
+import { MessageSquare, Wallet, Menu, X, Moon, Sun, Store, FileText } from 'lucide-react';
 
 const links = [
   { to: '/', label: 'Hoy' },
