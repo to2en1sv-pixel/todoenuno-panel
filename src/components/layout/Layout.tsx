@@ -9,6 +9,7 @@ const links = [
   { to: '/catalogo', label: 'Catálogo' }, 
   { to: '/cola', label: 'Cola' }, 
   { to: '/proveedores', label: 'Proveedores', icon: Store }, // <-- NUEVO
+  { to: '/docs', label: 'Docs & Roadmap', icon: FileText }, // <-- NUEVO
   { to: '/pagos', label: 'Pagos', icon: Wallet },
   { to: '/sistema', label: 'Sistema' }
 ];
