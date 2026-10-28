@@ -8,15 +8,6 @@ const links = [
   { to: '/unichat', label: 'UniChat', icon: MessageSquare }, 
   { to: '/catalogo', label: 'Catálogo' }, 
   { to: '/cola', label: 'Cola' }, 
-  { to: '/pagos', label: 'Pagos', icon: Wallet },
-  { to: '/sistema', label: 'Sistema' }
-];
-
-const links = [
-  { to: '/', label: 'Hoy' },
-  { to: '/unichat', label: 'UniChat', icon: MessageSquare }, 
-  { to: '/catalogo', label: 'Catálogo' }, 
-  { to: '/cola', label: 'Cola' }, 
   { to: '/proveedores', label: 'Proveedores', icon: Store }, // <-- NUEVO
   { to: '/pagos', label: 'Pagos', icon: Wallet },
   { to: '/sistema', label: 'Sistema' }
