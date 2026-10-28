@@ -1,12 +1,23 @@
 import { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { MessageSquare, Wallet, Menu, X, Moon, Sun } from 'lucide-react';
+import { MessageSquare, Wallet, Menu, X, Moon, Sun, Store } from 'lucide-react';
 
 const links = [
   { to: '/', label: 'Hoy' },
   { to: '/unichat', label: 'UniChat', icon: MessageSquare }, 
   { to: '/catalogo', label: 'Catálogo' }, 
   { to: '/cola', label: 'Cola' }, 
+  { to: '/pagos', label: 'Pagos', icon: Wallet },
+  { to: '/sistema', label: 'Sistema' }
+];
+
+const links = [
+  { to: '/', label: 'Hoy' },
+  { to: '/unichat', label: 'UniChat', icon: MessageSquare }, 
+  { to: '/catalogo', label: 'Catálogo' }, 
+  { to: '/cola', label: 'Cola' }, 
+  { to: '/proveedores', label: 'Proveedores', icon: Store }, // <-- NUEVO
   { to: '/pagos', label: 'Pagos', icon: Wallet },
   { to: '/sistema', label: 'Sistema' }
 ];
