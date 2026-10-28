@@ -6,6 +6,7 @@ import { ColaPage } from '@/pages/Cola';
 import { SistemaPage } from '@/pages/Sistema';
 import { UniChatPage } from '@/pages/UniChat';
 import { PagosPage } from '@/pages/Pagos'; // <-- NUEVA PÁGINA
+import { ProveedoresPage } from '@/pages/Proveedores';
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
         <Route path="/cola" element={<ColaPage />} />
         <Route path="/pagos" element={<PagosPage />} /> {/* <-- NUEVA RUTA */}
         <Route path="/sistema" element={<SistemaPage />} />
+        <Route path="/proveedores" element={<ProveedoresPage />} />
       </Route>
     </Routes>
   );
