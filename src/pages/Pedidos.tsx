@@ -5,6 +5,7 @@ import {
   Printer,
   MessageCircle,
   Eye,
+  EyeOff,
   ChevronLeft,
   ChevronRight,
   X,
@@ -18,9 +19,12 @@ import {
   Hash,
   CreditCard,
   User,
+  Edit,
+  TrendingUp,
+  Clock,
+  BarChart3,
 } from "lucide-react";
-// CAMBIO 1: Usar la ruta absoluta para evitar problemas de Vite
-import { supabase } from "@/lib/supabase"; 
+import { supabase } from "@/lib/supabase";
 import PedidoModal from "@/components/PedidoModal";
 import GuiaEnvio from "@/components/GuiaEnvio";
 
@@ -77,15 +81,16 @@ const fechaCorta = (iso: string | null | undefined) => {
 /* Página principal                                                    */
 /* ------------------------------------------------------------------ */
 
-// CAMBIO 2: Cambiar default export por named export para que coincida con App.tsx
 export function PedidosPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [cargando, setCargando] = useState(true);
   const [refrescando, setRefrescando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState("");
+  const [mostrarHistorial, setMostrarHistorial] = useState(false);
 
   const [modalNuevo, setModalNuevo] = useState(false);
+  const [pedidoAEditar, setPedidoAEditar] = useState<Pedido | null>(null);
   const [pedidoGuia, setPedidoGuia] = useState<Pedido | null>(null);
   const [pedidoDetalle, setPedidoDetalle] = useState<Pedido | null>(null);
   const [moviendoId, setMoviendoId] = useState<string | null>(null);
@@ -114,6 +119,36 @@ export function PedidosPage() {
   useEffect(() => {
     cargarPedidos();
   }, [cargarPedidos]);
+
+  /* --------------------------- KPIs --------------------------- */
+  const kpis = useMemo(() => {
+    let ventasHoy = 0;
+    let porDespachar = 0;
+    let totalHistorico = 0;
+    
+    // Obtenemos la fecha de hoy en formato YYYY-MM-DD en zona horaria local
+    const hoy = new Date();
+    const hoyStr = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
+
+    pedidos.forEach((p) => {
+      const total = Number(p.total) || 0;
+      totalHistorico += total;
+
+      // Comparamos si el created_at empieza con la fecha de hoy
+      if (p.created_at && p.created_at.startsWith(hoyStr)) {
+        ventasHoy += total;
+      }
+      if (p.estado === "nuevo" || p.estado === "por_empacar") {
+        porDespachar++;
+      }
+    });
+
+    return {
+      ventasHoy,
+      porDespachar,
+      ticketPromedio: pedidos.length > 0 ? totalHistorico / pedidos.length : 0,
+    };
+  }, [pedidos]);
 
   /* --------------------------- Mover entre columnas --------------------------- */
   const moverPedido = async (pedido: Pedido, dir: -1 | 1) => {
@@ -172,9 +207,14 @@ export function PedidosPage() {
     [porEstado]
   );
 
+  // Filtro visual del historial
+  const columnasVisibles = mostrarHistorial
+    ? COLUMNAS
+    : COLUMNAS.filter((c) => c.key !== "entregado" && c.key !== "cancelado");
+
   /* --------------------------- Render --------------------------- */
   return (
-    <div className="min-h-screen bg-[var(--cd)] text-[var(--tx)] p-4 md:p-6">
+    <div className="min-h-screen bg-[var(--cd)] text-[var(--tx)] p-4 md:p-6 flex flex-col">
       {/* ------------------------------ HEADER ------------------------------ */}
       <header className="flex flex-col lg:flex-row lg:items-center gap-4 mb-6">
         <div className="flex-1 min-w-0">
@@ -185,8 +225,8 @@ export function PedidosPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full lg:w-auto">
-          <div className="relative flex-1 lg:w-72">
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+          <div className="relative flex-1 min-w-[200px] lg:w-72">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-50" />
             <input
               type="text"
@@ -216,6 +256,20 @@ export function PedidosPage() {
           </button>
 
           <button
+            onClick={() => setMostrarHistorial(!mostrarHistorial)}
+            className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition-colors whitespace-nowrap ${
+              mostrarHistorial
+                ? "border-indigo-500 bg-indigo-500/10 text-indigo-500"
+                : "border-[var(--bd)] bg-[var(--cd)] text-[var(--tx)] hover:bg-black/5"
+            }`}
+          >
+            {mostrarHistorial ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            <span className="hidden sm:inline">
+              {mostrarHistorial ? "Ocultar Historial" : "Ver Historial"}
+            </span>
+          </button>
+
+          <button
             onClick={() => setModalNuevo(true)}
             className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-600/20 transition-colors whitespace-nowrap"
           >
@@ -224,6 +278,42 @@ export function PedidosPage() {
           </button>
         </div>
       </header>
+
+      {/* ------------------------------ KPIs ------------------------------ */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {/* KPI 1: Ventas Hoy */}
+        <div className="flex items-center gap-4 rounded-2xl border border-[var(--bd)] bg-[var(--cd)] p-4 shadow-sm">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500">
+            <TrendingUp className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider opacity-60">Ventas de Hoy</p>
+            <p className="text-2xl font-black">{dinero(kpis.ventasHoy)}</p>
+          </div>
+        </div>
+
+        {/* KPI 2: Por Despachar */}
+        <div className="flex items-center gap-4 rounded-2xl border border-[var(--bd)] bg-[var(--cd)] p-4 shadow-sm">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-amber-500">
+            <Clock className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider opacity-60">Por Despachar</p>
+            <p className="text-2xl font-black">{kpis.porDespachar}</p>
+          </div>
+        </div>
+
+        {/* KPI 3: Ticket Promedio */}
+        <div className="flex items-center gap-4 rounded-2xl border border-[var(--bd)] bg-[var(--cd)] p-4 shadow-sm">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-500">
+            <BarChart3 className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider opacity-60">Ticket Promedio</p>
+            <p className="text-2xl font-black">{dinero(kpis.ticketPromedio)}</p>
+          </div>
+        </div>
+      </div>
 
       {/* ------------------------------ ERROR ------------------------------ */}
       {error && (
@@ -238,14 +328,14 @@ export function PedidosPage() {
 
       {/* ------------------------------ LOADING ------------------------------ */}
       {cargando ? (
-        <div className="flex flex-col items-center justify-center py-24 opacity-60">
+        <div className="flex flex-col items-center justify-center py-24 opacity-60 flex-1">
           <Loader2 className="w-8 h-8 animate-spin mb-3" />
           <p className="text-sm">Cargando pedidos...</p>
         </div>
       ) : (
         /* ------------------------------ KANBAN ------------------------------ */
-        <div className="flex gap-4 overflow-x-auto pb-4 -mx-1 px-1">
-          {COLUMNAS.map((col) => (
+        <div className="flex gap-4 overflow-x-auto pb-4 -mx-1 px-1 flex-1 items-start">
+          {columnasVisibles.map((col) => (
             <section
               key={col.key}
               className={`flex flex-col shrink-0 min-w-[290px] w-[290px] xl:w-auto xl:flex-1 rounded-2xl border border-[var(--bd)] border-t-4 ${col.accent} bg-[var(--cd)]`}
@@ -260,7 +350,7 @@ export function PedidosPage() {
                 </span>
               </header>
 
-              <div className="p-3 space-y-3 overflow-y-auto min-h-[140px] max-h-[calc(100vh-300px)]">
+              <div className="p-3 space-y-3 overflow-y-auto min-h-[140px] max-h-[calc(100vh-380px)]">
                 {porEstado[col.key].length === 0 ? (
                   <p className="text-center text-xs opacity-40 py-8">Sin pedidos</p>
                 ) : (
@@ -272,6 +362,7 @@ export function PedidosPage() {
                       onGuia={setPedidoGuia}
                       onDetalle={setPedidoDetalle}
                       onMover={moverPedido}
+                      onEditar={setPedidoAEditar}
                     />
                   ))
                 )}
@@ -281,10 +372,14 @@ export function PedidosPage() {
         </div>
       )}
 
-      {/* ------------------------------ MODAL: NUEVO PEDIDO ------------------------------ */}
-      {modalNuevo && (
+      {/* ------------------------------ MODAL: NUEVO / EDITAR ------------------------------ */}
+      {(modalNuevo || pedidoAEditar) && (
         <PedidoModal
-          onClose={() => setModalNuevo(false)}
+          pedido={pedidoAEditar}
+          onClose={() => {
+            setModalNuevo(false);
+            setPedidoAEditar(null);
+          }}
           onSaved={() => cargarPedidos(true)}
         />
       )}
@@ -312,12 +407,14 @@ function PedidoCard({
   onGuia,
   onDetalle,
   onMover,
+  onEditar,
 }: {
   pedido: Pedido;
   moviendo: boolean;
   onGuia: (p: Pedido) => void;
   onDetalle: (p: Pedido) => void;
   onMover: (p: Pedido, dir: -1 | 1) => void;
+  onEditar: (p: Pedido) => void;
 }) {
   const estado = normalizarEstado(pedido.estado);
   const idx = ESTADOS.indexOf(estado);
@@ -344,7 +441,7 @@ function PedidoCard({
           <Package className="w-3.5 h-3.5 shrink-0" />
           {pedido.sku || "—"}
         </span>
-        <span className="text-sm font-black text-[var(--tx)] whitespace-nowrap">
+        <span className="text-lg font-black text-emerald-500 whitespace-nowrap">
           {dinero(pedido.total)}
         </span>
       </div>
@@ -359,8 +456,8 @@ function PedidoCard({
         </div>
       )}
 
-      {/* Acciones */}
-      <div className="mt-3 grid grid-cols-3 gap-1.5">
+      {/* Acciones (4 botones) */}
+      <div className="mt-3 grid grid-cols-4 gap-1.5">
         <button
           onClick={() => onGuia(pedido)}
           className={`${btnBase} text-[var(--tx)] hover:bg-black/5`}
@@ -390,6 +487,14 @@ function PedidoCard({
           title="Ver detalle"
         >
           <Eye className="w-4 h-4" />
+        </button>
+
+        <button
+          onClick={() => onEditar(pedido)}
+          className={`${btnBase} text-indigo-500 hover:bg-indigo-500/10`}
+          title="Editar pedido"
+        >
+          <Edit className="w-4 h-4" />
         </button>
       </div>
 
@@ -485,7 +590,7 @@ function DetallePedido({ pedido, onClose }: { pedido: Pedido; onClose: () => voi
 
           <div className="flex items-center justify-between rounded-xl border border-[var(--bd)] bg-black/5 px-4 py-3">
             <span className="text-xs font-bold uppercase tracking-wider opacity-60">Total</span>
-            <span className="text-xl font-black">{dinero(pedido.total)}</span>
+            <span className="text-xl font-black text-emerald-500">{dinero(pedido.total)}</span>
           </div>
         </div>
       </div>
