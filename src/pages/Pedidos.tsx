@@ -19,9 +19,10 @@ import {
   CreditCard,
   User,
 } from "lucide-react";
-import { supabase } from "../lib/supabase";
-import PedidoModal from "../components/PedidoModal";
-import GuiaEnvio from "../components/GuiaEnvio";
+// CAMBIO 1: Usar la ruta absoluta para evitar problemas de Vite
+import { supabase } from "@/lib/supabase"; 
+import PedidoModal from "@/components/PedidoModal";
+import GuiaEnvio from "@/components/GuiaEnvio";
 
 /* ------------------------------------------------------------------ */
 /* Tipos y constantes                                                  */
@@ -76,7 +77,8 @@ const fechaCorta = (iso: string | null | undefined) => {
 /* Página principal                                                    */
 /* ------------------------------------------------------------------ */
 
-export default function Pedidos() {
+// CAMBIO 2: Cambiar default export por named export para que coincida con App.tsx
+export function PedidosPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [cargando, setCargando] = useState(true);
   const [refrescando, setRefrescando] = useState(false);
