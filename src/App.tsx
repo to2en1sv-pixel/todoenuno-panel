@@ -8,6 +8,7 @@ import { UniChatPage } from '@/pages/UniChat';
 import { PagosPage } from '@/pages/Pagos'; // <-- NUEVA PÁGINA
 import { ProveedoresPage } from '@/pages/Proveedores';
 import { DocsPage } from '@/pages/Docs';
+import { PedidosPage } from '@/pages/Pedidos'; // <-- NUEVA PÁGINA
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="/pagos" element={<PagosPage />} /> {/* <-- NUEVA RUTA */}
         <Route path="/sistema" element={<SistemaPage />} />
         <Route path="/proveedores" element={<ProveedoresPage />} />
+        <Route path="/pedidos" element={<PedidosPage />} /> {/* <-- NUEVA RUTA */}
         <Route path="/docs" element={<DocsPage />} />
       </Route>
     </Routes>
