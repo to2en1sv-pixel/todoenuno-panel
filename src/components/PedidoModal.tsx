@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Loader2, Save, AlertCircle, Plus } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { X, Loader2, Save, AlertCircle, Plus, Edit } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { Pedido } from "@/pages/Pedidos";
 
 interface Props {
   onClose: () => void;
   onSaved: () => void;
+  pedido?: Pedido | null; // Si existe, editamos
 }
 
 const FORM_INICIAL = {
@@ -27,12 +29,26 @@ const inputCls =
 const labelCls =
   "mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60";
 
-export default function PedidoModal({ onClose, onSaved }: Props) {
+export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
   const [form, setForm] = useState({ ...FORM_INICIAL });
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /* Escape + bloqueo de scroll */
+  useEffect(() => {
+    if (pedido) {
+      setForm({
+        nombre_cliente: pedido.nombre_cliente || "",
+        telefono: pedido.telefono || "",
+        sku: pedido.sku || "",
+        total: pedido.total?.toString() || "",
+        direccion: pedido.direccion || "",
+        metodo_pago: pedido.metodo_pago || "Contra entrega",
+        codigo_anuncio: pedido.codigo_anuncio || "",
+        notas: pedido.notas || "",
+      });
+    }
+  }, [pedido]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !guardando) onClose();
@@ -66,9 +82,9 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
       return setError("El total debe ser un número mayor a 0.");
     }
 
-    /* ---------- Insert ---------- */
+    /* ---------- Insert o Update ---------- */
     setGuardando(true);
-    const { error: dbError } = await supabase.from("whatsapp_orders").insert({
+    const payload = {
       nombre_cliente: form.nombre_cliente.trim(),
       telefono: form.telefono.trim(),
       sku: form.sku.trim(),
@@ -77,8 +93,26 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
       metodo_pago: form.metodo_pago,
       codigo_anuncio: form.codigo_anuncio.trim() || null,
       notas: form.notas.trim() || null,
-      estado: "nuevo",
-    });
+    };
+
+    let dbError = null;
+
+    if (pedido) {
+      // Actualizar
+      const { error } = await supabase
+        .from("whatsapp_orders")
+        .update(payload)
+        .eq("id", pedido.id);
+      dbError = error;
+    } else {
+      // Crear
+      const { error } = await supabase.from("whatsapp_orders").insert({
+        ...payload,
+        estado: "nuevo",
+      });
+      dbError = error;
+    }
+
     setGuardando(false);
 
     if (dbError) {
@@ -99,15 +133,18 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
         onClick={(e) => e.stopPropagation()}
         className="my-6 w-full max-w-xl rounded-2xl border border-[var(--bd)] bg-[var(--cd)] text-[var(--tx)] shadow-2xl"
       >
-        {/* Header */}
         <header className="flex items-start justify-between gap-3 border-b border-[var(--bd)] px-5 py-4">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest opacity-50">
-              Alta manual
+              {pedido ? "Editar pedido" : "Alta manual"}
             </p>
             <h2 className="flex items-center gap-2 text-lg font-black">
-              <Plus className="h-5 w-5 text-indigo-500" />
-              Nuevo Pedido
+              {pedido ? (
+                <Edit className="h-5 w-5 text-indigo-500" />
+              ) : (
+                <Plus className="h-5 w-5 text-indigo-500" />
+              )}
+              {pedido ? "Modificar Pedido" : "Nuevo Pedido"}
             </h2>
           </div>
           <button
@@ -119,7 +156,6 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
           </button>
         </header>
 
-        {/* Formulario */}
         <form onSubmit={handleSubmit} className="space-y-4 px-5 py-5">
           {error && (
             <div className="flex items-start gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2.5 text-xs text-rose-500">
@@ -129,7 +165,6 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
           )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {/* Nombre */}
             <div className="sm:col-span-2">
               <label className={labelCls} htmlFor="nombre_cliente">
                 Nombre del cliente *
@@ -145,7 +180,6 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
               />
             </div>
 
-            {/* Teléfono */}
             <div>
               <label className={labelCls} htmlFor="telefono">
                 Teléfono *
@@ -160,7 +194,6 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
               />
             </div>
 
-            {/* Total */}
             <div>
               <label className={labelCls} htmlFor="total">
                 Total ($) *
@@ -177,7 +210,6 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
               />
             </div>
 
-            {/* SKU */}
             <div className="sm:col-span-2">
               <label className={labelCls} htmlFor="sku">
                 SKU / Producto *
@@ -192,7 +224,6 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
               />
             </div>
 
-            {/* Dirección */}
             <div className="sm:col-span-2">
               <label className={labelCls} htmlFor="direccion">
                 Dirección *
@@ -207,7 +238,6 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
               />
             </div>
 
-            {/* Método de pago */}
             <div>
               <label className={labelCls} htmlFor="metodo_pago">
                 Método de pago *
@@ -223,7 +253,6 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
               </select>
             </div>
 
-            {/* Código de anuncio */}
             <div>
               <label className={labelCls} htmlFor="codigo_anuncio">
                 Código de anuncio
@@ -238,7 +267,6 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
               />
             </div>
 
-            {/* Notas */}
             <div className="sm:col-span-2">
               <label className={labelCls} htmlFor="notas">
                 Notas
@@ -254,7 +282,6 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
             </div>
           </div>
 
-          {/* Acciones */}
           <div className="flex flex-col-reverse gap-2 border-t border-[var(--bd)] pt-4 sm:flex-row sm:justify-end">
             <button
               type="button"
@@ -277,7 +304,7 @@ export default function PedidoModal({ onClose, onSaved }: Props) {
               ) : (
                 <>
                   <Save className="h-4 w-4" />
-                  Crear Pedido
+                  {pedido ? "Guardar Cambios" : "Crear Pedido"}
                 </>
               )}
             </button>
