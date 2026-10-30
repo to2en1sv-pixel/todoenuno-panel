@@ -38,15 +38,11 @@ const fechaCorta = (iso?: string | null) => {
   });
 };
 
-/* ------------------------------------------------------------------ */
-/* CSS Modificado para Etiquetas 4x6 / 6x4 (Térmicas)                  */
-/* ------------------------------------------------------------------ */
 const PRINT_CSS = `
 @media print {
   @page {
-    /* Configurado para etiquetas estándar de 4x6 pulgadas (o 6x4) */
     size: 4in 6in; 
-    margin: 0; /* Las térmicas no necesitan márgenes */
+    margin: 0; 
   }
 
   html, body {
@@ -82,13 +78,12 @@ const PRINT_CSS = `
     display: none !important;
   }
 
-  /* Ajustes específicos para que quepa en 4x6 */
   #guia-print {
     width: 100% !important;
     height: 100% !important;
     max-width: none !important;
     margin: 0 !important;
-    padding: 10px !important; /* Margen interno pequeño */
+    padding: 10px !important;
     border: none !important;
     box-shadow: none !important;
     background: #ffffff !important;
@@ -135,7 +130,6 @@ export default function GuiaEnvio({
           className="guia-wrapper w-full max-w-[450px] my-6"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Barra de acciones */}
           <div className="no-print mb-3 flex items-center justify-end gap-2">
             <button
               onClick={() => window.print()}
@@ -153,16 +147,14 @@ export default function GuiaEnvio({
             </button>
           </div>
 
-          {/* GUÍA COMPACTA (Diseño 4x6) */}
           <div
             id="guia-print"
             className="rounded-xl bg-white p-5 text-black shadow-2xl flex flex-col gap-3"
           >
-            {/* Encabezado */}
             <div className="flex items-start justify-between gap-4 border-b-2 border-black pb-2">
               <div>
                 <h1 className="text-xl font-black tracking-tight leading-none">
-                  TODOENUNO
+                  To2en1.app
                 </h1>
                 <p className="mt-0.5 text-[9px] font-bold uppercase tracking-widest">
                   Guía de entrega
@@ -174,7 +166,6 @@ export default function GuiaEnvio({
               </div>
             </div>
 
-            {/* Datos del cliente */}
             <div>
               <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-500">
                 Destinatario
@@ -190,7 +181,6 @@ export default function GuiaEnvio({
               </p>
             </div>
 
-            {/* Contenido */}
             <div>
               <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-500">
                 Contenido
@@ -218,7 +208,6 @@ export default function GuiaEnvio({
               )}
             </div>
 
-            {/* Recuadro de pago (Destacado) */}
             <div className="border-[3px] border-black px-2 py-2 text-center">
               <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-600">
                 Pago
@@ -231,7 +220,6 @@ export default function GuiaEnvio({
               </p>
             </div>
 
-            {/* Notas */}
             {pedido.notas && (
               <div className="border-l-2 border-neutral-400 pl-2">
                 <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-500">
@@ -241,13 +229,17 @@ export default function GuiaEnvio({
               </div>
             )}
 
-            {/* Firma (Más compacta) */}
             <div className="mt-auto pt-6">
               <div className="border-t border-black pt-1">
                 <p className="text-[9px] font-bold uppercase tracking-widest text-neutral-600">
                   Firma de recibido
                 </p>
               </div>
+            </div>
+            
+            <div className="mt-2 flex items-center justify-between border-t border-neutral-200 pt-1 text-[8px] uppercase tracking-widest text-neutral-400">
+              <span>To2en1.app · Guía de entrega</span>
+              <span>#{idCorto}</span>
             </div>
           </div>
         </div>
