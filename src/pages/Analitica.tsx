@@ -20,7 +20,8 @@ interface OrdenTotal {
   total: number
 }
 
-export function Analitica() {
+// AQUÍ ESTÁ EL CAMBIO: export function AnaliticaPage
+export function AnaliticaPage() {
   const [mes, setMes] = useState<string>(mesActual())
   const [ordenes, setOrdenes] = useState<OrdenWhatsapp[]>([])
   const [gastos, setGastos] = useState<GastoPublicidad[]>([])
