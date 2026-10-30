@@ -1,314 +1,204 @@
-import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '../lib/supabase'; // ajustá la ruta si corresponde
+import { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabase'; // Ajustá tu ruta
 
 type Proveedor = {
   id: string;
   nombre: string;
   telefono: string | null;
-  email?: string | null;
-  activo?: boolean;
-};
-
-type FormState = {
-  sku: string;
-  cantidad: string;
-  imagen_url: string;
-  precio_referencia: string;
-  precio_maximo: string;
-};
-
-const EMPTY_FORM: FormState = {
-  sku: '',
-  cantidad: '1',
-  imagen_url: '',
-  precio_referencia: '',
-  precio_maximo: '',
+  etiquetas: string[];
 };
 
 export default function Proveedores() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
 
-  useEffect(() => {
-    void fetchProveedores();
-  }, []);
+  // Form State
+  const [sku, setSku] = useState('');
+  const [cantidad, setCantidad] = useState('1');
+  const [imagenUrl, setImagenUrl] = useState('');
+  const [precioRef, setPrecioRef] = useState('');
+  const [precioMax, setPrecioMax] = useState('');
+  const [modoPrueba, setModoPrueba] = useState(false);
+
+  useEffect(() => { void fetchProveedores(); }, []);
 
   async function fetchProveedores() {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('proveedores')
-      .select('*')
-      .order('nombre', { ascending: true });
-
-    if (error) {
-      setMessage({ type: 'error', text: `No se pudieron cargar los proveedores: ${error.message}` });
-    } else {
-      setProveedores(data ?? []);
-    }
-    setLoading(false);
+    const { data } = await supabase.from('proveedores').select('*').order('nombre');
+    if (data) setProveedores(data);
   }
 
-  function update<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  }
+  const filteredProveedores = proveedores.filter(p => 
+    p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (p.telefono && p.telefono.includes(searchTerm))
+  );
 
-  function resetAndClose() {
-    if (saving) return;
-    setForm(EMPTY_FORM);
-    setIsModalOpen(false);
-  }
+  const toggleSelect = (id: string) => {
+    const newSet = new Set(selectedIds);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedIds(newSet);
+  };
 
-  const imagePreview = useMemo(() => {
-    const url = form.imagen_url.trim();
-    if (!url) return null;
-    if (!/^https?:\/\//i.test(url)) return null;
-    return url;
-  }, [form.imagen_url]);
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredProveedores.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(filteredProveedores.map(p => p.id)));
+  };
 
-  async function handleLanzarLicitacion() {
-    setMessage(null);
-
-    const sku = form.sku.trim();
-    const cantidad = Number(form.cantidad);
-
-    if (!sku) {
-      setMessage({ type: 'error', text: 'El SKU es obligatorio.' });
-      return;
-    }
-    if (!cantidad || cantidad <= 0) {
-      setMessage({ type: 'error', text: 'La cantidad debe ser mayor a 0.' });
-      return;
-    }
-
-    const precioRefNum = form.precio_referencia.trim() === '' ? null : Number(form.precio_referencia);
-    const precioMaxNum = form.precio_maximo.trim() === '' ? null : Number(form.precio_maximo);
-
-    if (precioRefNum !== null && (Number.isNaN(precioRefNum) || precioRefNum < 0)) {
-      setMessage({ type: 'error', text: 'El precio de referencia no es válido.' });
-      return;
-    }
-    if (precioMaxNum !== null && (Number.isNaN(precioMaxNum) || precioMaxNum < 0)) {
-      setMessage({ type: 'error', text: 'El precio máximo no es válido.' });
-      return;
+  async function handleGuardarLicitacion() {
+    if (selectedIds.size === 0 && !modoPrueba) {
+      return setMessage({ type: 'error', text: 'Seleccioná al menos un proveedor o activá Modo Prueba.' });
     }
 
     setSaving(true);
-    const { error } = await supabase.from('licitaciones').insert({
-      sku,
-      cantidad,
-      imagen_url: form.imagen_url.trim() || null,
-      precio_referencia: precioRefNum,
-      precio_maximo: precioMaxNum,
-      estado: 'pending',
-    });
-    setSaving(false);
+    setMessage(null);
 
-    if (error) {
-      setMessage({ type: 'error', text: `No se pudo crear la licitación: ${error.message}` });
-      return;
+    // 1. Crear la licitación
+    const { data: licitacion, error: errLicitacion } = await supabase
+      .from('licitaciones')
+      .insert({
+        sku, cantidad: Number(cantidad),
+        imagen_url: imagenUrl || null,
+        precio_referencia: precioRef ? Number(precioRef) : null,
+        precio_maximo: precioMax ? Number(precioMax) : null,
+        modo_prueba: modoPrueba,
+        estado: 'pending'
+      }).select().single();
+
+    if (errLicitacion || !licitacion) {
+      setSaving(false);
+      return setMessage({ type: 'error', text: errLicitacion?.message || 'Error al crear' });
     }
 
-    setMessage({ type: 'ok', text: 'Licitación creada. El sistema avisará a los proveedores.' });
-    setForm(EMPTY_FORM);
+    // 2. Crear la cola de envíos (licitacion_proveedores)
+    let queueData = [];
+    
+    if (modoPrueba) {
+      // Buscamos un proveedor ficticio de prueba (o lo mandamos a tu número)
+      const { data: testProvider } = await supabase.from('proveedores').select('id').ilike('nombre', '%TEST%').limit(1).single();
+      if (testProvider) queueData.push({ licitacion_id: licitacion.id, proveedor_id: testProvider.id });
+    } else {
+      queueData = Array.from(selectedIds).map(id => ({ licitacion_id: licitacion.id, proveedor_id: id }));
+    }
+
+    if (queueData.length > 0) {
+      await supabase.from('licitacion_proveedores').insert(queueData);
+    }
+
+    setSaving(false);
     setIsModalOpen(false);
+    setSelectedIds(new Set());
+    setMessage({ type: 'ok', text: 'Licitación encolada. El sistema enviará en lotes de 5 cada 10 min.' });
   }
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="mx-auto max-w-6xl">
+        
+        {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Proveedores</h1>
-            <p className="text-sm text-slate-500">
-              Gestioná tus proveedores y lanzá licitaciones masivas para buscar stock.
-            </p>
+            <h1 className="text-2xl font-semibold text-slate-900">Red de Proveedores</h1>
+            <p className="text-sm text-slate-500">Gestión masiva para licitaciones.</p>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setMessage(null);
-              setIsModalOpen(true);
-            }}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800"
-          >
-            Lanzar Licitación
+          <button onClick={() => setIsModalOpen(true)} className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600">
+            Lanzar Licitación ({selectedIds.size})
           </button>
         </div>
 
-        {message && (
-          <div
-            className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
-              message.type === 'ok'
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                : 'border-rose-200 bg-rose-50 text-rose-700'
-            }`}
-          >
-            {message.text}
-          </div>
-        )}
+        {message && <div className={`mb-4 p-3 rounded-lg text-sm ${message.type === 'ok' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>{message.text}</div>}
 
+        {/* Buscador y Filtros */}
+        <div className="mb-4 flex gap-4">
+          <input 
+            type="text" placeholder="Buscar por nombre o teléfono..." 
+            value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+            className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+        </div>
+
+        {/* Tabla */}
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <thead className="bg-slate-50">
               <tr>
-                <th className="px-4 py-3">Nombre</th>
-                <th className="px-4 py-3">Teléfono</th>
-                <th className="px-4 py-3">Email</th>
-                <th className="px-4 py-3">Estado</th>
+                <th className="px-4 py-3 w-12">
+                  <input type="checkbox" onChange={toggleSelectAll} checked={selectedIds.size === filteredProveedores.length && filteredProveedores.length > 0} />
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-slate-500">Proveedor</th>
+                <th className="px-4 py-3 text-left font-medium text-slate-500">Teléfono</th>
+                <th className="px-4 py-3 text-left font-medium text-slate-500">Etiquetas</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
-                    Cargando proveedores...
+              {filteredProveedores.map(p => (
+                <tr key={p.id} className={`hover:bg-slate-50 ${selectedIds.has(p.id) ? 'bg-orange-50' : ''}`}>
+                  <td className="px-4 py-3">
+                    <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} />
+                  </td>
+                  <td className="px-4 py-3 font-medium text-slate-800">{p.nombre}</td>
+                  <td className="px-4 py-3 text-slate-600">{p.telefono || '—'}</td>
+                  <td className="px-4 py-3">
+                    {p.etiquetas?.map(tag => (
+                      <span key={tag} className="mr-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{tag}</span>
+                    ))}
                   </td>
                 </tr>
-              ) : proveedores.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
-                    No hay proveedores cargados.
-                  </td>
-                </tr>
-              ) : (
-                proveedores.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-800">{p.nombre}</td>
-                    <td className="px-4 py-3 text-slate-600">{p.telefono || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600">{p.email || '—'}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs ${
-                          p.activo === false
-                            ? 'bg-rose-100 text-rose-700'
-                            : 'bg-emerald-100 text-emerald-700'
-                        }`}
-                      >
-                        {p.activo === false ? 'Inactivo' : 'Activo'}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
+              ))}
             </tbody>
           </table>
         </div>
       </div>
 
+      {/* MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-900">Nueva Licitación</h2>
-              <button
-                type="button"
-                onClick={resetAndClose}
-                disabled={saving}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                ✕
-              </button>
-            </div>
-
+            <h2 className="mb-4 text-lg font-semibold">Nueva Licitación</h2>
+            
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">
-                    SKU / Producto *
-                  </label>
-                  <input
-                    value={form.sku}
-                    onChange={(e) => update('sku', e.target.value)}
-                    placeholder="SKU-1234"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                  />
+                  <label className="text-xs font-medium">SKU *</label>
+                  <input value={sku} onChange={e => setSku(e.target.value)} className="w-full rounded-lg border p-2 text-sm" />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Cantidad *</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={form.cantidad}
-                    onChange={(e) => update('cantidad', e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                  />
+                  <label className="text-xs font-medium">Cantidad *</label>
+                  <input type="number" value={cantidad} onChange={e => setCantidad(e.target.value)} className="w-full rounded-lg border p-2 text-sm" />
                 </div>
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">
-                  URL de la imagen (opcional)
-                </label>
-                <input
-                  value={form.imagen_url}
-                  onChange={(e) => update('imagen_url', e.target.value)}
-                  placeholder="https://..."
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                />
-                {imagePreview && (
-                  <img
-                    src={imagePreview}
-                    alt="Preview"
-                    className="mt-2 h-24 w-24 rounded-lg border border-slate-200 object-cover"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).style.display = 'none';
-                    }}
-                  />
-                )}
+                <label className="text-xs font-medium">URL Imagen (Opcional)</label>
+                <input value={imagenUrl} onChange={e => setImagenUrl(e.target.value)} placeholder="https://..." className="w-full rounded-lg border p-2 text-sm" />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">
-                    Precio Referencia
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={form.precio_referencia}
-                    onChange={(e) => update('precio_referencia', e.target.value)}
-                    placeholder="0.00"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                  />
+                  <label className="text-xs font-medium">Precio Ref (Opcional)</label>
+                  <input type="number" value={precioRef} onChange={e => setPrecioRef(e.target.value)} className="w-full rounded-lg border p-2 text-sm" />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">
-                    Precio Máximo
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={form.precio_maximo}
-                    onChange={(e) => update('precio_maximo', e.target.value)}
-                    placeholder="0.00"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                  />
+                  <label className="text-xs font-medium">Precio Máx (Opcional)</label>
+                  <input type="number" value={precioMax} onChange={e => setPrecioMax(e.target.value)} className="w-full rounded-lg border p-2 text-sm" />
                 </div>
+              </div>
+
+              <div className="flex items-center gap-2 mt-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
+                <input type="checkbox" id="modoPrueba" checked={modoPrueba} onChange={e => setModoPrueba(e.target.checked)} className="h-4 w-4" />
+                <label htmlFor="modoPrueba" className="text-sm font-medium text-amber-800">
+                  Modo Prueba (Envía solo al proveedor "TEST")
+                </label>
               </div>
             </div>
 
             <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={resetAndClose}
-                disabled={saving}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleLanzarLicitacion}
-                disabled={saving}
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-              >
-                {saving ? 'Guardando...' : 'Guardar y Lanzar'}
+              <button onClick={() => setIsModalOpen(false)} className="rounded-lg px-4 py-2 text-sm text-slate-600">Cancelar</button>
+              <button onClick={handleGuardarLicitacion} disabled={saving} className="rounded-lg bg-orange-500 px-4 py-2 text-sm text-white">
+                {saving ? 'Guardando...' : 'Encolar Envíos'}
               </button>
             </div>
           </div>
