@@ -1,16 +1,15 @@
 import { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { MessageSquare, Wallet, Menu, X, Moon, Sun } from 'lucide-react';
-import { MessageSquare, Wallet, Menu, X, Moon, Sun, Store } from 'lucide-react';
-import { MessageSquare, Wallet, Menu, X, Moon, Sun, Store, FileText } from 'lucide-react';
+import { MessageSquare, Wallet, Menu, X, Moon, Sun, Store, FileText, ClipboardList } from 'lucide-react'; // <-- Agregamos ClipboardList
 
 const links = [
   { to: '/', label: 'Hoy' },
+  { to: '/pedidos', label: 'Pedidos', icon: ClipboardList }, // <-- NUEVO BOTÓN
   { to: '/unichat', label: 'UniChat', icon: MessageSquare }, 
   { to: '/catalogo', label: 'Catálogo' }, 
   { to: '/cola', label: 'Cola' }, 
-  { to: '/proveedores', label: 'Proveedores', icon: Store }, // <-- NUEVO
-  { to: '/docs', label: 'Docs & Roadmap', icon: FileText }, // <-- NUEVO
+  { to: '/proveedores', label: 'Proveedores', icon: Store },
+  { to: '/docs', label: 'Docs & Roadmap', icon: FileText }, 
   { to: '/pagos', label: 'Pagos', icon: Wallet },
   { to: '/sistema', label: 'Sistema' }
 ];
@@ -18,8 +17,6 @@ const links = [
 export function Layout() {
   const { pathname } = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  
-  // Estado del tema
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
 
   useEffect(() => {
@@ -54,7 +51,6 @@ export function Layout() {
       `}>
         <div className="flex items-center justify-between mb-4">
           <div className="font-bold hidden lg:block">TODOENUNO OS</div>
-          {/* Botón de tema para Desktop */}
           <button onClick={toggleTheme} className="hidden lg:flex p-2 bg-sf rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
