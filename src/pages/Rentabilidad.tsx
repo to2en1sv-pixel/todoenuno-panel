@@ -24,7 +24,8 @@ const FORM_INICIAL = {
   notas: '',
 }
 
-export function Rentabilidad() {
+// AQUÍ ESTÁ EL CAMBIO: export function RentabilidadPage
+export function RentabilidadPage() {
   const [mes, setMes] = useState<string>(mesActual())
   const [gastos, setGastos] = useState<GastoPublicidad[]>([])
   const [ordenes, setOrdenes] = useState<OrdenWhatsapp[]>([])
