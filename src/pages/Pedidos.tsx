@@ -23,6 +23,7 @@ import {
   TrendingUp,
   Clock,
   BarChart3,
+  Trash2, // 👈 Nuevo ícono
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import PedidoModal from "@/components/PedidoModal";
@@ -120,24 +121,28 @@ export function PedidosPage() {
     cargarPedidos();
   }, [cargarPedidos]);
 
-  /* --------------------------- KPIs --------------------------- */
+  /* --------------------------- KPIs (CORREGIDOS) --------------------------- */
   const kpis = useMemo(() => {
     let ventasHoy = 0;
     let porDespachar = 0;
     let totalHistorico = 0;
     
-    // Obtenemos la fecha de hoy en formato YYYY-MM-DD en zona horaria local
     const hoy = new Date();
     const hoyStr = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
 
     pedidos.forEach((p) => {
       const total = Number(p.total) || 0;
-      totalHistorico += total;
+      const esCancelado = p.estado === "cancelado";
 
-      // Comparamos si el created_at empieza con la fecha de hoy
-      if (p.created_at && p.created_at.startsWith(hoyStr)) {
-        ventasHoy += total;
+      // Si no está cancelado, lo sumamos a las métricas
+      if (!esCancelado) {
+        totalHistorico += total;
+        if (p.created_at && p.created_at.startsWith(hoyStr)) {
+          ventasHoy += total;
+        }
       }
+
+      // "Por Despachar" solo cuenta los activos
       if (p.estado === "nuevo" || p.estado === "por_empacar") {
         porDespachar++;
       }
@@ -159,7 +164,6 @@ export function PedidosPage() {
     setMoviendoId(pedido.id);
     const previos = pedidos;
 
-    // Optimistic update
     setPedidos((prev) =>
       prev.map((p) => (p.id === pedido.id ? { ...p, estado: destino } : p))
     );
@@ -176,6 +180,25 @@ export function PedidosPage() {
       await cargarPedidos(true);
     }
     setMoviendoId(null);
+  };
+
+  /* --------------------------- Borrar Pedido --------------------------- */
+  const borrarPedido = async (pedido: Pedido) => {
+    const confirmar = window.confirm(
+      `¿Estás seguro de que deseas eliminar permanentemente el pedido de ${pedido.nombre_cliente}?`
+    );
+    if (!confirmar) return;
+
+    const { error } = await supabase
+      .from("whatsapp_orders")
+      .delete()
+      .eq("id", pedido.id);
+
+    if (error) {
+      setError(`No se pudo eliminar el pedido: ${error.message}`);
+    } else {
+      await cargarPedidos(true);
+    }
   };
 
   /* --------------------------- Filtro + agrupación --------------------------- */
@@ -207,7 +230,6 @@ export function PedidosPage() {
     [porEstado]
   );
 
-  // Filtro visual del historial
   const columnasVisibles = mostrarHistorial
     ? COLUMNAS
     : COLUMNAS.filter((c) => c.key !== "entregado" && c.key !== "cancelado");
@@ -215,7 +237,6 @@ export function PedidosPage() {
   /* --------------------------- Render --------------------------- */
   return (
     <div className="min-h-screen bg-[var(--cd)] text-[var(--tx)] p-4 md:p-6 flex flex-col">
-      {/* ------------------------------ HEADER ------------------------------ */}
       <header className="flex flex-col lg:flex-row lg:items-center gap-4 mb-6">
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl md:text-3xl font-black tracking-tight">Pedidos</h1>
@@ -279,9 +300,7 @@ export function PedidosPage() {
         </div>
       </header>
 
-      {/* ------------------------------ KPIs ------------------------------ */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        {/* KPI 1: Ventas Hoy */}
         <div className="flex items-center gap-4 rounded-2xl border border-[var(--bd)] bg-[var(--cd)] p-4 shadow-sm">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500">
             <TrendingUp className="h-6 w-6" />
@@ -292,7 +311,6 @@ export function PedidosPage() {
           </div>
         </div>
 
-        {/* KPI 2: Por Despachar */}
         <div className="flex items-center gap-4 rounded-2xl border border-[var(--bd)] bg-[var(--cd)] p-4 shadow-sm">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-amber-500">
             <Clock className="h-6 w-6" />
@@ -303,7 +321,6 @@ export function PedidosPage() {
           </div>
         </div>
 
-        {/* KPI 3: Ticket Promedio */}
         <div className="flex items-center gap-4 rounded-2xl border border-[var(--bd)] bg-[var(--cd)] p-4 shadow-sm">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-500">
             <BarChart3 className="h-6 w-6" />
@@ -315,7 +332,6 @@ export function PedidosPage() {
         </div>
       </div>
 
-      {/* ------------------------------ ERROR ------------------------------ */}
       {error && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-500">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -326,14 +342,12 @@ export function PedidosPage() {
         </div>
       )}
 
-      {/* ------------------------------ LOADING ------------------------------ */}
       {cargando ? (
         <div className="flex flex-col items-center justify-center py-24 opacity-60 flex-1">
           <Loader2 className="w-8 h-8 animate-spin mb-3" />
           <p className="text-sm">Cargando pedidos...</p>
         </div>
       ) : (
-        /* ------------------------------ KANBAN ------------------------------ */
         <div className="flex gap-4 overflow-x-auto pb-4 -mx-1 px-1 flex-1 items-start">
           {columnasVisibles.map((col) => (
             <section
@@ -363,6 +377,7 @@ export function PedidosPage() {
                       onDetalle={setPedidoDetalle}
                       onMover={moverPedido}
                       onEditar={setPedidoAEditar}
+                      onBorrar={borrarPedido}
                     />
                   ))
                 )}
@@ -372,7 +387,6 @@ export function PedidosPage() {
         </div>
       )}
 
-      {/* ------------------------------ MODAL: NUEVO / EDITAR ------------------------------ */}
       {(modalNuevo || pedidoAEditar) && (
         <PedidoModal
           pedido={pedidoAEditar}
@@ -384,12 +398,10 @@ export function PedidosPage() {
         />
       )}
 
-      {/* ------------------------------ MODAL: GUÍA DE ENVÍO ------------------------------ */}
       {pedidoGuia && (
         <GuiaEnvio pedido={pedidoGuia} onClose={() => setPedidoGuia(null)} />
       )}
 
-      {/* ------------------------------ MODAL: DETALLE ------------------------------ */}
       {pedidoDetalle && (
         <DetallePedido pedido={pedidoDetalle} onClose={() => setPedidoDetalle(null)} />
       )}
@@ -408,6 +420,7 @@ function PedidoCard({
   onDetalle,
   onMover,
   onEditar,
+  onBorrar,
 }: {
   pedido: Pedido;
   moviendo: boolean;
@@ -415,17 +428,22 @@ function PedidoCard({
   onDetalle: (p: Pedido) => void;
   onMover: (p: Pedido, dir: -1 | 1) => void;
   onEditar: (p: Pedido) => void;
+  onBorrar: (p: Pedido) => void;
 }) {
   const estado = normalizarEstado(pedido.estado);
   const idx = ESTADOS.indexOf(estado);
   const telefonoLimpio = (pedido.telefono ?? "").replace(/\D/g, "");
+
+  const mensajeWa = `Hola ${pedido.nombre_cliente || ""}, tenemos tu pedido de *${pedido.sku || "tu producto"}*, con entrega en 📍 ${pedido.direccion || "tu dirección"} y precio de *${dinero(pedido.total)}*. \n\n¿Puedes recibir ahora?`;
+  const urlWa = telefonoLimpio 
+    ? `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensajeWa)}` 
+    : undefined;
 
   const btnBase =
     "flex items-center justify-center rounded-lg border border-[var(--bd)] bg-[var(--cd)] py-1.5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed";
 
   return (
     <article className="rounded-xl border border-[var(--bd)] bg-[var(--cd)] p-3 shadow-sm hover:shadow-md transition-shadow">
-      {/* Nombre + fecha */}
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-sm font-semibold leading-tight text-[var(--tx)] truncate">
           {pedido.nombre_cliente || "Sin nombre"}
@@ -435,7 +453,6 @@ function PedidoCard({
         </span>
       </div>
 
-      {/* SKU + Total */}
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1 text-xs opacity-80 truncate">
           <Package className="w-3.5 h-3.5 shrink-0" />
@@ -446,7 +463,6 @@ function PedidoCard({
         </span>
       </div>
 
-      {/* Badge código de anuncio */}
       {pedido.codigo_anuncio && (
         <div className="mt-2">
           <span className="inline-flex items-center gap-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-indigo-500">
@@ -456,8 +472,8 @@ function PedidoCard({
         </div>
       )}
 
-      {/* Acciones (4 botones) */}
-      <div className="mt-3 grid grid-cols-4 gap-1.5">
+      {/* Ahora son 5 botones */}
+      <div className="mt-3 grid grid-cols-5 gap-1">
         <button
           onClick={() => onGuia(pedido)}
           className={`${btnBase} text-[var(--tx)] hover:bg-black/5`}
@@ -467,7 +483,7 @@ function PedidoCard({
         </button>
 
         <a
-          href={telefonoLimpio ? `https://wa.me/${telefonoLimpio}` : undefined}
+          href={urlWa}
           target="_blank"
           rel="noreferrer"
           onClick={(e) => {
@@ -496,9 +512,16 @@ function PedidoCard({
         >
           <Edit className="w-4 h-4" />
         </button>
+
+        <button
+          onClick={() => onBorrar(pedido)}
+          className={`${btnBase} text-rose-500 hover:bg-rose-500/10`}
+          title="Eliminar pedido"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
       </div>
 
-      {/* Mover entre columnas */}
       <div className="mt-2 flex items-center justify-between gap-1.5">
         <button
           onClick={() => onMover(pedido, -1)}
@@ -506,11 +529,7 @@ function PedidoCard({
           className={`${btnBase} flex-1 text-[var(--tx)] hover:bg-black/5`}
           title="Mover a la columna anterior"
         >
-          {moviendo ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <ChevronLeft className="w-4 h-4" />
-          )}
+          {moviendo ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronLeft className="w-4 h-4" />}
         </button>
 
         <span className="text-[9px] font-bold uppercase tracking-wider opacity-50 whitespace-nowrap px-1">
@@ -523,11 +542,7 @@ function PedidoCard({
           className={`${btnBase} flex-1 text-[var(--tx)] hover:bg-black/5`}
           title="Mover a la columna siguiente"
         >
-          {moviendo ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <ChevronRight className="w-4 h-4" />
-          )}
+          {moviendo ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronRight className="w-4 h-4" />}
         </button>
       </div>
     </article>
