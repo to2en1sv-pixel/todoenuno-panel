@@ -1,10 +1,24 @@
 import { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { MessageSquare, Wallet, Menu, X, Moon, Sun, Store, FileText, ClipboardList } from 'lucide-react'; // <-- Agregamos ClipboardList
+import { 
+  MessageSquare, 
+  Wallet, 
+  Menu, 
+  X, 
+  Moon, 
+  Sun, 
+  Store, 
+  FileText, 
+  ClipboardList,
+  TrendingUp, // <-- Nuevo ícono para Rentabilidad
+  PieChart    // <-- Nuevo ícono para Analítica
+} from 'lucide-react';
 
 const links = [
   { to: '/', label: 'Hoy' },
-  { to: '/pedidos', label: 'Pedidos', icon: ClipboardList }, // <-- NUEVO BOTÓN
+  { to: '/pedidos', label: 'Pedidos', icon: ClipboardList },
+  { to: '/rentabilidad', label: 'Rentabilidad', icon: TrendingUp }, // <-- NUEVO BOTÓN
+  { to: '/analitica', label: 'Analítica', icon: PieChart },          // <-- NUEVO BOTÓN
   { to: '/unichat', label: 'UniChat', icon: MessageSquare }, 
   { to: '/catalogo', label: 'Catálogo' }, 
   { to: '/cola', label: 'Cola' }, 
@@ -46,7 +60,7 @@ export function Layout() {
       <aside className={`
         fixed lg:static top-14 lg:top-0 left-0 bottom-0 z-40
         w-[200px] shrink-0 bg-cd border-r border-[var(--bd)] p-4 flex flex-col gap-2
-        transition-transform duration-300 ease-in-out
+        transition-transform duration-300 ease-in-out overflow-y-auto
         ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
         <div className="flex items-center justify-between mb-4">
