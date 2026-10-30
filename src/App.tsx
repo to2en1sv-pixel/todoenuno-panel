@@ -8,7 +8,9 @@ import { UniChatPage } from '@/pages/UniChat';
 import { PagosPage } from '@/pages/Pagos';
 import { ProveedoresPage } from '@/pages/Proveedores';
 import { DocsPage } from '@/pages/Docs';
-import { PedidosPage } from '@/pages/Pedidos'; // <-- NUEVA PÁGINA
+import { PedidosPage } from '@/pages/Pedidos';
+import { RentabilidadPage } from '@/pages/Rentabilidad'; // <-- NUEVO
+import { AnaliticaPage } from '@/pages/Analitica'; // <-- NUEVO
 
 export default function App() {
   return (
@@ -19,10 +21,14 @@ export default function App() {
         <Route path="/catalogo" element={<CatalogoPage />} />
         <Route path="/cola" element={<ColaPage />} />
         <Route path="/proveedores" element={<ProveedoresPage />} />
-        <Route path="/pedidos" element={<PedidosPage />} /> {/* <-- NUEVA RUTA */}
+        <Route path="/pedidos" element={<PedidosPage />} />
         <Route path="/docs" element={<DocsPage />} />
         <Route path="/pagos" element={<PagosPage />} />
         <Route path="/sistema" element={<SistemaPage />} />
+        
+        {/* NUEVAS RUTAS */}
+        <Route path="/rentabilidad" element={<RentabilidadPage />} />
+        <Route path="/analitica" element={<AnaliticaPage />} />
       </Route>
     </Routes>
   );
