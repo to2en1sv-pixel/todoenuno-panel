@@ -8,7 +8,7 @@ type Proveedor = {
   etiquetas: string[];
 };
 
-export default function Proveedores() {
+export function Proveedores() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
