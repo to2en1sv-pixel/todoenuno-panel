@@ -11,6 +11,7 @@ import { DocsPage } from '@/pages/Docs';
 import { PedidosPage } from '@/pages/Pedidos';
 import { RentabilidadPage } from '@/pages/Rentabilidad'; // <-- NUEVO
 import { AnaliticaPage } from '@/pages/Analitica'; // <-- NUEVO
+import { MarketingPage } from '@/pages/Marketing'
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="/docs" element={<DocsPage />} />
         <Route path="/pagos" element={<PagosPage />} />
         <Route path="/sistema" element={<SistemaPage />} />
+        <Route path="/marketing" element={<MarketingPage />} />
         
         {/* NUEVAS RUTAS */}
         <Route path="/rentabilidad" element={<RentabilidadPage />} />
