@@ -10,15 +10,17 @@ import {
   Store, 
   FileText, 
   ClipboardList,
-  TrendingUp, // <-- Nuevo ícono para Rentabilidad
-  PieChart    // <-- Nuevo ícono para Analítica
+  TrendingUp, // Rentabilidad
+  PieChart,   // Analítica
+  Megaphone   // Pricing & Promo Studio
 } from 'lucide-react';
 
 const links = [
   { to: '/', label: 'Hoy' },
   { to: '/pedidos', label: 'Pedidos', icon: ClipboardList },
-  { to: '/rentabilidad', label: 'Rentabilidad', icon: TrendingUp }, // <-- NUEVO BOTÓN
-  { to: '/analitica', label: 'Analítica', icon: PieChart },          // <-- NUEVO BOTÓN
+  { to: '/rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
+  { to: '/analitica', label: 'Analítica', icon: PieChart },
+  { to: '/marketing', label: 'Pricing & Promo', icon: Megaphone }, // <-- NUEVO BOTÓN
   { to: '/unichat', label: 'UniChat', icon: MessageSquare }, 
   { to: '/catalogo', label: 'Catálogo' }, 
   { to: '/cola', label: 'Cola' }, 
