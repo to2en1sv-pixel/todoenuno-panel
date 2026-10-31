@@ -165,41 +165,9 @@ export function MarketingPage() {
 
   /* --------------------------- IA --------------------------- */
 
-  const buildPrompt = () =>
-    `Actúa como un estratega senior de ecommerce y copywriter de direct response.
-
-DATOS DEL MERCADO:
-- Precio más bajo de la competencia: ${usd(market.low)}
-- Precio más alto de la competencia: ${usd(market.high)}
-- Precio promedio del mercado: ${usd(market.avg)}
-
-ESTRUCTURA DE COSTOS:
-- Costo del producto: ${usd(costs.product)}
-- Costo de envío: ${usd(costs.shipping)}
-- CPA estimado (costo por adquisición): ${usd(costs.cpa)}
-- Costo total unitario: ${usd(costs.total)}
-- Margen de utilidad deseado: ${costs.marginPct}%
-- Precio ideal de venta calculado: ${usd(costs.ideal)}
-- Utilidad neta estimada por unidad: ${usd(costs.profit)}
-
-TAREA:
-1) Sugiere UNA oferta irresistible y fácil de ejecutar (combo, bundle, descuento por tiempo limitado, envío gratis condicionado, etc.) coherente con estos números. Justifícala en 2 líneas.
-2) Escribe un copy publicitario corto y persuasivo (máximo 60 palabras) listo para Meta Ads y WhatsApp, con emojis y un llamado a la acción claro.
-3) Añade 3 viñetas con los ángulos psicológicos usados (escasez, prueba social, anclaje de precio, etc.).
-
-Responde en español, en texto plano, con títulos cortos y viñetas. No uses tablas.`
-
   const generateStrategy = async () => {
     setAiError(null)
     setCopied(false)
-
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
-    if (!apiKey) {
-      setAiError(
-        'Falta la variable de entorno VITE_OPENAI_API_KEY. Agrégala en tu archivo .env y reinicia el servidor.',
-      )
-      return
-    }
 
     if (costs.total <= 0) {
       setAiError('Ingresa al menos un costo para generar una estrategia coherente.')
@@ -210,39 +178,35 @@ Responde en español, en texto plano, con títulos cortos y viñetas. No uses ta
     setAiResult('')
 
     try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      // 🔥 LLAMAMOS A NUESTRA API SEGURA EN VERCEL
+      const res = await fetch('/api/generate-copy', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          temperature: 0.7,
-          max_tokens: 700,
-          messages: [
-            {
-              role: 'system',
-              content:
-                'Eres un estratega de pricing y copywriter de respuesta directa para ecommerce. Respondes siempre en español, concreto, accionable y sin relleno.',
-            },
-            { role: 'user', content: buildPrompt() },
-          ],
+          marketLow: market.low,
+          marketHigh: market.high,
+          marketAvg: market.avg,
+          productCost: costs.product,
+          shippingCost: costs.shipping,
+          cpa: costs.cpa,
+          totalCost: costs.total,
+          marginPct: costs.marginPct,
+          idealPrice: costs.ideal,
+          profit: costs.profit,
         }),
       })
 
+      const data = await res.json()
+
       if (!res.ok) {
-        const errText = await res.text()
-        throw new Error(`OpenAI respondió ${res.status}. ${errText.slice(0, 180)}`)
+        throw new Error(data.error || 'Error al generar la estrategia.')
       }
 
-      const data = await res.json()
-      const content: string | undefined = data?.choices?.[0]?.message?.content
-      if (!content) throw new Error('La IA no devolvió contenido. Intenta de nuevo.')
-
-      setAiResult(content.trim())
-    } catch (err) {
-      setAiError(err instanceof Error ? err.message : 'Error desconocido al generar la estrategia.')
+      setAiResult(data.copy)
+    } catch (err: any) {
+      setAiError(err.message || 'Error desconocido al generar la estrategia.')
     } finally {
       setAiLoading(false)
     }
