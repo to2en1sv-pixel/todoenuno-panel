@@ -4,6 +4,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { 
+    productName, // <--- NUEVO
     marketLow, marketHigh, marketAvg, 
     productCost, shippingCost, cpa, totalCost, 
     marginPct, idealPrice, profit 
@@ -14,7 +15,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const prompt = `Actúa como un estratega senior de ecommerce y copywriter de direct response.
-    
+  
+PRODUCTO: "${productName}" // <--- LA IA YA SABE QUÉ ES
+
 DATOS DEL MERCADO:
 - Precio más bajo: $${marketLow}
 - Precio más alto: $${marketHigh}
@@ -30,8 +33,8 @@ ESTRUCTURA DE COSTOS:
 - Utilidad neta: $${profit.toFixed(2)}
 
 TAREA:
-1) Sugiere UNA oferta irresistible (combo, bundle, descuento por tiempo limitado, etc.). Justifícala en 2 líneas.
-2) Escribe un copy publicitario corto y persuasivo (máximo 60 palabras) para Meta Ads y WhatsApp, con emojis y llamado a la acción.
+1) Sugiere UNA oferta irresistible para vender "${productName}" (combo, bundle, descuento por tiempo limitado, etc.). Justifícala en 2 líneas.
+2) Escribe un copy publicitario corto y persuasivo (máximo 60 palabras) para Meta Ads y WhatsApp, con emojis y llamado a la acción. Menciona el producto.
 3) Añade 3 viñetas con los ángulos psicológicos usados.
 Responde en español, texto plano.`;
 
@@ -54,10 +57,7 @@ Responde en español, texto plano.`;
     });
 
     const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error?.message || 'Error consultando OpenAI');
-    }
+    if (!response.ok) throw new Error(data.error?.message || 'Error consultando OpenAI');
 
     return res.status(200).json({ copy: data.choices[0].message.content });
   } catch (error: any) {
