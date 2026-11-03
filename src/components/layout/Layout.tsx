@@ -12,7 +12,8 @@ import {
   ClipboardList,
   TrendingUp, // Rentabilidad
   PieChart,   // Analítica
-  Megaphone   // Pricing & Promo Studio
+  Megaphone,  // Pricing & Promo Studio
+  Inbox       // <-- NUEVO ICONO PARA SOCIAL INBOX
 } from 'lucide-react';
 
 const links = [
@@ -20,8 +21,9 @@ const links = [
   { to: '/pedidos', label: 'Pedidos', icon: ClipboardList },
   { to: '/rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
   { to: '/analitica', label: 'Analítica', icon: PieChart },
-  { to: '/marketing', label: 'Pricing & Promo', icon: Megaphone }, // <-- NUEVO BOTÓN
+  { to: '/marketing', label: 'Pricing & Promo', icon: Megaphone },
   { to: '/unichat', label: 'UniChat', icon: MessageSquare }, 
+  { to: '/social-inbox', label: 'Social Inbox', icon: Inbox }, // <-- NUEVA RUTA
   { to: '/catalogo', label: 'Catálogo' }, 
   { to: '/cola', label: 'Cola' }, 
   { to: '/proveedores', label: 'Proveedores', icon: Store },
