@@ -9,15 +9,19 @@ import { PagosPage } from '@/pages/Pagos';
 import { ProveedoresPage } from '@/pages/Proveedores';
 import { DocsPage } from '@/pages/Docs';
 import { PedidosPage } from '@/pages/Pedidos';
-import { RentabilidadPage } from '@/pages/Rentabilidad'; // <-- NUEVO
-import { AnaliticaPage } from '@/pages/Analitica'; // <-- NUEVO
-import { MarketingPage } from '@/pages/Marketing'
+import { RentabilidadPage } from '@/pages/Rentabilidad';
+import { AnaliticaPage } from '@/pages/Analitica';
+import { MarketingPage } from '@/pages/Marketing';
 import { SocialInbox } from '@/pages/SocialInbox';
 import { ConfirmarEntregaPage } from "@/pages/ConfirmarEntrega";
 
 export default function App() {
   return (
     <Routes>
+      {/* 👇 ESTA RUTA ESTÁ AFUERA, POR ESO NO TENDRÁ SIDEBAR */}
+      <Route path="/entregar/:id" element={<ConfirmarEntregaPage />} />
+
+      {/* 👇 ESTAS RUTAS ESTÁN ADENTRO, POR ESO SÍ TIENEN SIDEBAR */}
       <Route element={<Layout />}>
         <Route path="/" element={<HoyPage />} />
         <Route path="/unichat" element={<UniChatPage />} />
@@ -30,9 +34,6 @@ export default function App() {
         <Route path="/sistema" element={<SistemaPage />} />
         <Route path="/marketing" element={<MarketingPage />} />
         <Route path="/social-inbox" element={<SocialInbox />} />
-        <Route path="/entregar/:id" element={<ConfirmarEntregaPage />} />
-        
-        {/* NUEVAS RUTAS */}
         <Route path="/rentabilidad" element={<RentabilidadPage />} />
         <Route path="/analitica" element={<AnaliticaPage />} />
       </Route>
