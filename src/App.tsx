@@ -13,6 +13,7 @@ import { RentabilidadPage } from '@/pages/Rentabilidad'; // <-- NUEVO
 import { AnaliticaPage } from '@/pages/Analitica'; // <-- NUEVO
 import { MarketingPage } from '@/pages/Marketing'
 import { SocialInbox } from '@/pages/SocialInbox';
+import { ConfirmarEntregaPage } from "@/pages/ConfirmarEntrega";
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="/sistema" element={<SistemaPage />} />
         <Route path="/marketing" element={<MarketingPage />} />
         <Route path="/social-inbox" element={<SocialInbox />} />
+        <Route path="/entregar/:id" element={<ConfirmarEntregaPage />} />
         
         {/* NUEVAS RUTAS */}
         <Route path="/rentabilidad" element={<RentabilidadPage />} />
