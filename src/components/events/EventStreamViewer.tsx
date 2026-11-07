@@ -202,18 +202,38 @@ grant select, insert on os.events to anon, authenticated, service_role;
 grant select on os.event_types, os.state_event_map, os.event_consumers to anon, authenticated, service_role;
 grant execute on function os.emit_event to anon, authenticated, service_role;
 
+drop policy if exists "os_events_read" on os.events;
+drop policy if exists "os_events_insert" on os.events;
+drop policy if exists "os_event_types_read" on os.event_types;
+drop policy if exists "os_state_event_map_read" on os.state_event_map;
+drop policy if exists "os_event_consumers_read" on os.event_consumers;
+
 create policy "os_events_read" on os.events for select using (true);
 create policy "os_events_insert" on os.events for insert with check (true);
 create policy "os_event_types_read" on os.event_types for select using (true);
 create policy "os_state_event_map_read" on os.state_event_map for select using (true);
 create policy "os_event_consumers_read" on os.event_consumers for select using (true);
 
+create or replace view public.os_events as select * from os.events;
+create or replace view public.os_event_types as select * from os.event_types;
+create or replace view public.os_event_consumers as select * from os.event_consumers;
+
+grant select, insert on public.os_events to anon, authenticated, service_role;
+grant select on public.os_event_types to anon, authenticated, service_role;
+grant select on public.os_event_consumers to anon, authenticated, service_role;
+
 do $$
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    execute 'alter publication supabase_realtime add table os.events';
+    if not exists (
+      select 1 from pg_publication_tables 
+      where pubname = 'supabase_realtime' 
+        and schemaname = 'os' 
+        and tablename = 'events'
+    ) then
+      alter publication supabase_realtime add table os.events;
+    end if;
   end if;
-exception when duplicate_object then null;
 end $$;`;
 
 export function EventStreamViewer() {

@@ -158,38 +158,46 @@ export async function fetchOsEvents(limit = 100): Promise<{
   error?: string;
 }> {
   try {
-    // Intentamos consultar el schema 'os'
-    const { data, error } = await (supabase as any)
+    // 1. Intentamos consultar la vista pública public.os_events (óptimo para Supabase API)
+    const publicRes = await supabase
+      .from('os_events')
+      .select('*')
+      .order('occurred_at', { ascending: false })
+      .limit(limit);
+
+    if (!publicRes.error && publicRes.data) {
+      return { events: publicRes.data as OsEvent[], isRealDb: true };
+    }
+
+    // 2. Intentamos con el schema directo os.events
+    const schemaRes = await (supabase as any)
       .schema('os')
       .from('events')
       .select('*')
       .order('occurred_at', { ascending: false })
       .limit(limit);
 
-    if (error) {
-      // Fallback a schema público por si el usuario lo creó en public.events
-      const fallback = await supabase
-        .from('events')
-        .select('*')
-        .order('occurred_at', { ascending: false })
-        .limit(limit);
-
-      if (!fallback.error && fallback.data && fallback.data.length > 0) {
-        return { events: fallback.data as OsEvent[], isRealDb: true };
-      }
-
-      return {
-        events: localEvents.slice(0, limit),
-        isRealDb: false,
-        error: `Supabase: ${error.message} (Mostrando vista previa local hasta ejecutar el SQL del Sprint 1)`
-      };
+    if (!schemaRes.error && schemaRes.data) {
+      return { events: schemaRes.data as OsEvent[], isRealDb: true };
     }
 
-    if (data && Array.isArray(data)) {
-      return { events: data as OsEvent[], isRealDb: true };
+    // 3. Fallback a tabla events en public
+    const fallback = await supabase
+      .from('events')
+      .select('*')
+      .order('occurred_at', { ascending: false })
+      .limit(limit);
+
+    if (!fallback.error && fallback.data) {
+      return { events: fallback.data as OsEvent[], isRealDb: true };
     }
 
-    return { events: localEvents.slice(0, limit), isRealDb: false };
+    const lastErr = publicRes.error?.message || schemaRes.error?.message || 'Pendiente de ejecutar migración en Supabase';
+    return {
+      events: localEvents.slice(0, limit),
+      isRealDb: false,
+      error: `Supabase: ${lastErr} (Mostrando vista previa local hasta ejecutar el SQL)`
+    };
   } catch (err: any) {
     return {
       events: localEvents.slice(0, limit),

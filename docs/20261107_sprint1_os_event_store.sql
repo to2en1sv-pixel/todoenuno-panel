@@ -1,15 +1,12 @@
 -- ============================================================================
--- TODOENUNO OS — SPRINT 1: OS EVENT STORE (VERSIÓN COMPLETA Y OFICIAL)
+-- TODOENUNO OS — SPRINT 1: OS EVENT STORE (VERSIÓN DEFINITIVA E IDEMPOTENTE)
 -- Archivo: 20261107_sprint1_os_event_store.sql
 -- Ejecutar en: Supabase SQL Editor
 --
--- Alcance oficial:
---   Paso 1: Schema os
---   Paso 2: os.events (con índice GIN y anti-duplicados)
---   Paso 3: os.event_types, os.state_event_map y os.event_consumers
---   Paso 4: Producer con trigger idempotente sobre public.whatsapp_orders
---           (soportando estados: nuevo, por_empacar, en_camino, entregado, cancelado)
---   Paso 5: Emisor central os.emit_event, RLS, permisos y Realtime para el Viewer
+-- Correcciones aplicadas:
+--   1. DROP POLICY IF EXISTS antes de crear políticas (Evita ERROR 42710)
+--   2. Vistas públicas (public.os_events) para compatibilidad 100% inmediata con PostgREST
+--   3. Verificación de pg_publication_tables para Realtime sin errores de duplicidad
 -- ============================================================================
 
 -- ============================================================================
@@ -108,9 +105,6 @@ on conflict (consumer_name) do nothing;
 
 -- ============================================================================
 -- PASO 3C: Mapa Estado → Evento (os.state_event_map)
--- Soporta los estados exactos del tablero Kanban de TodoEnUno:
--- 'nuevo', 'por_empacar', 'en_camino', 'entregado', 'cancelado'
--- y variantes históricas 'confirmado', 'enviado', 'cancelada'
 -- ============================================================================
 create table if not exists os.state_event_map (
   source_table text not null,
@@ -233,69 +227,57 @@ create trigger trg_whatsapp_orders_events
   for each row execute function os.whatsapp_orders_events();
 
 -- ============================================================================
--- PASO 5B: Permisos y RLS
+-- PASO 5B: Permisos y RLS (Con DROP previo para evitar error 42710)
 -- ============================================================================
 alter table os.events          enable row level security;
 alter table os.event_types     enable row level security;
 alter table os.state_event_map enable row level security;
 alter table os.event_consumers enable row level security;
 
--- Concesión de permisos a usuarios autenticados y anónimos (para panel frontend)
+-- Permisos sobre schema y tablas
 grant usage on schema os to anon, authenticated, service_role;
 grant select, insert on os.events to anon, authenticated, service_role;
 grant select on os.event_types, os.state_event_map, os.event_consumers to anon, authenticated, service_role;
 grant execute on function os.emit_event to anon, authenticated, service_role;
 
--- Políticas de lectura abierta para el panel
+-- Eliminar políticas si existen antes de crearlas
 drop policy if exists "os_events_read" on os.events;
-create policy "os_events_read" on os.events for select using (true);
-
 drop policy if exists "os_events_insert" on os.events;
-create policy "os_events_insert" on os.events for insert with check (true);
-
 drop policy if exists "os_event_types_read" on os.event_types;
-create policy "os_event_types_read" on os.event_types for select using (true);
-
 drop policy if exists "os_state_event_map_read" on os.state_event_map;
-create policy "os_state_event_map_read" on os.state_event_map for select using (true);
-
 drop policy if exists "os_event_consumers_read" on os.event_consumers;
+
+create policy "os_events_read"          on os.events          for select using (true);
+create policy "os_events_insert"        on os.events          for insert with check (true);
+create policy "os_event_types_read"     on os.event_types     for select using (true);
+create policy "os_state_event_map_read" on os.state_event_map for select using (true);
 create policy "os_event_consumers_read" on os.event_consumers for select using (true);
 
 -- ============================================================================
--- PASO 5C: Habilitar Realtime para el Visor de Eventos
+-- PASO 5C: Vistas en 'public' para compatibilidad total con PostgREST
+-- Permite consultar directamente supabase.from('os_events') sin configurar schemas
+-- ============================================================================
+create or replace view public.os_events as select * from os.events;
+create or replace view public.os_event_types as select * from os.event_types;
+create or replace view public.os_event_consumers as select * from os.event_consumers;
+
+grant select, insert on public.os_events to anon, authenticated, service_role;
+grant select on public.os_event_types to anon, authenticated, service_role;
+grant select on public.os_event_consumers to anon, authenticated, service_role;
+
+-- ============================================================================
+-- PASO 5D: Habilitar Realtime para el Visor de Eventos
 -- ============================================================================
 do $$
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    -- Remover primero si existía para evitar duplicado
-    begin
-      execute 'alter publication supabase_realtime add table os.events';
-    exception when duplicate_object then
-      null;
-    end;
+    if not exists (
+      select 1 from pg_publication_tables 
+      where pubname = 'supabase_realtime' 
+        and schemaname = 'os' 
+        and tablename = 'events'
+    ) then
+      alter publication supabase_realtime add table os.events;
+    end if;
   end if;
 end $$;
-
--- ============================================================================
--- BACKFILL HISTÓRICO OPCIONAL (Convertir pedidos existentes a order.created)
--- Ejecutar si deseas poblar el histórico de eventos con tus pedidos actuales:
--- ============================================================================
--- select os.emit_event(
---   'order.created',
---   'whatsapp_orders',
---   id::text,
---   'whatsapp_orders:' || id::text || ':order.created:backfill',
---   jsonb_build_object(
---     'order_id',       id,
---     'pedido_codigo',  coalesce(pedido_codigo, 'PED-' || substr(id::text, 1, 8)),
---     'nombre_cliente', nombre_cliente,
---     'telefono',       telefono,
---     'sku',            sku,
---     'total',          total,
---     'estado',         estado,
---     'codigo_anuncio', codigo_anuncio,
---     'backfilled',     true
---   )
--- )
--- from public.whatsapp_orders;
