@@ -14,6 +14,7 @@ import { AnaliticaPage } from '@/pages/Analitica';
 import { MarketingPage } from '@/pages/Marketing';
 import { SocialInbox } from '@/pages/SocialInbox';
 import { ConfirmarEntregaPage } from "@/pages/ConfirmarEntrega";
+import { EventStreamPage } from '@/pages/EventStreamPage';
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
       {/* 👇 ESTAS RUTAS ESTÁN ADENTRO, POR ESO SÍ TIENEN SIDEBAR */}
       <Route element={<Layout />}>
         <Route path="/" element={<HoyPage />} />
+        <Route path="/event-stream" element={<EventStreamPage />} />
         <Route path="/unichat" element={<UniChatPage />} />
         <Route path="/catalogo" element={<CatalogoPage />} />
         <Route path="/cola" element={<ColaPage />} />

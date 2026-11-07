@@ -177,6 +177,37 @@ export function PedidosPage() {
       setPedidos(previos);
       setError(`No se pudo mover el pedido: ${error.message}`);
     } else {
+      // Emitir evento al OS Event Store
+      try {
+        const { emitOsEvent } = await import('@/lib/osEvents');
+        const eventMap: Record<string, string> = {
+          nuevo: 'order.created',
+          por_empacar: 'order.confirmed',
+          en_camino: 'order.shipped',
+          entregado: 'order.delivered',
+          cancelado: 'order.cancelled'
+        };
+        const eventType = eventMap[destino] || 'order.confirmed';
+
+        emitOsEvent({
+          type: eventType,
+          source_table: 'whatsapp_orders',
+          source_id: pedido.id,
+          payload: {
+            order_id: pedido.id,
+            nombre_cliente: pedido.nombre_cliente,
+            telefono: pedido.telefono,
+            sku: pedido.sku,
+            total: pedido.total,
+            estado_anterior: pedido.estado,
+            estado: destino,
+            codigo_anuncio: pedido.codigo_anuncio
+          }
+        });
+      } catch {
+        // Ignorar error en emisión secundaria
+      }
+
       await cargarPedidos(true);
     }
     setMoviendoId(null);

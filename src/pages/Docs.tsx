@@ -27,13 +27,74 @@ export function DocsPage() {
     loadDocs();
   }, []);
 
+  const STARTER_DOCS: Doc[] = [
+    {
+      id: 'doc-os-roadmap',
+      titulo: 'Arquitectura: Núcleo OS Events (8 Fases)',
+      categoria: 'Roadmap',
+      estado: 'En Progreso',
+      updated_at: new Date().toISOString(),
+      contenido: `# TODOENUNO OS — NÚCLEO DE EVENTOS
+
+Principio Rector:
+"No construyamos OS Events como una tabla. Construyámoslo como el núcleo de TodoEnUno OS."
+
+Ciclo de Vida Unificado:
+1. Cliente escribió (chat.message.received)
+2. Lead generado (lead.generated)
+3. Pedido creado (order.created)
+4. Pedido confirmado (order.confirmed)
+5. Pedido enviado (order.shipped)
+6. Pedido entregado (order.delivered)
+7. Dinero cobrado (finance.income.created)
+
+Roadmap Oficial de 8 Fases:
+- FASE 0: Auditoría y Congelación (docs/os-events-map.md)
+- FASE 1: Crear OS Event Store (schema os, os.events, os.event_types, os.event_consumers)
+- FASE 2: Normalización de Lenguaje Único (order.*, chat.*, marketing.*, supplier.*)
+- FASE 3: Order Event Producer (trigger whatsapp_orders)
+- FASE 4: Marketing Event Producer (gastos_publicidad, fb_leads, post_queue)
+- FASE 5: Supplier Event Producer (proveedores, licitaciones)
+- FASE 6: Money Engine (Finance Projector consumidor)
+- FASE 7: OS Memory (memory.facts, daily snapshots)
+- FASE 8: Intelligence Layer (Copilot & Agentes IA)`
+    },
+    {
+      id: 'doc-sprint1-guide',
+      titulo: 'Sprint 1: Guía de Despliegue SQL y Pruebas',
+      categoria: 'Fase',
+      estado: 'Completado',
+      updated_at: new Date().toISOString(),
+      contenido: `# SPRINT 1 — ESPECIFICACIÓN Y GUÍA DE ACTIVACIÓN
+
+Archivos creados en el repositorio:
+1. docs/20261107_sprint1_os_event_store.sql
+2. docs/os-events-map.md
+3. src/lib/osEvents.ts
+4. src/components/events/EventStreamViewer.tsx
+5. src/pages/EventStreamPage.tsx
+
+Paso a Paso en Supabase:
+1. Ir al Dashboard de Supabase -> SQL Editor.
+2. Pegar el contenido del script 'docs/20261107_sprint1_os_event_store.sql'.
+3. Ejecutar (Run).
+4. Verificar en el panel en la ruta /event-stream o en Sistema -> Event Stream.`
+    }
+  ];
+
   async function loadDocs() {
-    const { data } = await supabase.from('panel_docs').select('*').order('updated_at', { ascending: false });
-    if (data) {
-      setDocs(data);
-      if (data.length > 0 && !selectedDoc) {
-        handleSelect(data[0]);
+    try {
+      const { data } = await supabase.from('panel_docs').select('*').order('updated_at', { ascending: false });
+      if (data && data.length > 0) {
+        setDocs(data);
+        if (!selectedDoc) handleSelect(data[0]);
+      } else {
+        setDocs(STARTER_DOCS);
+        if (!selectedDoc) handleSelect(STARTER_DOCS[0]);
       }
+    } catch {
+      setDocs(STARTER_DOCS);
+      if (!selectedDoc) handleSelect(STARTER_DOCS[0]);
     }
     setLoading(false);
   }

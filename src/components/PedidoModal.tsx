@@ -120,6 +120,23 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
       return;
     }
 
+    // Emitir evento al OS Event Store para trazabilidad en vivo
+    try {
+      const { emitOsEvent } = await import('@/lib/osEvents');
+      emitOsEvent({
+        type: pedido ? 'order.confirmed' : 'order.created',
+        source_table: 'whatsapp_orders',
+        source_id: pedido ? pedido.id : `new-${Date.now()}`,
+        payload: {
+          ...payload,
+          estado: pedido ? (pedido.estado || 'por_empacar') : 'nuevo',
+          nombre_cliente: form.nombre_cliente.trim()
+        }
+      });
+    } catch {
+      // Ignorar si falla emisión secundaria
+    }
+
     onSaved();
     onClose();
   };

@@ -1,0 +1,6 @@
+{
+  "name": "TODOENUNO OS",
+  "description": "Panel operativo unificado de TodoEnUno OS con OS Event Store, gestión de pedidos, marketing, finanzas y analítica.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
