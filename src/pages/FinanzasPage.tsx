@@ -36,7 +36,8 @@ import {
   fetchMoneyTransactions, 
   addManualTransaction, 
   saveBudget,
-  updateCashAccountBalance
+  updateCashAccountBalance,
+  deleteMoneyTransaction
 } from '@/lib/finance';
 import type { 
   CashAccount, 
@@ -324,6 +325,28 @@ export function FinanzasPage() {
     setIsSavingAdjust(false);
     setShowAdjustModal(false);
     await loadFinanceData(true);
+  };
+
+  // Manejo de eliminación de transacciones
+  const [deletingTxId, setDeletingTxId] = useState<number | string | null>(null);
+
+  const handleDeleteTransaction = async (tx: MoneyTransaction) => {
+    const desc = tx.descripcion || 'esta transacción';
+    const monto = Number(tx.monto).toFixed(2);
+    const signo = tx.tipo === 'income' ? '+' : '-';
+    const revertirTexto = tx.tipo === 'expense' 
+      ? `Se devolverán $${monto} al saldo de la cuenta.` 
+      : `Se restarán $${monto} del saldo de la cuenta.`;
+
+    const confirmado = window.confirm(
+      `¿Deseas eliminar la transacción "${desc}" (${signo}$${monto})?\n\n${revertirTexto}`
+    );
+    if (!confirmado) return;
+
+    setDeletingTxId(tx.id);
+    await deleteMoneyTransaction(tx.id);
+    await loadFinanceData(true);
+    setDeletingTxId(null);
   };
 
   // Carga de datos
@@ -783,8 +806,18 @@ export function FinanzasPage() {
                     </div>
                   </div>
 
-                  <div className={`font-mono font-bold text-sm shrink-0 ${tx.tipo === 'income' ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {tx.tipo === 'income' ? '+' : '-'}${Number(tx.monto).toFixed(2)}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className={`font-mono font-bold text-sm ${tx.tipo === 'income' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                      {tx.tipo === 'income' ? '+' : '-'}${Number(tx.monto).toFixed(2)}
+                    </div>
+                    <button
+                      onClick={() => handleDeleteTransaction(tx)}
+                      disabled={deletingTxId === tx.id}
+                      title="Eliminar movimiento y revertir saldo"
+                      className="p-1.5 text-[var(--mu)] hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -939,12 +972,13 @@ export function FinanzasPage() {
                     <th className="py-3 px-4">Categoría</th>
                     <th className="py-3 px-4">Origen</th>
                     <th className="py-3 px-4 text-right">Monto</th>
+                    <th className="py-3 px-4 text-center">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--bd)]">
                   {filteredTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center tx-mu">
+                      <td colSpan={7} className="py-8 text-center tx-mu">
                         No se encontraron transacciones con los filtros seleccionados.
                       </td>
                     </tr>
@@ -974,6 +1008,16 @@ export function FinanzasPage() {
                           tx.tipo === 'income' ? 'text-emerald-500' : 'text-rose-500'
                         }`}>
                           {tx.tipo === 'income' ? '+' : '-'}${Number(tx.monto).toFixed(2)}
+                        </td>
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <button
+                            onClick={() => handleDeleteTransaction(tx)}
+                            disabled={deletingTxId === tx.id}
+                            title="Eliminar transacción y revertir saldo"
+                            className="p-1.5 text-[var(--mu)] hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </td>
                       </tr>
                     ))

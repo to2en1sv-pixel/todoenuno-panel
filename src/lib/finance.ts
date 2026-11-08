@@ -297,21 +297,6 @@ export async function addManualTransaction(params: {
         p_delta: delta
       });
     }
-
-    // Si es gasto de pauta, sincronizar también con gastos_publicidad (para Rentabilidad y ROAS)
-    if (params.categoria === 'pauta_publicidad') {
-      try {
-        await supabase.from('gastos_publicidad').insert({
-          fecha: params.fecha,
-          codigo_anuncio: (params.codigo_anuncio || 'META_AD').toUpperCase(),
-          plataforma: 'Meta',
-          monto: newTx.monto,
-          notas: params.descripcion
-        });
-      } catch {
-        // ignorar si tabla no disponible
-      }
-    }
   } catch {
     // local fallback
   }
@@ -386,4 +371,74 @@ export async function saveBudget(budget: Omit<Budget, 'id'> & { id?: string }): 
   }
 
   return true;
+}
+
+/**
+ * Eliminar una transacción y revertir el saldo de la cuenta afectada
+ */
+export async function deleteMoneyTransaction(id: number | string): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 1. Obtener los datos de la transacción antes de eliminarla para conocer el monto y la cuenta
+    let txToDelete: MoneyTransaction | undefined = localTransactions.find(t => String(t.id) === String(id));
+
+    try {
+      const { data } = await supabase
+        .from('finance_money_transactions')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (data) {
+        txToDelete = data as MoneyTransaction;
+      }
+    } catch {
+      // continuar con txToDelete local
+    }
+
+    // 2. Eliminar de Supabase
+    try {
+      await supabase.from('finance_money_transactions').delete().eq('id', id);
+    } catch {
+      // continuar
+    }
+
+    // 3. Revertir saldo de la cuenta:
+    //    Si era gasto (-), revertir suma (+). Si era ingreso (+), revertir resta (-).
+    if (txToDelete) {
+      const montoNum = Number(txToDelete.monto) || 0;
+      const deltaReversion = txToDelete.tipo === 'income' ? -montoNum : montoNum;
+
+      try {
+        await (supabase as any).rpc('update_account_balance', {
+          p_account_id: txToDelete.account_id,
+          p_delta: deltaReversion
+        });
+      } catch {
+        // fallback
+      }
+
+      // Revertir localmente
+      localAccounts = localAccounts.map(acc => {
+        if (acc.id === txToDelete!.account_id) {
+          return { ...acc, saldo_actual: acc.saldo_actual + deltaReversion };
+        }
+        return acc;
+      });
+
+      // Si estaba enlazada a un gasto de publicidad, opcionalmente limpiar de gastos_publicidad
+      if (txToDelete.source_table === 'gastos_publicidad' && txToDelete.source_id) {
+        try {
+          await supabase.from('gastos_publicidad').delete().eq('id', txToDelete.source_id);
+        } catch {
+          // continuar
+        }
+      }
+    }
+
+    // 4. Actualizar store en memoria
+    localTransactions = localTransactions.filter(t => String(t.id) !== String(id));
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Error al eliminar transacción' };
+  }
 }
