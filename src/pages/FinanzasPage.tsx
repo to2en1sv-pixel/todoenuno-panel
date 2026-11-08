@@ -33,7 +33,8 @@ import {
   fetchBudgets, 
   fetchMoneyTransactions, 
   addManualTransaction, 
-  saveBudget 
+  saveBudget,
+  updateCashAccountBalance
 } from '@/lib/finance';
 import type { 
   CashAccount, 
@@ -275,6 +276,22 @@ export function FinanzasPage() {
   // Filtros de transacciones
   const [filterTipo, setFilterTipo] = useState<'all' | 'income' | 'expense' | 'manual'>('all');
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Modal de Ajuste de Saldo de Cuenta
+  const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const [adjustAccount, setAdjustAccount] = useState<CashAccount | null>(null);
+  const [adjustSaldo, setAdjustSaldo] = useState('');
+  const [isSavingAdjust, setIsSavingAdjust] = useState(false);
+
+  const handleSaveAdjust = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adjustAccount || !adjustSaldo) return;
+    setIsSavingAdjust(true);
+    await updateCashAccountBalance(adjustAccount.id, parseFloat(adjustSaldo));
+    setIsSavingAdjust(false);
+    setShowAdjustModal(false);
+    await loadFinanceData(true);
+  };
 
   // Carga de datos
   const loadFinanceData = async (silent = false) => {
@@ -606,7 +623,16 @@ export function FinanzasPage() {
                   </div>
 
                   <div className="mt-3 pt-3 border-t border-[var(--bd)] flex items-center justify-between text-[11px] tx-mu">
-                    <span>Estado: Activa</span>
+                    <button
+                      onClick={() => {
+                        setAdjustAccount(acc);
+                        setAdjustSaldo(String(acc.saldo_actual));
+                        setShowAdjustModal(true);
+                      }}
+                      className="hover:text-[var(--tx)] hover:underline flex items-center gap-1 font-medium transition-colors"
+                    >
+                      <Pencil size={11} /> Ajustar Saldo
+                    </button>
                     <button
                       onClick={() => {
                         setManualAccountId(acc.id);
@@ -1198,6 +1224,64 @@ export function FinanzasPage() {
                 Cerrar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: AJUSTAR SALDO DE CUENTA */}
+      {showAdjustModal && adjustAccount && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setShowAdjustModal(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+          >
+            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+              <h3 className="font-bold text-sm">Ajustar Saldo de Cuenta</h3>
+              <button onClick={() => setShowAdjustModal(false)} className="p-1 rounded-lg">
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAdjust} className="p-5 space-y-4">
+              <div>
+                <span className="text-xs font-bold text-[var(--tx)] block">{adjustAccount.nombre}</span>
+                <span className="text-[10px] tx-mu">Define el saldo real actual en tu caja o banco.</span>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Nuevo Saldo ($) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={adjustSaldo}
+                  onChange={e => setAdjustSaldo(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-lg font-bold outline-none"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAdjustModal(false)}
+                  className="px-3 py-1.5 border border-[var(--bd)] rounded-xl text-xs font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingAdjust}
+                  className="px-4 py-1.5 bg-[var(--ac)] text-white font-bold rounded-xl text-xs flex items-center gap-1.5"
+                >
+                  {isSavingAdjust ? 'Guardando...' : 'Actualizar Saldo'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

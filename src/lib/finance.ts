@@ -159,12 +159,12 @@ let localTransactions = [...DEFAULT_TRANSACTIONS];
 export async function fetchCashAccounts(): Promise<{ accounts: CashAccount[]; isRealDb: boolean }> {
   try {
     const res = await supabase.from('finance_cash_accounts').select('*').order('nombre');
-    if (!res.error && res.data && res.data.length > 0) {
+    if (!res.error && res.data) {
       return { accounts: res.data as CashAccount[], isRealDb: true };
     }
 
     const schemaRes = await (supabase as any).schema('finance').from('cash_accounts').select('*').order('nombre');
-    if (!schemaRes.error && schemaRes.data && schemaRes.data.length > 0) {
+    if (!schemaRes.error && schemaRes.data) {
       return { accounts: schemaRes.data as CashAccount[], isRealDb: true };
     }
   } catch {
@@ -179,12 +179,12 @@ export async function fetchCashAccounts(): Promise<{ accounts: CashAccount[]; is
 export async function fetchBudgets(periodo = currentMonth()): Promise<{ budgets: Budget[]; isRealDb: boolean }> {
   try {
     const res = await supabase.from('finance_budgets').select('*').eq('periodo', periodo);
-    if (!res.error && res.data && res.data.length > 0) {
+    if (!res.error && res.data) {
       return { budgets: res.data as Budget[], isRealDb: true };
     }
 
     const schemaRes = await (supabase as any).schema('finance').from('budgets').select('*').eq('periodo', periodo);
-    if (!schemaRes.error && schemaRes.data && schemaRes.data.length > 0) {
+    if (!schemaRes.error && schemaRes.data) {
       return { budgets: schemaRes.data as Budget[], isRealDb: true };
     }
   } catch {
@@ -205,7 +205,7 @@ export async function fetchMoneyTransactions(limit = 100): Promise<{ transaction
       .order('created_at', { ascending: false })
       .limit(limit);
 
-    if (!res.error && res.data && res.data.length > 0) {
+    if (!res.error && res.data) {
       return { transactions: res.data as MoneyTransaction[], isRealDb: true };
     }
 
@@ -217,13 +217,26 @@ export async function fetchMoneyTransactions(limit = 100): Promise<{ transaction
       .order('created_at', { ascending: false })
       .limit(limit);
 
-    if (!schemaRes.error && schemaRes.data && schemaRes.data.length > 0) {
+    if (!schemaRes.error && schemaRes.data) {
       return { transactions: schemaRes.data as MoneyTransaction[], isRealDb: true };
     }
   } catch {
     // fallback
   }
   return { transactions: localTransactions.slice(0, limit), isRealDb: false };
+}
+
+/**
+ * Ajustar saldo de una cuenta manualmente
+ */
+export async function updateCashAccountBalance(id: string, nuevoSaldo: number): Promise<boolean> {
+  try {
+    await supabase.from('finance_cash_accounts').update({ saldo_actual: nuevoSaldo }).eq('id', id);
+  } catch {
+    // fallback
+  }
+  localAccounts = localAccounts.map(a => a.id === id ? { ...a, saldo_actual: nuevoSaldo } : a);
+  return true;
 }
 
 /**
