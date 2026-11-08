@@ -23,6 +23,7 @@ const links = [
   { to: '/', label: 'Hoy' },
   { to: '/pedidos', label: 'Pedidos', icon: ClipboardList },
   { to: '/event-stream', label: 'Event Stream', icon: Activity, isNew: true },
+  { to: '/finanzas', label: 'Finanzas & Budget', icon: Wallet },
   { to: '/rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
   { to: '/analitica', label: 'Analítica', icon: PieChart },
   { to: '/marketing', label: 'Pricing & Promo', icon: Megaphone },
@@ -32,7 +33,6 @@ const links = [
   { to: '/cola', label: 'Cola' }, 
   { to: '/proveedores', label: 'Proveedores', icon: Store },
   { to: '/docs', label: 'Docs & Roadmap', icon: FileText }, 
-  { to: '/pagos', label: 'Pagos', icon: Wallet },
   { to: '/sistema', label: 'Sistema', icon: Server }
 ];
 
