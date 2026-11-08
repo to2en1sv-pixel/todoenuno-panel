@@ -560,8 +560,26 @@ export function CatalogoPage() {
             </div>
           )}
           {filteredProductos.map(p => {
-            const stockDeEste = stockItems.find(s => s.template_id === String(p.template_id) || s.sku === p.sku);
-            const disponible = stockDeEste ? stockDeEste.stock_disponible : (inv.data?.find(i => i.sku === p.sku)?.qty ?? 0);
+            // Buscar todas las variantes asociadas a este producto
+            const variantesDeEste = (variantes.data || []).filter(v => String(v.template_id) === String(p.template_id));
+            const skusDeEste = new Set(variantesDeEste.map(v => v.sku).filter(Boolean));
+
+            let disponible = 0;
+            // Sumar stock nativo por template_id o por SKU de variante
+            stockItems.forEach(s => {
+              if (String(s.template_id) === String(p.template_id) || (s.sku && skusDeEste.has(s.sku))) {
+                disponible += Number(s.stock_disponible) || 0;
+              }
+            });
+
+            // Fallback a inv.data si stockItems aún no lo tiene indexado
+            if (disponible === 0 && skusDeEste.size > 0 && inv.data) {
+              inv.data.forEach(i => {
+                if (skusDeEste.has(i.sku)) {
+                  disponible += Number(i.qty) || 0;
+                }
+              });
+            }
 
             return (
               <div 
@@ -570,11 +588,29 @@ export function CatalogoPage() {
                 className="bg-cd border border-[var(--bd)] rounded-2xl p-3 flex flex-col justify-between cursor-pointer hover:border-[var(--ac)] hover:shadow-md transition-all group"
               >
                 <div>
-                  <div className="aspect-square bg-sf rounded-xl overflow-hidden relative">
+                  <div className="aspect-square bg-sf rounded-xl overflow-hidden relative flex items-center justify-center">
                     {p.image_url ? (
-                      <img src={p.image_url} alt={p.nombre_base || ''} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                      <>
+                        <img 
+                          src={p.image_url} 
+                          alt="" 
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const fb = e.currentTarget.parentElement?.querySelector('.img-fallback') as HTMLElement;
+                            if (fb) fb.classList.remove('hidden');
+                          }}
+                        />
+                        <div className="img-fallback w-full h-full hidden flex-col items-center justify-center text-3xl bg-gradient-to-br from-sf to-cd">
+                          <span>📦</span>
+                          <span className="text-[9px] font-mono tx-mu mt-1">Sin imagen</span>
+                        </div>
+                      </>
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-4xl">📦</div>
+                      <div className="w-full h-full flex flex-col items-center justify-center text-3xl bg-gradient-to-br from-sf to-cd">
+                        <span>📦</span>
+                        <span className="text-[9px] font-mono tx-mu mt-1">Sin imagen</span>
+                      </div>
                     )}
                     <div className="absolute top-2 right-2">
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
@@ -1086,9 +1122,23 @@ export function CatalogoPage() {
             <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
               <div className="flex gap-4">
                 {selectedProduct.image_url ? (
-                  <img src={selectedProduct.image_url} className="w-24 h-24 rounded-2xl object-cover bg-sf border border-[var(--bd)]" />
+                  <div className="w-24 h-24 rounded-2xl bg-sf border border-[var(--bd)] overflow-hidden shrink-0 relative flex items-center justify-center">
+                    <img 
+                      src={selectedProduct.image_url} 
+                      alt=""
+                      className="w-full h-full object-cover" 
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        const fb = e.currentTarget.parentElement?.querySelector('.drawer-img-fb') as HTMLElement;
+                        if (fb) fb.classList.remove('hidden');
+                      }}
+                    />
+                    <div className="drawer-img-fb w-full h-full hidden flex-col items-center justify-center text-3xl bg-sf">
+                      <span>📦</span>
+                    </div>
+                  </div>
                 ) : (
-                  <div className="w-24 h-24 rounded-2xl bg-sf border border-[var(--bd)] flex items-center justify-center text-4xl">📦</div>
+                  <div className="w-24 h-24 rounded-2xl bg-sf border border-[var(--bd)] flex items-center justify-center text-3xl shrink-0">📦</div>
                 )}
                 <div>
                   <div className="text-[11px] mono tx-mu">#{selectedProduct.template_id}</div>
