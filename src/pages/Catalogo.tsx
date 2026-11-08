@@ -76,19 +76,21 @@ create table if not exists inventory.kardex (
   created_at       timestamptz not null default now()
 );
 
--- Migración inicial desde inventory_cache y productos_variantes
+-- Migración inicial desde inventory_cache y productos_variantes (con agrupación anti-duplicados)
 do $$
 begin
   if exists (select from pg_tables where schemaname = 'public' and tablename = 'inventory_cache') then
     insert into inventory.stock (sku, nombre, stock_fisico, updated_at)
     select 
       ic.sku,
-      coalesce(p.nombre_base, ic.sku) as nombre,
-      greatest(coalesce(ic.qty, 0), 0) as stock_fisico,
+      coalesce(max(p.nombre_base), ic.sku) as nombre,
+      greatest(sum(coalesce(ic.qty, 0)), 0) as stock_fisico,
       now()
     from public.inventory_cache ic
     left join public.productos_variantes pv on pv.sku = ic.sku
     left join public.productos p on p.template_id = pv.template_id
+    where ic.sku is not null and trim(ic.sku) <> ''
+    group by ic.sku
     on conflict (sku) do update set
       stock_fisico = excluded.stock_fisico,
       nombre = coalesce(inventory.stock.nombre, excluded.nombre);

@@ -62,17 +62,19 @@ create index if not exists inventory_kardex_created_at_idx on inventory.kardex (
 -- 3. Migración Automática Inicial: Poblar inventory.stock desde inventory_cache y productos si existen
 do $$
 begin
-  -- Si existe inventory_cache, poblamos el stock inicial
+  -- Si existe inventory_cache, poblamos el stock inicial agrupando por SKU para evitar duplicados
   if exists (select from pg_tables where schemaname = 'public' and tablename = 'inventory_cache') then
     insert into inventory.stock (sku, nombre, stock_fisico, updated_at)
     select 
       ic.sku,
-      coalesce(p.nombre_base, ic.sku) as nombre,
-      greatest(coalesce(ic.qty, 0), 0) as stock_fisico,
+      coalesce(max(p.nombre_base), ic.sku) as nombre,
+      greatest(sum(coalesce(ic.qty, 0)), 0) as stock_fisico,
       now()
     from public.inventory_cache ic
     left join public.productos_variantes pv on pv.sku = ic.sku
     left join public.productos p on p.template_id = pv.template_id
+    where ic.sku is not null and trim(ic.sku) <> ''
+    group by ic.sku
     on conflict (sku) do update set
       stock_fisico = excluded.stock_fisico,
       nombre = coalesce(inventory.stock.nombre, excluded.nombre);
@@ -83,12 +85,13 @@ begin
     insert into inventory.stock (sku, nombre, precio_venta, template_id)
     select 
       pv.sku,
-      coalesce(p.nombre_base, pv.sku) as nombre,
-      coalesce(pv.precio, 0.00) as precio_venta,
-      pv.template_id::text
+      coalesce(max(p.nombre_base), pv.sku) as nombre,
+      coalesce(max(pv.precio), 0.00) as precio_venta,
+      max(pv.template_id::text) as template_id
     from public.productos_variantes pv
     left join public.productos p on p.template_id = pv.template_id
-    where pv.sku is not null and pv.sku <> ''
+    where pv.sku is not null and trim(pv.sku) <> ''
+    group by pv.sku
     on conflict (sku) do update set
       precio_venta = coalesce(excluded.precio_venta, inventory.stock.precio_venta),
       template_id  = coalesce(excluded.template_id, inventory.stock.template_id);
