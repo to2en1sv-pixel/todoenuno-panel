@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { emitOsEvent } from '@/lib/osEvents'
 import { KpiCard } from '@/components/KpiCard'
 import {
   construirRoas,
@@ -108,7 +109,7 @@ export function RentabilidadPage() {
     setError(null)
     setExito(null)
 
-    const { error: insertError } = await supabase
+    const { data: insertData, error: insertError } = await supabase
       .from('gastos_publicidad')
       .insert({
         fecha: form.fecha,
@@ -117,12 +118,35 @@ export function RentabilidadPage() {
         monto,
         notas: form.notas.trim() || null,
       })
+      .select()
+      .single()
 
     if (insertError) {
       setError(insertError.message)
     } else {
       setExito(`Gasto de ${formatCurrency(monto)} registrado para ${codigo}.`)
       setForm({ ...FORM_INICIAL, fecha: form.fecha })
+
+      // Emitir evento al OS Event Store para Money Engine & trazabilidad
+      try {
+        await emitOsEvent({
+          type: 'marketing.ad.expense',
+          source_table: 'gastos_publicidad',
+          source_id: String(insertData?.id || codigo),
+          payload: {
+            gasto_id: insertData?.id,
+            campaign_id: codigo,
+            codigo_anuncio: codigo,
+            platform: form.plataforma.toLowerCase(),
+            amount: monto,
+            date: form.fecha,
+            notas: form.notas.trim() || null,
+          },
+        })
+      } catch (err) {
+        console.warn('Error emitiendo evento marketing.ad.expense:', err)
+      }
+
       await cargarDatos()
     }
 

@@ -25,7 +25,9 @@ import {
   CreditCard,
   Building,
   Coins,
-  RefreshCw
+  RefreshCw,
+  Megaphone,
+  ExternalLink
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { 
@@ -201,6 +203,36 @@ create trigger trg_finance_projector
   after insert on os.events
   for each row execute function finance.project_os_event();
 
+-- Trigger sobre gastos_publicidad (Marketing Event Producer)
+create or replace function os.gastos_publicidad_events() returns trigger
+language plpgsql security definer set search_path = os, public as $$
+begin
+  if TG_OP = 'INSERT' then
+    perform os.emit_event(
+      'marketing.ad.expense',
+      'gastos_publicidad',
+      NEW.id::text,
+      'gastos_publicidad:' || NEW.id || ':' || coalesce(NEW.fecha::text, current_date::text),
+      jsonb_build_object(
+        'gasto_id', NEW.id,
+        'campaign_id', coalesce(NEW.codigo_anuncio, 'META_AD'),
+        'codigo_anuncio', NEW.codigo_anuncio,
+        'platform', coalesce(NEW.plataforma, 'meta'),
+        'amount', NEW.monto,
+        'date', NEW.fecha,
+        'notas', NEW.notas
+      )
+    );
+  end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists trg_gastos_publicidad_events on public.gastos_publicidad;
+create trigger trg_gastos_publicidad_events
+  after insert on public.gastos_publicidad
+  for each row execute function os.gastos_publicidad_events();
+
 create or replace view public.finance_cash_accounts as select * from finance.cash_accounts;
 create or replace view public.finance_money_transactions as select * from finance.money_transactions;
 create or replace view public.finance_budgets as select * from finance.budgets;
@@ -260,6 +292,7 @@ export function FinanzasPage() {
   const [manualCategoria, setManualCategoria] = useState('gasto_manual');
   const [manualAccountId, setManualAccountId] = useState('caja_chica');
   const [manualFecha, setManualFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [manualCodigoAnuncio, setManualCodigoAnuncio] = useState('');
   const [isSavingManual, setIsSavingManual] = useState(false);
 
   // Modal de Presupuesto
@@ -342,12 +375,42 @@ export function FinanzasPage() {
     return { ingresos, egresos, utilidadNeta, margen };
   }, [transactions]);
 
+  // Presupuestos con cálculo reactivo del gasto real del mes
+  const budgetsWithRealSpent = useMemo(() => {
+    return budgets.map(b => {
+      const isMarketing = b.categoria.toLowerCase().includes('marketing') || b.categoria.toLowerCase().includes('pauta');
+      const isEnvios = b.categoria.toLowerCase().includes('envio') || b.categoria.toLowerCase().includes('logist');
+      const isEmpaque = b.categoria.toLowerCase().includes('empaque') || b.categoria.toLowerCase().includes('suministro');
+      const isOperativo = b.categoria.toLowerCase().includes('operat') || b.categoria.toLowerCase().includes('nomina');
+
+      let gastoReal = 0;
+      transactions.forEach(t => {
+        if (t.tipo !== 'expense') return;
+        const cat = (t.categoria || '').toLowerCase();
+        if (isMarketing && (cat.includes('pauta') || cat.includes('marketing') || t.account_id === 'tarjeta_pauta')) {
+          gastoReal += Number(t.monto) || 0;
+        } else if (isEnvios && (cat.includes('flete') || cat.includes('envio'))) {
+          gastoReal += Number(t.monto) || 0;
+        } else if (isEmpaque && (cat.includes('empaque') || cat.includes('bolsa') || cat.includes('suministro'))) {
+          gastoReal += Number(t.monto) || 0;
+        } else if (isOperativo && (cat.includes('nomina') || cat.includes('sueldo') || cat.includes('operat'))) {
+          gastoReal += Number(t.monto) || 0;
+        }
+      });
+
+      return {
+        ...b,
+        monto_gastado: gastoReal > 0 ? gastoReal : (b.monto_gastado || 0)
+      };
+    });
+  }, [budgets, transactions]);
+
   const presupuestoTotal = useMemo(() => {
-    const totalPresupuestado = budgets.reduce((sum, b) => sum + (b.monto_presupuestado || 0), 0);
-    const totalGastado = budgets.reduce((sum, b) => sum + (b.monto_gastado || 0), 0);
+    const totalPresupuestado = budgetsWithRealSpent.reduce((sum, b) => sum + (b.monto_presupuestado || 0), 0);
+    const totalGastado = budgetsWithRealSpent.reduce((sum, b) => sum + (b.monto_gastado || 0), 0);
     const pct = totalPresupuestado > 0 ? (totalGastado / totalPresupuestado) * 100 : 0;
     return { totalPresupuestado, totalGastado, pct };
-  }, [budgets]);
+  }, [budgetsWithRealSpent]);
 
   // Manejo de Registro Manual
   const handleSaveManualTransaction = async (e: React.FormEvent) => {
@@ -361,13 +424,15 @@ export function FinanzasPage() {
       categoria: manualCategoria,
       monto: parseFloat(manualMonto),
       descripcion: manualDescripcion,
-      fecha: manualFecha
+      fecha: manualFecha,
+      codigo_anuncio: manualCategoria === 'pauta_publicidad' ? manualCodigoAnuncio : undefined
     });
 
     setIsSavingManual(false);
     setShowManualModal(false);
     setManualMonto('');
     setManualDescripcion('');
+    setManualCodigoAnuncio('');
     await loadFinanceData(true);
   };
 
@@ -648,6 +713,46 @@ export function FinanzasPage() {
             </div>
           </div>
 
+          {/* Card de Conexión de Pauta Publicitaria Meta Ads */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-500/10 via-purple-500/5 to-transparent border border-purple-500/20 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-purple-500/20 text-purple-600 dark:text-purple-400">
+                <Megaphone size={20} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-sm text-[var(--tx)]">Conexión Pauta Publicitaria (Meta Ads / TikTok)</h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-600 dark:text-purple-300">
+                    Fase 4 Activa
+                  </span>
+                </div>
+                <p className="text-xs tx-mu mt-0.5">
+                  Los gastos en publicidad descuentan de la <strong>Tarjeta Débito Meta Ads</strong>, alimentan el <strong>Event Stream</strong> y calculan el ROAS por anuncio.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                onClick={() => {
+                  setManualTipo('expense');
+                  setManualCategoria('pauta_publicidad');
+                  setManualAccountId('tarjeta_pauta');
+                  setShowManualModal(true);
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+              >
+                <Plus size={14} /> Registrar Pauta
+              </button>
+              <a
+                href="/rentabilidad"
+                className="px-3.5 py-1.5 rounded-xl border border-[var(--bd)] bg-sf hover:bg-cd text-xs font-bold flex items-center gap-1.5 transition-colors"
+              >
+                Ver ROAS & Anuncios <ExternalLink size={12} />
+              </a>
+            </div>
+          </div>
+
           {/* Resumen rápido de últimos movimientos */}
           <div className="bg-cd border border-[var(--bd)] rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-4">
@@ -736,7 +841,7 @@ export function FinanzasPage() {
 
           {/* Lista de Presupuestos por Categoría */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {budgets.map(b => {
+            {budgetsWithRealSpent.map(b => {
               const gastado = b.monto_gastado || 0;
               const pct = b.monto_presupuestado > 0 ? (gastado / b.monto_presupuestado) * 100 : 0;
               const saldoRestante = b.monto_presupuestado - gastado;
@@ -1045,12 +1150,19 @@ export function FinanzasPage() {
                   <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Categoría</label>
                   <select
                     value={manualCategoria}
-                    onChange={e => setManualCategoria(e.target.value)}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setManualCategoria(val);
+                      if (val === 'pauta_publicidad') {
+                        setManualAccountId('tarjeta_pauta');
+                      }
+                    }}
                     className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
                   >
                     {manualTipo === 'expense' ? (
                       <>
                         <option value="gasto_manual">Gasto General</option>
+                        <option value="pauta_publicidad">📢 Pauta Publicitaria (Meta Ads / TikTok)</option>
                         <option value="flete_envio">Flete / Transporte</option>
                         <option value="empaque_suministros">Empaque / Bolsas</option>
                         <option value="nomina_sueldos">Nómina / Ayudante</option>
@@ -1067,6 +1179,24 @@ export function FinanzasPage() {
                   </select>
                 </div>
               </div>
+
+              {manualCategoria === 'pauta_publicidad' && (
+                <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] space-y-1">
+                  <label className="block text-[10px] uppercase font-bold text-purple-600 dark:text-purple-400">
+                    Código de Anuncio / Campaña
+                  </label>
+                  <input
+                    type="text"
+                    value={manualCodigoAnuncio}
+                    onChange={e => setManualCodigoAnuncio(e.target.value.toUpperCase())}
+                    placeholder="Ej. PROMO1, CAMP-EMS-01..."
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs uppercase outline-none font-mono font-bold"
+                  />
+                  <span className="text-[10px] tx-mu block">
+                    ✨ Se sincronizará automáticamente con el módulo de Rentabilidad & ROAS y afectará la Tarjeta Débito Meta Ads.
+                  </span>
+                </div>
+              )}
 
               <div>
                 <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Fecha</label>

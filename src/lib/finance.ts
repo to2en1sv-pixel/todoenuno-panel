@@ -249,6 +249,7 @@ export async function addManualTransaction(params: {
   monto: number;
   descripcion: string;
   fecha: string;
+  codigo_anuncio?: string;
   comprobante_url?: string;
 }): Promise<{ success: boolean; transaction: MoneyTransaction; isRealDb: boolean }> {
   const account = localAccounts.find(a => a.id === params.account_id) || localAccounts[0];
@@ -295,6 +296,21 @@ export async function addManualTransaction(params: {
         p_account_id: newTx.account_id,
         p_delta: delta
       });
+    }
+
+    // Si es gasto de pauta, sincronizar también con gastos_publicidad (para Rentabilidad y ROAS)
+    if (params.categoria === 'pauta_publicidad') {
+      try {
+        await supabase.from('gastos_publicidad').insert({
+          fecha: params.fecha,
+          codigo_anuncio: (params.codigo_anuncio || 'META_AD').toUpperCase(),
+          plataforma: 'Meta',
+          monto: newTx.monto,
+          notas: params.descripcion
+        });
+      } catch {
+        // ignorar si tabla no disponible
+      }
     }
   } catch {
     // local fallback
