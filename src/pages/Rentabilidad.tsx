@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { emitOsEvent } from '@/lib/osEvents'
 import { KpiCard } from '@/components/KpiCard'
+import { BovedaProductosRoas } from '@/components/BovedaProductosRoas'
+import { Sparkles, BarChart3, Layers } from 'lucide-react'
 import {
   construirRoas,
   etiquetaMes,
@@ -25,8 +27,8 @@ const FORM_INICIAL = {
   notas: '',
 }
 
-// AQUÍ ESTÁ EL CAMBIO: export function RentabilidadPage
 export function RentabilidadPage() {
+  const [vistaActiva, setVistaActiva] = useState<'mensual' | 'boveda'>('mensual')
   const [mes, setMes] = useState<string>(mesActual())
   const [gastos, setGastos] = useState<GastoPublicidad[]>([])
   const [ordenes, setOrdenes] = useState<OrdenWhatsapp[]>([])
@@ -200,27 +202,61 @@ export function RentabilidadPage() {
   /* ------------------------------- UI -------------------------------- */
 
   return (
-    <div className="space-y-8 p-4 md:p-6">
-      <header>
-        <h1 className="text-2xl font-semibold text-slate-900">
-          Rentabilidad y ROAS
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Cargá tu inversión publicitaria y cruzala con las ventas de WhatsApp.
-        </p>
+    <div className="space-y-6 p-4 md:p-6">
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2">
+            <BarChart3 className="text-indigo-600" size={24} />
+            <h1 className="text-2xl font-black text-slate-900">
+              Rentabilidad, ROAS & Ciclos de Pauta
+            </h1>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Cruce de inversión publicitaria con ventas de WhatsApp y memoria histórica de rendimiento por producto.
+          </p>
+        </div>
+
+        {/* Selector de Pestañas */}
+        <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold border border-slate-200">
+          <button
+            onClick={() => setVistaActiva('mensual')}
+            className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors ${
+              vistaActiva === 'mensual'
+                ? 'bg-white shadow-sm text-slate-900'
+                : 'text-slate-500 hover:text-slate-900'
+            }`}
+          >
+            <BarChart3 size={14} /> ROAS Mensual
+          </button>
+          <button
+            onClick={() => setVistaActiva('boveda')}
+            className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors ${
+              vistaActiva === 'boveda'
+                ? 'bg-amber-500 text-white shadow-sm'
+                : 'text-amber-700 hover:bg-amber-100/50'
+            }`}
+          >
+            <Sparkles size={14} /> Bóveda de Productos & Ciclos
+          </button>
+        </div>
       </header>
 
-      {error ? (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </div>
-      ) : null}
+      {/* RENDER CONDICIONAL DE LA BÓVEDA */}
+      {vistaActiva === 'boveda' ? (
+        <BovedaProductosRoas />
+      ) : (
+        <>
+          {error ? (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {error}
+            </div>
+          ) : null}
 
-      {exito ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          {exito}
-        </div>
-      ) : null}
+          {exito ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              {exito}
+            </div>
+          ) : null}
 
       {/* A. Formulario de gasto manual */}
       <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -456,6 +492,9 @@ export function RentabilidadPage() {
           </div>
         )}
       </section>
+        </>
+      )}
     </div>
   )
 }
+

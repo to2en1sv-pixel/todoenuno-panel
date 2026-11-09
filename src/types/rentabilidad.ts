@@ -30,3 +30,34 @@ export interface PuntoVentas {
   ventas: number
   pedidos: number
 }
+
+export type CicloVidaProducto = 'escala' | 'hibernacion' | 'testeo' | 'quemado';
+
+export interface RendimientoMesProducto {
+  mesNumero: number; // 1 - 12
+  nombreMes: string; // Ene, Feb, Mar...
+  ventas: number;
+  gasto: number;
+  pedidos: number;
+  roas: number | null;
+}
+
+export interface ProductoBovedaRoas {
+  sku: string;
+  nombre: string;
+  image_url?: string | null;
+  ventasTotales: number;
+  gastoTotal: number;
+  pedidosTotales: number;
+  roasHistorico: number | null;
+  cpaHistorico: number | null;
+  ticketPromedio: number;
+  estadoCiclo: CicloVidaProducto;
+  mesesDesempeno: RendimientoMesProducto[];
+  mejorMes: { nombre: string; roas: number } | null;
+  peorMes: { nombre: string; roas: number } | null;
+  anunciosAsociados: string[];
+  activo: boolean;
+  notasEstrategicas?: string;
+}
+
