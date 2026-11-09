@@ -8,6 +8,7 @@ import {
   EyeOff,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   X,
   MapPin,
   Phone,
@@ -1318,9 +1319,23 @@ export function PedidosPage() {
                           {dinero(p.total)}
                         </td>
                         <td className="p-3 text-center">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sf border border-[var(--bd)] uppercase block mb-1">
-                            {ETIQUETA_ESTADO[normalizarEstado(p.estado)]}
-                          </span>
+                          <div className="relative inline-block mb-1">
+                            <select
+                              value={normalizarEstado(p.estado)}
+                              onChange={(e) => cambiarEstadoDirecto(p, e.target.value as Estado)}
+                              className="py-1 pl-2 pr-6 rounded-lg text-[10px] font-bold bg-sf border border-[var(--bd)] uppercase cursor-pointer outline-none focus:border-indigo-500 appearance-none shadow-sm block"
+                            >
+                              <option value="nuevo">📥 Nuevo</option>
+                              <option value="programado">📅 Encargo</option>
+                              <option value="por_empacar">📦 Empacar</option>
+                              <option value="en_camino">🛵 En Camino</option>
+                              <option value="entregado">✅ Entregado</option>
+                              <option value="cancelado">❌ Cancelado</option>
+                            </select>
+                            <div className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 opacity-50">
+                              <ChevronDown size={10} />
+                            </div>
+                          </div>
                           {encargoInfo && (
                             <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border ${
                               encargoInfo.urgencia === 'hoy'
@@ -1926,29 +1941,53 @@ function PedidoCard({
         </button>
       )}
 
-      {/* Mover entre columnas */}
-      <div className="mt-2 flex items-center justify-between gap-1.5 pt-1 border-t border-[var(--bd)]">
-        <button
-          onClick={() => onMover(pedido, -1)}
-          disabled={idx === 0 || moviendo}
-          className={`${btnBase} flex-1 text-[var(--tx)]`}
-          title="Mover a columna anterior"
-        >
-          {moviendo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ChevronLeft className="w-3.5 h-3.5" />}
-        </button>
-
-        <span className="text-[9px] font-bold uppercase tracking-wider opacity-60 px-1 truncate">
-          {ETIQUETA_ESTADO[estado]}
-        </span>
-
-        <button
-          onClick={() => onMover(pedido, 1)}
-          disabled={idx === ESTADOS.length - 1 || moviendo}
-          className={`${btnBase} flex-1 text-[var(--tx)]`}
-          title="Mover a columna siguiente"
-        >
-          {moviendo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ChevronRight className="w-3.5 h-3.5" />}
-        </button>
+      {/* Selector directo de estado / etapa */}
+      <div className="mt-2.5 pt-2 border-t border-[var(--bd)]">
+        <div className="flex items-center justify-between gap-1 mb-1">
+          <label className="text-[9px] font-black uppercase tracking-wider tx-mu">
+            Estado / Fase:
+          </label>
+          {moviendo && (
+            <span className="text-[9px] text-indigo-500 font-bold flex items-center gap-1">
+              <Loader2 size={10} className="animate-spin" /> Guardando...
+            </span>
+          )}
+        </div>
+        <div className="relative">
+          <select
+            value={estado}
+            disabled={moviendo}
+            onChange={(e) => {
+              const nuevo = e.target.value as Estado;
+              if (nuevo !== estado && onCambiarDirecto) {
+                onCambiarDirecto(pedido, nuevo);
+              }
+            }}
+            className={`w-full py-1.5 pl-2.5 pr-8 rounded-xl text-xs font-bold border transition-all outline-none cursor-pointer appearance-none shadow-sm ${
+              estado === 'nuevo'
+                ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/30 hover:bg-sky-500/20'
+                : estado === 'programado'
+                ? 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/20'
+                : estado === 'por_empacar'
+                ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30 hover:bg-amber-500/20'
+                : estado === 'en_camino'
+                ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/30 hover:bg-violet-500/20'
+                : estado === 'entregado'
+                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20'
+                : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30 hover:bg-rose-500/20'
+            }`}
+          >
+            <option value="nuevo">📥 Nuevo (Despacho Hoy)</option>
+            <option value="programado">📅 Encargo / Programado</option>
+            <option value="por_empacar">📦 Por Empacar (Bodega)</option>
+            <option value="en_camino">🛵 En Camino (Ruta)</option>
+            <option value="entregado">✅ Entregado</option>
+            <option value="cancelado">❌ Cancelado / Novedad</option>
+          </select>
+          <div className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 opacity-60">
+            <ChevronDown size={14} />
+          </div>
+        </div>
       </div>
     </article>
   );
