@@ -347,6 +347,161 @@ export async function addManualTransaction(params: {
 }
 
 /**
+ * Registrar una Transferencia Interna entre Billeteras / Cuentas
+ */
+export async function addAccountTransfer(params: {
+  origen_id: string;
+  destino_id: string;
+  monto: number;
+  fecha: string;
+  descripcion?: string;
+}): Promise<{
+  success: boolean;
+  origenTx?: MoneyTransaction;
+  destinoTx?: MoneyTransaction;
+  isRealDb?: boolean;
+  error?: string;
+}> {
+  if (params.origen_id === params.destino_id) {
+    return {
+      success: false,
+      error: 'La cuenta de origen y destino no pueden ser la misma.'
+    };
+  }
+
+  const monto = Math.abs(Number(params.monto) || 0);
+  if (monto <= 0) {
+    return {
+      success: false,
+      error: 'El monto a transferir debe ser mayor a 0.'
+    };
+  }
+
+  const origenAcc = localAccounts.find(a => a.id === params.origen_id);
+  const destinoAcc = localAccounts.find(a => a.id === params.destino_id);
+
+  const descBase = params.descripcion?.trim() ? `${params.descripcion.trim()} ` : '';
+  const descSalida = `${descBase}⇄ Transferencia hacia ${destinoAcc?.nombre || params.destino_id}`.trim();
+  const descEntrada = `${descBase}⇄ Transferencia desde ${origenAcc?.nombre || params.origen_id}`.trim();
+
+  const nowId = Date.now();
+
+  const origenTx: MoneyTransaction = {
+    id: nowId,
+    account_id: params.origen_id,
+    account_nombre: origenAcc?.nombre,
+    tipo: 'transfer',
+    categoria: 'transferencia_salida',
+    monto,
+    descripcion: descSalida,
+    fecha: params.fecha,
+    es_manual: true,
+    created_at: new Date().toISOString()
+  };
+
+  const destinoTx: MoneyTransaction = {
+    id: nowId + 1,
+    account_id: params.destino_id,
+    account_nombre: destinoAcc?.nombre,
+    tipo: 'transfer',
+    categoria: 'transferencia_entrada',
+    monto,
+    descripcion: descEntrada,
+    fecha: params.fecha,
+    es_manual: true,
+    created_at: new Date().toISOString()
+  };
+
+  let isRealDb = false;
+
+  // 1. Guardar en Supabase si está disponible
+  try {
+    const { data: insertedData, error: insertErr } = await supabase
+      .from('finance_money_transactions')
+      .insert([
+        {
+          account_id: origenTx.account_id,
+          tipo: 'transfer',
+          categoria: 'transferencia_salida',
+          monto: origenTx.monto,
+          descripcion: origenTx.descripcion,
+          fecha: origenTx.fecha,
+          es_manual: true
+        },
+        {
+          account_id: destinoTx.account_id,
+          tipo: 'transfer',
+          categoria: 'transferencia_entrada',
+          monto: destinoTx.monto,
+          descripcion: destinoTx.descripcion,
+          fecha: destinoTx.fecha,
+          es_manual: true
+        }
+      ])
+      .select();
+
+    if (!insertErr && insertedData && insertedData.length >= 2) {
+      origenTx.id = insertedData[0].id;
+      destinoTx.id = insertedData[1].id;
+      isRealDb = true;
+
+      // Actualizar saldos en Supabase vía RPC o update directo
+      try {
+        await Promise.all([
+          (supabase as any).rpc('update_account_balance', {
+            p_account_id: origenTx.account_id,
+            p_delta: -monto
+          }),
+          (supabase as any).rpc('update_account_balance', {
+            p_account_id: destinoTx.account_id,
+            p_delta: monto
+          })
+        ]);
+      } catch {
+        // Fallback update directo
+        await Promise.all([
+          supabase.from('finance_cash_accounts').update({ saldo_actual: (origenAcc?.saldo_actual || 0) - monto }).eq('id', origenTx.account_id),
+          supabase.from('finance_cash_accounts').update({ saldo_actual: (destinoAcc?.saldo_actual || 0) + monto }).eq('id', destinoTx.account_id)
+        ]);
+      }
+    }
+  } catch {
+    // fallback local
+  }
+
+  // 2. Actualizar memoria local
+  localTransactions = [destinoTx, origenTx, ...localTransactions];
+
+  localAccounts = localAccounts.map(acc => {
+    if (acc.id === params.origen_id) {
+      return { ...acc, saldo_actual: acc.saldo_actual - monto };
+    }
+    if (acc.id === params.destino_id) {
+      return { ...acc, saldo_actual: acc.saldo_actual + monto };
+    }
+    return acc;
+  });
+
+  // 3. Emitir evento OS
+  try {
+    await emitOsEvent({
+      type: 'finance.transfer.created',
+      source_table: 'finance_money_transactions',
+      source_id: `${origenTx.id}->${destinoTx.id}`,
+      payload: {
+        origen_id: params.origen_id,
+        destino_id: params.destino_id,
+        monto,
+        fecha: params.fecha,
+        descripcion: params.descripcion || ''
+      }
+    });
+  } catch {}
+
+  return { success: true, origenTx, destinoTx, isRealDb };
+}
+
+/**
  * Guardar o actualizar presupuesto
  */
 export async function saveBudget(budget: Omit<Budget, 'id'> & { id?: string }): Promise<boolean> {
@@ -402,10 +557,12 @@ export async function deleteMoneyTransaction(id: number | string): Promise<{ suc
     }
 
     // 3. Revertir saldo de la cuenta:
-    //    Si era gasto (-), revertir suma (+). Si era ingreso (+), revertir resta (-).
+    //    Si era gasto (-) o transferencia de salida (-), revertir suma (+).
+    //    Si era ingreso (+) o transferencia de entrada (+), revertir resta (-).
     if (txToDelete) {
       const montoNum = Number(txToDelete.monto) || 0;
-      const deltaReversion = txToDelete.tipo === 'income' ? -montoNum : montoNum;
+      const esEntrada = txToDelete.tipo === 'income' || txToDelete.categoria === 'transferencia_entrada';
+      const deltaReversion = esEntrada ? -montoNum : montoNum;
 
       try {
         await (supabase as any).rpc('update_account_balance', {

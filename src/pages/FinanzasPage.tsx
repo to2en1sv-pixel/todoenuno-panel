@@ -27,7 +27,8 @@ import {
   Coins,
   RefreshCw,
   Megaphone,
-  ExternalLink
+  ExternalLink,
+  ArrowRightLeft
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { 
@@ -35,6 +36,7 @@ import {
   fetchBudgets, 
   fetchMoneyTransactions, 
   addManualTransaction, 
+  addAccountTransfer,
   saveBudget,
   updateCashAccountBalance,
   deleteMoneyTransaction
@@ -307,8 +309,58 @@ export function FinanzasPage() {
   const [showSqlModal, setShowSqlModal] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
 
+  // Modal de Transferencia entre Cuentas / Billeteras
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferOrigenId, setTransferOrigenId] = useState('banco_principal');
+  const [transferDestinoId, setTransferDestinoId] = useState('tarjeta_pauta');
+  const [transferMonto, setTransferMonto] = useState('');
+  const [transferDescripcion, setTransferDescripcion] = useState('');
+  const [transferFecha, setTransferFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [isSavingTransfer, setIsSavingTransfer] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+
+  const handleTransferSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTransferError(null);
+    const monto = parseFloat(transferMonto);
+    if (!monto || monto <= 0) {
+      setTransferError('Ingresa un monto válido mayor a 0');
+      return;
+    }
+    if (transferOrigenId === transferDestinoId) {
+      setTransferError('La cuenta de origen y destino no pueden ser la misma');
+      return;
+    }
+
+    setIsSavingTransfer(true);
+    try {
+      const res = await addAccountTransfer({
+        origen_id: transferOrigenId,
+        destino_id: transferDestinoId,
+        monto,
+        fecha: transferFecha,
+        descripcion: transferDescripcion
+      });
+
+      if (!res.success) {
+        setTransferError(res.error || 'No se pudo completar la transferencia');
+        setIsSavingTransfer(false);
+        return;
+      }
+
+      setTransferMonto('');
+      setTransferDescripcion('');
+      setShowTransferModal(false);
+      await loadFinanceData(true);
+    } catch (err: any) {
+      setTransferError(err?.message || 'Error al procesar la transferencia');
+    } finally {
+      setIsSavingTransfer(false);
+    }
+  };
+
   // Filtros de transacciones
-  const [filterTipo, setFilterTipo] = useState<'all' | 'income' | 'expense' | 'manual'>('all');
+  const [filterTipo, setFilterTipo] = useState<'all' | 'income' | 'expense' | 'transfer' | 'manual'>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
   // Modal de Ajuste de Saldo de Cuenta
@@ -542,6 +594,7 @@ export function FinanzasPage() {
     return transactions.filter(t => {
       if (filterTipo === 'income' && t.tipo !== 'income') return false;
       if (filterTipo === 'expense' && t.tipo !== 'expense') return false;
+      if (filterTipo === 'transfer' && t.tipo !== 'transfer') return false;
       if (filterTipo === 'manual' && !t.es_manual) return false;
 
       if (searchTerm.trim()) {
@@ -586,7 +639,18 @@ export function FinanzasPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <button
+            onClick={() => {
+              setTransferError(null);
+              setShowTransferModal(true);
+            }}
+            className="flex-1 sm:flex-none px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-colors"
+            title="Mover dinero entre cuentas (ej. Banco a Tarjeta de Ads o Efectivo a Banco)"
+          >
+            <ArrowRightLeft size={15} /> ⇄ Transferir entre Billeteras
+          </button>
+
           <button
             onClick={() => {
               setManualTipo('expense');
@@ -718,8 +782,22 @@ export function FinanzasPage() {
                         setShowAdjustModal(true);
                       }}
                       className="hover:text-[var(--tx)] hover:underline flex items-center gap-1 font-medium transition-colors"
+                      title="Definir saldo actual"
                     >
-                      <Pencil size={11} /> Ajustar Saldo
+                      <Pencil size={11} /> Ajustar
+                    </button>
+                    <button
+                      onClick={() => {
+                        setTransferOrigenId(acc.id);
+                        const otra = accounts.find(a => a.id !== acc.id);
+                        if (otra) setTransferDestinoId(otra.id);
+                        setTransferError(null);
+                        setShowTransferModal(true);
+                      }}
+                      className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-bold transition-colors"
+                      title="Mover dinero desde esta cuenta a otra"
+                    >
+                      <ArrowRightLeft size={11} /> Transferir
                     </button>
                     <button
                       onClick={() => {
@@ -933,13 +1011,14 @@ export function FinanzasPage() {
                 { id: 'all', label: 'Todos' },
                 { id: 'income', label: '🟢 Ingresos' },
                 { id: 'expense', label: '🔴 Egresos' },
+                { id: 'transfer', label: '⇄ Transferencias' },
                 { id: 'manual', label: '✍️ Solo Manuales' },
               ].map(f => (
                 <button
                   key={f.id}
                   onClick={() => setFilterTipo(f.id as any)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                    filterTipo === f.id ? 'bg-[var(--tx)] text-[var(--cd)]' : 'text-[var(--mu)] hover:bg-sf'
+                    filterTipo === f.id ? 'bg-[var(--tx)] text-[var(--cd)] shadow-sm' : 'text-[var(--mu)] hover:bg-sf'
                   }`}
                 >
                   {f.label}
@@ -993,21 +1072,33 @@ export function FinanzasPage() {
                           {tx.account_nombre || tx.account_id}
                         </td>
                         <td className="py-3 px-4 whitespace-nowrap">
-                          <span className="px-2 py-0.5 rounded-md bg-sf border border-[var(--bd)] text-[10px] font-mono">
-                            {tx.categoria}
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono border ${
+                            tx.tipo === 'transfer'
+                              ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30 font-bold'
+                              : 'bg-sf border-[var(--bd)]'
+                          }`}>
+                            {tx.tipo === 'transfer' ? (tx.categoria === 'transferencia_salida' ? '⇄ Salida' : '⇄ Entrada') : tx.categoria}
                           </span>
                         </td>
                         <td className="py-3 px-4 whitespace-nowrap">
                           <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            tx.es_manual ? 'bg-amber-500/10 text-amber-600' : 'bg-blue-500/10 text-blue-600'
+                            tx.tipo === 'transfer'
+                              ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+                              : tx.es_manual
+                              ? 'bg-amber-500/10 text-amber-600'
+                              : 'bg-blue-500/10 text-blue-600'
                           }`}>
-                            {tx.es_manual ? '✍️ Manual' : '🤖 OS Event'}
+                            {tx.tipo === 'transfer' ? '⇄ Billeteras' : tx.es_manual ? '✍️ Manual' : '🤖 OS Event'}
                           </span>
                         </td>
                         <td className={`py-3 px-4 font-mono font-bold text-right whitespace-nowrap ${
-                          tx.tipo === 'income' ? 'text-emerald-500' : 'text-rose-500'
+                          tx.tipo === 'income'
+                            ? 'text-emerald-500'
+                            : tx.tipo === 'transfer'
+                            ? (tx.categoria === 'transferencia_salida' ? 'text-indigo-600 dark:text-indigo-400' : 'text-emerald-500')
+                            : 'text-rose-500'
                         }`}>
-                          {tx.tipo === 'income' ? '+' : '-'}${Number(tx.monto).toFixed(2)}
+                          {tx.tipo === 'income' ? '+' : tx.tipo === 'transfer' ? (tx.categoria === 'transferencia_salida' ? '-' : '+') : '-'}${Number(tx.monto).toFixed(2)}
                         </td>
                         <td className="py-3 px-4 text-center whitespace-nowrap">
                           <button
@@ -1453,6 +1544,169 @@ export function FinanzasPage() {
                   className="px-4 py-1.5 bg-[var(--ac)] text-white font-bold rounded-xl text-xs flex items-center gap-1.5"
                 >
                   {isSavingAdjust ? 'Guardando...' : 'Actualizar Saldo'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: TRANSFERENCIA ENTRE BILLETERAS / CUENTAS */}
+      {showTransferModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+          onClick={() => setShowTransferModal(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+          >
+            {/* Cabecera */}
+            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+              <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                <ArrowRightLeft size={18} />
+                <h3 className="font-bold text-sm">Transferencia entre Billeteras</h3>
+              </div>
+              <button onClick={() => setShowTransferModal(false)} className="p-1 rounded-lg hover:bg-black/10">
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleTransferSubmit} className="p-5 space-y-4">
+              {transferError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-600 rounded-xl text-xs flex items-center gap-2">
+                  <AlertCircle size={15} className="shrink-0" />
+                  <span>{transferError}</span>
+                </div>
+              )}
+
+              {/* Selector de Cuentas: Origen -> Destino */}
+              <div className="bg-sf p-3.5 rounded-xl border border-[var(--bd)] space-y-3">
+                {/* Cuenta Origen */}
+                <div>
+                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                    Cuenta Origen (Sale el dinero)
+                  </label>
+                  <select
+                    value={transferOrigenId}
+                    onChange={e => setTransferOrigenId(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-cd text-xs font-bold outline-none"
+                  >
+                    {accounts.map(acc => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.nombre} (Disp: ${acc.saldo_actual.toFixed(2)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Flecha visual indicadora */}
+                <div className="flex items-center justify-center py-0.5 text-indigo-500">
+                  <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 rounded-full border border-indigo-500/20 text-[10px] font-bold">
+                    <span>Transfiere a</span>
+                    <ArrowDownRight size={13} />
+                  </div>
+                </div>
+
+                {/* Cuenta Destino */}
+                <div>
+                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                    Cuenta Destino (Ingresa el dinero)
+                  </label>
+                  <select
+                    value={transferDestinoId}
+                    onChange={e => setTransferDestinoId(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-cd text-xs font-bold outline-none"
+                  >
+                    {accounts.map(acc => (
+                      <option key={acc.id} value={acc.id} disabled={acc.id === transferOrigenId}>
+                        {acc.nombre} (Actual: ${acc.saldo_actual.toFixed(2)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Monto */}
+              <div>
+                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                  Monto a Transferir ($ USD) *
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-sm opacity-50">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={transferMonto}
+                    onChange={e => setTransferMonto(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full pl-8 pr-3 py-2.5 rounded-xl border border-[var(--bd)] bg-sf text-base font-black outline-none focus:border-indigo-500"
+                    required
+                    autoFocus
+                  />
+                </div>
+                {/* Botones de atajo de monto */}
+                <div className="flex items-center gap-1.5 mt-2">
+                  <span className="text-[10px] tx-mu">Atajos:</span>
+                  {[25, 50, 100, 200, 500].map(val => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setTransferMonto(String(val))}
+                      className="px-2 py-0.5 rounded-md bg-sf border border-[var(--bd)] text-[10px] font-bold hover:bg-cd"
+                    >
+                      ${val}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Concepto / Descripción */}
+              <div>
+                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                  Concepto / Detalle (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={transferDescripcion}
+                  onChange={e => setTransferDescripcion(e.target.value)}
+                  placeholder="Ej: Recarga para Meta Ads, Depósito de cobros contra entrega..."
+                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              {/* Fecha */}
+              <div>
+                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Fecha</label>
+                <input
+                  type="date"
+                  value={transferFecha}
+                  onChange={e => setTransferFecha(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs font-semibold outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[10px] text-amber-700 dark:text-amber-300">
+                💡 <b>Nota Contable:</b> Esta transferencia mueve fondos internamente entre cuentas. <u>No cuenta como un gasto ni como un ingreso</u>, por lo que el P&L (ganancia neta) de tu negocio se mantiene exacto.
+              </div>
+
+              {/* Botones de acción */}
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTransferModal(false)}
+                  className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold hover:bg-sf"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingTransfer}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md"
+                >
+                  {isSavingTransfer ? <RefreshCw size={14} className="animate-spin" /> : <ArrowRightLeft size={14} />}
+                  {isSavingTransfer ? 'Transfiriendo...' : 'Confirmar Transferencia'}
                 </button>
               </div>
             </form>
