@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useProductos, useVariantes, useInventory } from '@/hooks/useCatalog';
 import { 
   Search, 
@@ -20,14 +20,30 @@ import {
   Layers, 
   History,
   FileSpreadsheet,
-  CheckCircle2
+  CheckCircle2,
+  Upload,
+  Image as ImageIcon,
+  Trash2,
+  Bot,
+  MessageSquare,
+  Tag,
+  Save,
+  Link as LinkIcon,
+  HelpCircle,
+  ExternalLink,
+  ChevronRight,
+  Send
 } from 'lucide-react';
 import { 
   fetchStockItems, 
   fetchKardexMovements, 
   recordStockEntry, 
   adjustStock, 
-  saveProductItem 
+  saveProductItem,
+  compressImageFile,
+  updateProductDetails,
+  deleteProductItem,
+  getToddProductConfig
 } from '@/lib/inventory';
 import type { 
   StockItem, 
@@ -171,7 +187,66 @@ grant select, insert on public.inventory_kardex to anon, authenticated, service_
 
 create policy "inventory_stock_all"  on inventory.stock  for all using (true) with check (true);
 create policy "inventory_kardex_all" on inventory.kardex for all using (true) with check (true);
-grant execute on function inventory.record_movement to anon, authenticated, service_role;`;
+grant execute on function inventory.record_movement to anon, authenticated, service_role;
+
+-- Extensión opcional para Bot Todd (WhatsApp / UniChat)
+alter table if exists public.productos 
+  add column if not exists todd_pitch text default '',
+  add column if not exists todd_instrucciones text default '',
+  add column if not exists todd_keywords text default '',
+  add column if not exists activo_todd boolean default true;
+`;
+
+/**
+ * Componente de Imagen a prueba de balas
+ * Descarta URLs relativas de Odoo local que dan 404 y previene iconos rotos del navegador
+ */
+function ProductImg({ 
+  src, 
+  alt = '', 
+  className = '', 
+  fallbackClassName = '' 
+}: { 
+  src?: string | null; 
+  alt?: string; 
+  className?: string; 
+  fallbackClassName?: string;
+}) {
+  const [hasError, setHasError] = useState(false);
+
+  const isValidSrc = useMemo(() => {
+    if (!src || typeof src !== 'string') return false;
+    const clean = src.trim();
+    if (!clean) return false;
+    if (clean.startsWith('/web/image') || clean.includes('localhost') || clean.startsWith('/web/content')) {
+      return false;
+    }
+    return true;
+  }, [src]);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [src]);
+
+  if (!isValidSrc || hasError) {
+    return (
+      <div className={`flex flex-col items-center justify-center text-3xl bg-gradient-to-br from-sf to-cd select-none ${fallbackClassName || className || 'w-full h-full'}`}>
+        <span className="text-2xl">📦</span>
+        <span className="text-[9px] font-mono tx-mu mt-1">Sin imagen</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src!}
+      alt=""
+      className={className}
+      onError={() => setHasError(true)}
+      loading="lazy"
+    />
+  );
+}
 
 export function CatalogoPage() {
   const productos = useProductos();
@@ -183,6 +258,9 @@ export function CatalogoPage() {
   const [filterStock, setFilterStock] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
+  // Pestaña interna del Drawer de Producto
+  const [drawerTab, setDrawerTab] = useState<'info' | 'todd' | 'variantes'>('info');
+
   // Datos nativos de inventario y kárdex
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [kardexList, setKardexList] = useState<KardexMovement[]>([]);
@@ -193,7 +271,28 @@ export function CatalogoPage() {
   const [showAjusteModal, setShowAjusteModal] = useState(false);
   const [showProductoModal, setShowProductoModal] = useState(false);
   const [showSqlModal, setShowSqlModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+
+  // Edición de Producto Seleccionado
+  const [editNombre, setEditNombre] = useState('');
+  const [editImageUrl, setEditImageUrl] = useState('');
+  const [editPrecio, setEditPrecio] = useState('');
+  const [editCosto, setEditCosto] = useState('');
+  const [editActivo, setEditActivo] = useState(true);
+  const [editToddPitch, setEditToddPitch] = useState('');
+  const [editToddInstrucciones, setEditToddInstrucciones] = useState('');
+  const [editToddKeywords, setEditToddKeywords] = useState('');
+  const [editActivoTodd, setEditActivoTodd] = useState(true);
+  const [isSavingDetails, setIsSavingDetails] = useState(false);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+
+  // Simulador de Todd Bot en el Drawer
+  const [simPregunta, setSimPregunta] = useState('');
+  const [simRespuesta, setSimRespuesta] = useState('');
+  const [isSimulating, setIsSimulating] = useState(false);
 
   // Formulario Entrada de Mercadería
   const [entradaSku, setEntradaSku] = useState('');
@@ -210,14 +309,18 @@ export function CatalogoPage() {
   const [ajusteMotivo, setAjusteMotivo] = useState('Conteo físico periódico');
   const [isSavingAjuste, setIsSavingAjuste] = useState(false);
 
-  // Formulario Producto
+  // Formulario Nuevo Producto
   const [prodNombre, setProdNombre] = useState('');
   const [prodSku, setProdSku] = useState('');
   const [prodPrecio, setProdPrecio] = useState('');
   const [prodCosto, setProdCosto] = useState('');
   const [prodStockInicial, setProdStockInicial] = useState('0');
   const [prodImagen, setProdImagen] = useState('');
+  const [prodToddPitch, setProdToddPitch] = useState('');
+  const [prodToddKeywords, setProdToddKeywords] = useState('');
   const [isSavingProd, setIsSavingProd] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadNativeInventory = async () => {
     setLoadingNative(true);
@@ -233,6 +336,35 @@ export function CatalogoPage() {
   useEffect(() => {
     loadNativeInventory();
   }, []);
+
+  // Sincronizar formulario del Drawer cuando se selecciona un producto
+  useEffect(() => {
+    if (selectedProduct) {
+      setEditNombre(selectedProduct.nombre_base || '');
+      setEditImageUrl(selectedProduct.image_url || '');
+      setEditActivo(selectedProduct.active !== false);
+
+      // Buscar stock y costos asociados
+      const itemStock = stockItems.find(s => 
+        String(s.template_id) === String(selectedProduct.template_id) || 
+        s.sku === String(selectedProduct.template_id)
+      );
+      setEditPrecio(itemStock?.precio_venta ? String(itemStock.precio_venta) : '');
+      setEditCosto(itemStock?.costo_unitario ? String(itemStock.costo_unitario) : '');
+
+      // Cargar configuración de Todd
+      const todd = getToddProductConfig(selectedProduct.template_id);
+      setEditToddPitch(selectedProduct.todd_pitch || todd.todd_pitch || '');
+      setEditToddInstrucciones(selectedProduct.todd_instrucciones || todd.todd_instrucciones || '');
+      setEditToddKeywords(selectedProduct.todd_keywords || todd.todd_keywords || '');
+      setEditActivoTodd(selectedProduct.activo_todd !== undefined ? selectedProduct.activo_todd : todd.activo_todd);
+      
+      setDrawerTab('info');
+      setSaveSuccessMsg(false);
+      setSimRespuesta('');
+      setShowUrlInput(false);
+    }
+  }, [selectedProduct, stockItems]);
 
   // 1. FILTRO DE PRODUCTOS
   const filteredProductos = useMemo(() => {
@@ -263,7 +395,7 @@ export function CatalogoPage() {
     return list;
   }, [productos.data, variantes.data, stockItems, search, filterStock]);
 
-  // 2. FILTRO DE INVENTARIO NATIVO (Físico, Reservado, Disponible)
+  // 2. FILTRO DE INVENTARIO NATIVO
   const filteredInventory = useMemo(() => {
     let list = stockItems;
 
@@ -318,8 +450,118 @@ export function CatalogoPage() {
   // Variantes del producto seleccionado
   const productVariants = useMemo(() => {
     if (!selectedProduct) return [];
-    return (variantes.data ?? []).filter(v => v.template_id === selectedProduct.template_id);
+    return (variantes.data ?? []).filter(v => String(v.template_id) === String(selectedProduct.template_id));
   }, [variantes.data, selectedProduct]);
+
+  // Subir foto desde el explorador de archivos (PC o Móvil) con compresión instantánea
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploadingPhoto(true);
+      const compressedDataUrl = await compressImageFile(file, 800, 800, 0.82);
+      setEditImageUrl(compressedDataUrl);
+
+      if (selectedProduct) {
+        // Auto-guardar la foto de inmediato para conveniencia del usuario
+        await updateProductDetails({
+          template_id: selectedProduct.template_id,
+          image_url: compressedDataUrl
+        });
+
+        // Actualizar en el estado de selectedProduct
+        setSelectedProduct((prev: any) => ({ ...prev, image_url: compressedDataUrl }));
+        await productos.refetch();
+        await loadNativeInventory();
+      }
+    } catch (err) {
+      console.error('Error al subir imagen:', err);
+    } finally {
+      setIsUploadingPhoto(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  // Guardar Cambios del Producto Seleccionado
+  const handleSaveProductDetails = async () => {
+    if (!selectedProduct) return;
+    setIsSavingDetails(true);
+
+    try {
+      await updateProductDetails({
+        template_id: selectedProduct.template_id,
+        nombre_base: editNombre.trim(),
+        image_url: editImageUrl.trim() || null,
+        active: editActivo,
+        precio_venta: parseFloat(editPrecio || '0'),
+        costo_unitario: parseFloat(editCosto || '0'),
+        todd_pitch: editToddPitch.trim(),
+        todd_instrucciones: editToddInstrucciones.trim(),
+        todd_keywords: editToddKeywords.trim(),
+        activo_todd: editActivoTodd
+      });
+
+      setSelectedProduct((prev: any) => ({
+        ...prev,
+        nombre_base: editNombre.trim(),
+        image_url: editImageUrl.trim() || null,
+        active: editActivo,
+        todd_pitch: editToddPitch.trim(),
+        todd_instrucciones: editToddInstrucciones.trim(),
+        todd_keywords: editToddKeywords.trim(),
+        activo_todd: editActivoTodd
+      }));
+
+      setSaveSuccessMsg(true);
+      setTimeout(() => setSaveSuccessMsg(false), 2500);
+
+      await productos.refetch();
+      await loadNativeInventory();
+    } catch (err) {
+      console.error('Error al guardar producto:', err);
+    } finally {
+      setIsSavingDetails(false);
+    }
+  };
+
+  // Eliminar o Desactivar Producto
+  const handleDeleteProduct = async (hardDelete: boolean) => {
+    if (!selectedProduct) return;
+    setIsSavingDetails(true);
+
+    await deleteProductItem(selectedProduct.template_id, hardDelete);
+
+    setIsSavingDetails(false);
+    setShowDeleteModal(false);
+    setSelectedProduct(null);
+
+    await productos.refetch();
+    await variantes.refetch();
+    await loadNativeInventory();
+  };
+
+  // Simular respuesta del Bot Todd
+  const handleSimulateTodd = () => {
+    if (!selectedProduct) return;
+    setIsSimulating(true);
+
+    const question = simPregunta.trim() || '¿Qué precio tiene y qué incluye?';
+    const pitch = editToddPitch || 'Es un producto de alta calidad disponible para entrega inmediata.';
+    const reglas = editToddInstrucciones ? `\n(Regla del bot: ${editToddInstrucciones})` : '';
+    const precio = editPrecio ? `$${parseFloat(editPrecio).toFixed(2)}` : '$25.00';
+
+    setTimeout(() => {
+      setSimRespuesta(
+        `¡Hola! 👋 Gracias por consultar por el *${editNombre || selectedProduct.nombre_base}*.\n\n` +
+        `${pitch}\n\n` +
+        `💰 *Precio especial:* ${precio} USD con pago contra entrega en todo El Salvador 🇸🇻.\n` +
+        `📦 *Disponibilidad:* Tenemos stock en bodega listo para envío en 24-48 horas.${reglas}\n\n` +
+        `¿Te gustaría que te tomemos los datos de envío ahora mismo? 📲`
+      );
+      setIsSimulating(false);
+    }, 400);
+  };
 
   // Manejo de Entrada de Mercadería (Compra)
   const handleSaveEntrada = async (e: React.FormEvent) => {
@@ -379,7 +621,9 @@ export function CatalogoPage() {
       costo_unitario: parseFloat(prodCosto || '0'),
       stock_inicial: parseInt(prodStockInicial || '0'),
       stock_minimo: 5,
-      image_url: prodImagen || undefined
+      image_url: prodImagen || undefined,
+      todd_pitch: prodToddPitch || undefined,
+      todd_keywords: prodToddKeywords || undefined
     });
 
     setIsSavingProd(false);
@@ -390,6 +634,9 @@ export function CatalogoPage() {
     setProdCosto('');
     setProdStockInicial('0');
     setProdImagen('');
+    setProdToddPitch('');
+    setProdToddKeywords('');
+    await productos.refetch();
     await loadNativeInventory();
   };
 
@@ -421,6 +668,15 @@ export function CatalogoPage() {
 
   return (
     <div className="max-w-6xl mx-auto flex flex-col gap-5 pb-14 h-full">
+      {/* Input de archivo oculto para subir fotos desde cualquier dispositivo */}
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        onChange={handleFileUpload} 
+        accept="image/*" 
+        className="hidden" 
+      />
+
       {/* Encabezado Principal */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
         <div>
@@ -430,9 +686,12 @@ export function CatalogoPage() {
             <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
               Sprint 3 Core
             </span>
+            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/30 flex items-center gap-1">
+              <Bot size={12} /> Todd Ready
+            </span>
           </div>
           <p className="text-xs text-[var(--mu)] mt-1">
-            Gestión de stock físico, reservas en pedidos activos, Kárdex inmutable y desacople 100% de Odoo.
+            Gestión de stock físico, Kárdex inmutable, carga de fotos y preparación de catálogo para el Bot de WhatsApp Todd.
           </p>
         </div>
 
@@ -454,7 +713,7 @@ export function CatalogoPage() {
           <button
             onClick={() => setShowSqlModal(true)}
             className="p-2 border border-[var(--bd)] rounded-xl text-xs font-bold hover:bg-sf transition-colors"
-            title="Script SQL Sprint 3"
+            title="Script SQL Sprint 3 & Bot Todd"
           >
             <Code size={16} />
           </button>
@@ -560,19 +819,16 @@ export function CatalogoPage() {
             </div>
           )}
           {filteredProductos.map(p => {
-            // Buscar todas las variantes asociadas a este producto
             const variantesDeEste = (variantes.data || []).filter(v => String(v.template_id) === String(p.template_id));
             const skusDeEste = new Set(variantesDeEste.map(v => v.sku).filter(Boolean));
 
             let disponible = 0;
-            // Sumar stock nativo por template_id o por SKU de variante
             stockItems.forEach(s => {
               if (String(s.template_id) === String(p.template_id) || (s.sku && skusDeEste.has(s.sku))) {
                 disponible += Number(s.stock_disponible) || 0;
               }
             });
 
-            // Fallback a inv.data si stockItems aún no lo tiene indexado
             if (disponible === 0 && skusDeEste.size > 0 && inv.data) {
               inv.data.forEach(i => {
                 if (skusDeEste.has(i.sku)) {
@@ -581,39 +837,25 @@ export function CatalogoPage() {
               });
             }
 
+            const toddCfg = getToddProductConfig(p.template_id);
+            const hasToddPitch = Boolean(p.todd_pitch || toddCfg.todd_pitch);
+
             return (
               <div 
                 key={p.template_id} 
                 onClick={() => setSelectedProduct(p)}
-                className="bg-cd border border-[var(--bd)] rounded-2xl p-3 flex flex-col justify-between cursor-pointer hover:border-[var(--ac)] hover:shadow-md transition-all group"
+                className="bg-cd border border-[var(--bd)] rounded-2xl p-3 flex flex-col justify-between cursor-pointer hover:border-[var(--ac)] hover:shadow-md transition-all group relative"
               >
                 <div>
                   <div className="aspect-square bg-sf rounded-xl overflow-hidden relative flex items-center justify-center">
-                    {p.image_url ? (
-                      <>
-                        <img 
-                          src={p.image_url} 
-                          alt="" 
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                            const fb = e.currentTarget.parentElement?.querySelector('.img-fallback') as HTMLElement;
-                            if (fb) fb.classList.remove('hidden');
-                          }}
-                        />
-                        <div className="img-fallback w-full h-full hidden flex-col items-center justify-center text-3xl bg-gradient-to-br from-sf to-cd">
-                          <span>📦</span>
-                          <span className="text-[9px] font-mono tx-mu mt-1">Sin imagen</span>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-3xl bg-gradient-to-br from-sf to-cd">
-                        <span>📦</span>
-                        <span className="text-[9px] font-mono tx-mu mt-1">Sin imagen</span>
-                      </div>
-                    )}
+                    <ProductImg 
+                      src={p.image_url} 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+
+                    {/* Badge de Disponibilidad */}
                     <div className="absolute top-2 right-2">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border shadow-sm ${
                         disponible <= 0 
                           ? 'bg-rose-500/90 text-white border-rose-600' 
                           : disponible <= 5 
@@ -623,16 +865,34 @@ export function CatalogoPage() {
                         {disponible} disp.
                       </span>
                     </div>
+
+                    {/* Badge de Todd Bot */}
+                    {hasToddPitch && (
+                      <div className="absolute bottom-2 left-2" title="Entrenado para Bot Todd (WhatsApp)">
+                        <span className="p-1 rounded-md bg-purple-600 text-white text-[10px] font-bold shadow flex items-center gap-0.5">
+                          <Bot size={11} />
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-3">
-                    <div className="text-[10px] mono tx-mu">#{p.template_id}</div>
-                    <div className="font-bold text-xs line-clamp-2 leading-snug mt-0.5 text-[var(--tx)]">{p.nombre_base}</div>
+                    <div className="flex items-center justify-between text-[10px] mono tx-mu">
+                      <span>#{p.template_id}</span>
+                      {p.active === false && (
+                        <span className="text-rose-500 font-bold uppercase text-[9px]">Pausado</span>
+                      )}
+                    </div>
+                    <div className="font-bold text-xs line-clamp-2 leading-snug mt-0.5 text-[var(--tx)]">
+                      {p.nombre_base}
+                    </div>
                   </div>
                 </div>
 
                 <div className="mt-3 pt-2 border-t border-[var(--bd)] flex items-center justify-between text-[11px]">
-                  <span className="text-[var(--ac)] font-bold">Ver variantes →</span>
+                  <span className="text-[var(--ac)] font-bold group-hover:underline flex items-center gap-1">
+                    Editar / Todd →
+                  </span>
                 </div>
               </div>
             );
@@ -792,6 +1052,420 @@ export function CatalogoPage() {
         </div>
       )}
 
+      {/* DRAWER LATERAL: EDICIÓN COMPLETA, FOTOS Y BOT TODD */}
+      {selectedProduct && (
+        <>
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 transition-opacity" onClick={() => setSelectedProduct(null)} />
+          <div className="fixed top-0 right-0 bottom-0 w-full sm:w-[500px] bg-cd z-50 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+            {/* Header del Drawer */}
+            <div className="p-4 border-b border-[var(--bd)] flex justify-between items-center bg-sf">
+              <div>
+                <span className="text-[10px] font-mono tx-mu uppercase">Ficha de Producto #{selectedProduct.template_id}</span>
+                <h2 className="font-black text-sm truncate max-w-[340px] text-[var(--tx)]">{editNombre || 'Sin nombre'}</h2>
+              </div>
+              <button onClick={() => setSelectedProduct(null)} className="p-1.5 hover:bg-black/10 rounded-lg">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Pestañas del Drawer */}
+            <div className="flex bg-sf/50 border-b border-[var(--bd)] p-1 text-xs">
+              <button 
+                onClick={() => setDrawerTab('info')}
+                className={`flex-1 py-2 font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  drawerTab === 'info' ? 'bg-cd shadow-sm text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
+                }`}
+              >
+                <Package size={14} /> General & Foto
+              </button>
+              <button 
+                onClick={() => setDrawerTab('todd')}
+                className={`flex-1 py-2 font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  drawerTab === 'todd' ? 'bg-purple-600 text-white shadow-sm' : 'text-purple-600 dark:text-purple-400 hover:bg-purple-500/10'
+                }`}
+              >
+                <Bot size={14} /> Bot Todd (WhatsApp)
+              </button>
+              <button 
+                onClick={() => setDrawerTab('variantes')}
+                className={`flex-1 py-2 font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  drawerTab === 'variantes' ? 'bg-cd shadow-sm text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
+                }`}
+              >
+                <Layers size={14} /> Variantes ({productVariants.length})
+              </button>
+            </div>
+
+            {/* Contenido del Drawer */}
+            <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
+              {/* SUB-PESTAÑA 1: GENERAL & FOTO */}
+              {drawerTab === 'info' && (
+                <div className="space-y-4">
+                  {/* Foto del Producto con Uploader */}
+                  <div className="p-4 bg-sf rounded-2xl border border-[var(--bd)] flex flex-col sm:flex-row items-center gap-4">
+                    <div className="w-28 h-28 rounded-2xl bg-cd border border-[var(--bd)] overflow-hidden shrink-0 relative shadow-inner flex items-center justify-center">
+                      <ProductImg src={editImageUrl} className="w-full h-full object-cover" />
+                      {isUploadingPhoto && (
+                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-xs font-bold">
+                          Optimizando...
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 space-y-2 w-full text-center sm:text-left">
+                      <span className="text-xs font-bold block text-[var(--tx)]">Foto del Producto</span>
+                      <p className="text-[11px] tx-mu">
+                        Sube una foto desde tu computadora o teléfono. Se optimiza y comprime automáticamente.
+                      </p>
+
+                      <div className="flex flex-wrap gap-2 pt-1 justify-center sm:justify-start">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isUploadingPhoto}
+                          className="px-3 py-1.5 bg-[var(--tx)] text-[var(--cd)] rounded-xl text-xs font-bold flex items-center gap-1.5 hover:opacity-90 shadow-sm"
+                        >
+                          <Upload size={14} /> {editImageUrl ? 'Cambiar Foto' : 'Subir Foto'}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setShowUrlInput(!showUrlInput)}
+                          className="px-3 py-1.5 border border-[var(--bd)] bg-cd hover:bg-sf rounded-xl text-xs font-semibold flex items-center gap-1.5"
+                        >
+                          <LinkIcon size={14} /> Pegar URL
+                        </button>
+
+                        {editImageUrl && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditImageUrl('');
+                              updateProductDetails({ template_id: selectedProduct.template_id, image_url: null });
+                            }}
+                            className="px-2.5 py-1.5 text-rose-500 hover:bg-rose-500/10 rounded-xl text-xs font-semibold"
+                            title="Quitar foto actual"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+
+                      {showUrlInput && (
+                        <div className="mt-2 pt-2 border-t border-[var(--bd)] flex gap-2">
+                          <input
+                            type="url"
+                            placeholder="https://ejemplo.com/foto.jpg"
+                            value={editImageUrl}
+                            onChange={e => setEditImageUrl(e.target.value)}
+                            className="flex-1 p-2 bg-cd border border-[var(--bd)] rounded-xl text-xs outline-none focus:border-[var(--ac)]"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Nombre y Estado */}
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Nombre Comercial del Producto *</label>
+                    <input
+                      type="text"
+                      value={editNombre}
+                      onChange={e => setEditNombre(e.target.value)}
+                      placeholder="Ej. Mini Masajeador Cervical EMS"
+                      className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs font-medium outline-none focus:border-[var(--ac)]"
+                    />
+                  </div>
+
+                  {/* Precios y Costos */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Precio de Venta ($)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={editPrecio}
+                        onChange={e => setEditPrecio(e.target.value)}
+                        placeholder="Ej. 25.00"
+                        className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-sm font-bold outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Costo Unitario ($)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={editCosto}
+                        onChange={e => setEditCosto(e.target.value)}
+                        placeholder="Ej. 3.50"
+                        className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-sm font-bold outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Switch de Estado de Venta */}
+                  <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-[var(--tx)] block">Estado del Producto</span>
+                      <span className="text-[10px] tx-mu">Activo para pedidos y visible en catálogo</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEditActivo(!editActivo)}
+                      className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+                        editActivo 
+                          ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20' 
+                          : 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
+                      }`}
+                    >
+                      {editActivo ? '✓ Activo' : '✕ Pausado'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* SUB-PESTAÑA 2: INTELIGENCIA PARA BOT TODD (WHATSAPP & UNICHAT) */}
+              {drawerTab === 'todd' && (
+                <div className="space-y-4">
+                  <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
+                    <div className="flex items-center gap-2">
+                      <Bot className="text-purple-600 dark:text-purple-400" size={18} />
+                      <h4 className="font-bold text-xs text-purple-700 dark:text-purple-300">
+                        Entrenamiento de Ventas para Bot Todd
+                      </h4>
+                    </div>
+                    <p className="text-[11px] text-purple-900/80 dark:text-purple-200/80 mt-1 leading-relaxed">
+                      Todd usará esta ficha cuando los clientes de WhatsApp o UniChat pregunten por este producto. Responderá con tono vendedor, mencionando beneficios, ofertas y disponibilidad real sin inventar información.
+                    </p>
+                  </div>
+
+                  {/* Toggle para Venta Activa por Bot Todd */}
+                  <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-[var(--tx)] block">Venta Activa por Bot Todd</span>
+                      <span className="text-[10px] tx-mu">Permite que Todd ofrezca y cierre ventas de este ítem por WhatsApp</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEditActivoTodd(!editActivoTodd)}
+                      className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+                        editActivoTodd 
+                          ? 'bg-purple-600 text-white shadow-sm' 
+                          : 'bg-sf border border-[var(--bd)] tx-mu'
+                      }`}
+                    >
+                      {editActivoTodd ? '✓ Habilitado' : '✕ Deshabilitado'}
+                    </button>
+                  </div>
+
+                  {/* Pitch Comercial */}
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold tx-mu mb-1 flex items-center gap-1.5">
+                      <Sparkles size={12} className="text-purple-500" /> Pitch de Venta & Beneficios Clave
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={editToddPitch}
+                      onChange={e => setEditToddPitch(e.target.value)}
+                      placeholder="Ej. Alivia contracturas y dolores musculares en 15 minutos gracias a su tecnología de microcorrientes EMS. Incluye 8 modos de masaje y batería recargable por USB."
+                      className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-purple-500 leading-relaxed resize-none"
+                    />
+                    <span className="text-[10px] tx-mu block mt-1">Todd recitará estos argumentos cuando el cliente pida detalles o tenga dudas de compra.</span>
+                  </div>
+
+                  {/* Reglas e Instrucciones Especiales */}
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold tx-mu mb-1 flex items-center gap-1.5">
+                      <MessageSquare size={12} className="text-purple-500" /> Ofertas & Reglas del Bot (Upsells / Combos)
+                    </label>
+                    <input
+                      type="text"
+                      value={editToddInstrucciones}
+                      onChange={e => setEditToddInstrucciones(e.target.value)}
+                      placeholder="Ej. Ofrecer promoción 2 por $25 o 3 por $30. Garantía de 30 días."
+                      className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  {/* Palabras Clave / Keywords */}
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold tx-mu mb-1 flex items-center gap-1.5">
+                      <Tag size={12} className="text-purple-500" /> Sinónimos y Palabras Clave de WhatsApp
+                    </label>
+                    <input
+                      type="text"
+                      value={editToddKeywords}
+                      onChange={e => setEditToddKeywords(e.target.value)}
+                      placeholder="Ej. masajeador, cuello, dolores, parches, ems, electroestimulador"
+                      className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-purple-500"
+                    />
+                    <span className="text-[10px] tx-mu block mt-1">Separadas por comas. Todd las usa para identificar el producto automáticamente en conversaciones.</span>
+                  </div>
+
+                  {/* Simulador Interactivo de Respuesta de WhatsApp */}
+                  <div className="p-4 bg-sf rounded-2xl border border-[var(--bd)] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-[var(--tx)] flex items-center gap-1.5">
+                        <Bot size={14} className="text-purple-500" /> Vista Previa: Respuesta de Todd
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleSimulateTodd}
+                        disabled={isSimulating}
+                        className="px-2.5 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-[10px] font-bold flex items-center gap-1"
+                      >
+                        <Sparkles size={11} /> Probar Simulación
+                      </button>
+                    </div>
+
+                    <div className="p-3 bg-emerald-950/10 dark:bg-emerald-900/20 rounded-xl border border-emerald-500/20 text-xs font-mono leading-relaxed whitespace-pre-wrap text-[var(--tx)]">
+                      {simRespuesta || (
+                        <span className="tx-mu italic font-sans text-[11px]">
+                          Presiona "Probar Simulación" para ver cómo responderá Todd a un cliente interesado en WhatsApp.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SUB-PESTAÑA 3: VARIANTES Y STOCK */}
+              {drawerTab === 'variantes' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-xs uppercase tx-mu flex items-center gap-2">
+                      <Package size={15} /> Variantes Vinculadas ({productVariants.length})
+                    </h4>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    {productVariants.length === 0 && (
+                      <div className="text-xs tx-mu p-4 bg-sf rounded-xl border border-[var(--bd)] text-center">
+                        Sin variantes registradas para este producto.
+                      </div>
+                    )}
+                    {productVariants.map(v => {
+                      const stockNativo = stockItems.find(s => s.sku === v.sku);
+                      const disponible = stockNativo ? stockNativo.stock_disponible : (inv.data?.find(i => i.sku === v.sku)?.qty ?? 0);
+
+                      return (
+                        <div key={v.variante_id || v.sku} className="p-3 bg-sf border border-[var(--bd)] rounded-xl flex items-center justify-between">
+                          <div>
+                            <div className="mono text-xs font-bold text-[var(--tx)]">{v.sku}</div>
+                            <div className="text-[10px] tx-mu mt-0.5">
+                              {[v.color, v.talla].filter(Boolean).join(' • ') || 'Estándar'}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-bold text-xs">${Number(v.precio || 0).toFixed(2)}</div>
+                            <div className={`text-[10px] font-bold ${disponible <= 0 ? 'text-rose-500' : disponible <= 5 ? 'text-amber-500' : 'text-emerald-500'}`}>
+                              {disponible} disponibles
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer de Acciones del Drawer */}
+            <div className="p-4 border-t border-[var(--bd)] bg-sf flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(true)}
+                className="px-3 py-2 border border-rose-500/20 text-rose-600 hover:bg-rose-500/10 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
+              >
+                <Trash2 size={14} /> Eliminar
+              </button>
+
+              <div className="flex items-center gap-2">
+                {saveSuccessMsg && (
+                  <span className="text-xs font-bold text-emerald-600 flex items-center gap-1 animate-pulse">
+                    <CheckCircle2 size={14} /> ¡Guardado!
+                  </span>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleSaveProductDetails}
+                  disabled={isSavingDetails}
+                  className="px-5 py-2 bg-[var(--ac)] hover:opacity-90 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm"
+                >
+                  <Save size={14} /> {isSavingDetails ? 'Guardando...' : 'Guardar Cambios'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* MODAL: CONFIRMACIÓN DE ELIMINACIÓN DE PRODUCTO */}
+      {showDeleteModal && selectedProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowDeleteModal(false)}>
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+              <div className="flex items-center gap-2 text-rose-500">
+                <Trash2 size={18} />
+                <h3 className="font-bold text-sm">¿Eliminar o Desactivar Producto?</h3>
+              </div>
+              <button onClick={() => setShowDeleteModal(false)} className="p-1 rounded-lg hover:bg-black/10"><X size={16} /></button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs leading-relaxed tx-mu">
+                Estás gestionando el producto <strong className="text-[var(--tx)] font-semibold">{selectedProduct.nombre_base}</strong> (#{selectedProduct.template_id}). Elige la acción adecuada:
+              </p>
+
+              <div className="space-y-3">
+                <div 
+                  onClick={() => handleDeleteProduct(false)}
+                  className="p-3.5 rounded-xl border border-[var(--bd)] bg-sf hover:border-amber-500/50 hover:bg-amber-500/5 cursor-pointer transition-all"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-amber-600 flex items-center gap-1.5">
+                      ⏸️ Desactivar / Ocultar (Recomendado)
+                    </span>
+                    <ChevronRight size={14} className="tx-mu" />
+                  </div>
+                  <p className="text-[11px] tx-mu mt-1">
+                    Mantiene los registros contables y de ventas intactos, pero oculta el producto del catálogo y evita que el Bot Todd lo ofrezca.
+                  </p>
+                </div>
+
+                <div 
+                  onClick={() => handleDeleteProduct(true)}
+                  className="p-3.5 rounded-xl border border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10 cursor-pointer transition-all"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-rose-600 flex items-center gap-1.5">
+                      🗑️ Eliminar Definitivamente (Pruebas)
+                    </span>
+                    <ChevronRight size={14} className="text-rose-500" />
+                  </div>
+                  <p className="text-[11px] text-rose-600/80 dark:text-rose-400/80 mt-1">
+                    Borra completamente el registro de Supabase, sus variantes y su stock. Úsalo para limpiar productos de prueba.
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <button 
+                  type="button" 
+                  onClick={() => setShowDeleteModal(false)} 
+                  className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold hover:bg-sf"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL 1: NUEVA ENTRADA DE MERCADERÍA / COMPRA */}
       {showEntradaModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowEntradaModal(false)}>
@@ -869,7 +1543,6 @@ export function CatalogoPage() {
                 </div>
               </div>
 
-              {/* Checkbox de Integración con Finanzas */}
               <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-start gap-2.5">
                 <input
                   type="checkbox"
@@ -1046,6 +1719,27 @@ export function CatalogoPage() {
                 />
               </div>
 
+              {/* Campos opcionales para Bot Todd */}
+              <div className="p-3 bg-purple-500/5 rounded-xl border border-purple-500/20 space-y-2">
+                <span className="text-[11px] font-bold text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                  <Bot size={13} /> Preparar para Bot Todd (Opcional)
+                </span>
+                <input
+                  type="text"
+                  value={prodToddPitch}
+                  onChange={e => setProdToddPitch(e.target.value)}
+                  placeholder="Pitch de venta: ¿Por qué comprarlo?"
+                  className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                />
+                <input
+                  type="text"
+                  value={prodToddKeywords}
+                  onChange={e => setProdToddKeywords(e.target.value)}
+                  placeholder="Palabras clave: masajeador, dolor, cuello"
+                  className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                />
+              </div>
+
               <div className="pt-2 flex justify-end gap-2">
                 <button type="button" onClick={() => setShowProductoModal(false)} className="px-3.5 py-1.5 border border-[var(--bd)] rounded-xl text-xs font-semibold">
                   Cancelar
@@ -1063,14 +1757,14 @@ export function CatalogoPage() {
         </div>
       )}
 
-      {/* MODAL 4: SCRIPT SQL SPRINT 3 */}
+      {/* MODAL 4: SCRIPT SQL SPRINT 3 & BOT TODD */}
       {showSqlModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowSqlModal(false)}>
           <div onClick={e => e.stopPropagation()} className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl flex flex-col">
             <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
               <div className="flex items-center gap-2">
                 <Code size={18} className="text-emerald-500" />
-                <h3 className="font-bold text-sm">Script SQL Sprint 3 — Inventario Nativo & Kárdex</h3>
+                <h3 className="font-bold text-sm">Script SQL Sprint 3 — Inventario Nativo, Kárdex & Bot Todd</h3>
               </div>
               <button onClick={() => setShowSqlModal(false)} className="p-1 rounded-lg"><X size={16} /></button>
             </div>
@@ -1080,18 +1774,18 @@ export function CatalogoPage() {
                 <p className="font-semibold text-[var(--tx)]">Instrucciones para Supabase:</p>
                 <p>1. Copia el script abajo.</p>
                 <p>2. Pégalo en tu SQL Editor de Supabase y presiona <strong>Run</strong>.</p>
-                <p>3. Migrará automáticamente tu stock existente desde <code className="font-mono bg-cd px-1 rounded">inventory_cache</code> a la tabla oficial <code className="font-mono bg-cd px-1 rounded">inventory.stock</code> e instalará el motor de Kárdex inmutable.</p>
+                <p>3. Migrará automáticamente tu stock existente a <code className="font-mono bg-cd px-1 rounded">inventory.stock</code>, instalará el motor de Kárdex y habilitará los campos de inteligencia para el Bot Todd.</p>
               </div>
 
               <div className="relative">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs font-mono tx-mu">docs/20261107_sprint3_inventory_kardex.sql</span>
+                  <span className="text-xs font-mono tx-mu">docs/20261108_sprint3_todd_bot_catalog.sql</span>
                   <button
                     onClick={copySql}
                     className="px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shadow-sm"
                   >
                     {copiedSql ? <Check size={14} /> : <Copy size={14} />}
-                    {copiedSql ? '¡Copiado!' : 'Copiar SQL Sprint 3'}
+                    {copiedSql ? '¡Copiado!' : 'Copiar Script SQL'}
                   </button>
                 </div>
                 <pre className="p-4 rounded-xl bg-zinc-950 text-zinc-200 font-mono text-xs overflow-x-auto max-h-96 border border-zinc-800 leading-relaxed">
@@ -1107,86 +1801,6 @@ export function CatalogoPage() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* DRAWER LATERAL DE PRODUCTO (Detalle y Variantes) */}
-      {selectedProduct && (
-        <>
-          <div className="fixed inset-0 bg-black/40 z-40 transition-opacity" onClick={() => setSelectedProduct(null)} />
-          <div className="fixed top-0 right-0 bottom-0 w-full sm:w-[420px] bg-cd z-50 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
-            <div className="p-4 border-b border-[var(--bd)] flex justify-between items-center bg-sf">
-              <h2 className="font-bold text-sm">Detalle del Producto</h2>
-              <button onClick={() => setSelectedProduct(null)} className="p-1.5 hover:bg-black/10 rounded-lg"><X size={18}/></button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
-              <div className="flex gap-4">
-                {selectedProduct.image_url ? (
-                  <div className="w-24 h-24 rounded-2xl bg-sf border border-[var(--bd)] overflow-hidden shrink-0 relative flex items-center justify-center">
-                    <img 
-                      src={selectedProduct.image_url} 
-                      alt=""
-                      className="w-full h-full object-cover" 
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                        const fb = e.currentTarget.parentElement?.querySelector('.drawer-img-fb') as HTMLElement;
-                        if (fb) fb.classList.remove('hidden');
-                      }}
-                    />
-                    <div className="drawer-img-fb w-full h-full hidden flex-col items-center justify-center text-3xl bg-sf">
-                      <span>📦</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="w-24 h-24 rounded-2xl bg-sf border border-[var(--bd)] flex items-center justify-center text-3xl shrink-0">📦</div>
-                )}
-                <div>
-                  <div className="text-[11px] mono tx-mu">#{selectedProduct.template_id}</div>
-                  <h3 className="font-bold text-base leading-tight mt-0.5">{selectedProduct.nombre_base}</h3>
-                  <div className="flex gap-2 mt-2">
-                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                      Activo
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-2">
-                <h4 className="font-bold text-xs uppercase tx-mu mb-3 flex items-center gap-2">
-                  <Package size={15} /> Variantes y Stock ({productVariants.length})
-                </h4>
-                <div className="flex flex-col gap-2">
-                  {productVariants.length === 0 && (
-                    <div className="text-xs tx-mu p-3 bg-sf rounded-xl border border-[var(--bd)] text-center">
-                      Sin variantes registradas para este producto.
-                    </div>
-                  )}
-                  {productVariants.map(v => {
-                    const stockNativo = stockItems.find(s => s.sku === v.sku);
-                    const disponible = stockNativo ? stockNativo.stock_disponible : (inv.data?.find(i => i.sku === v.sku)?.qty ?? 0);
-
-                    return (
-                      <div key={v.variante_id || v.sku} className="p-3 bg-sf border border-[var(--bd)] rounded-xl flex items-center justify-between">
-                        <div>
-                          <div className="mono text-xs font-bold text-[var(--tx)]">{v.sku}</div>
-                          <div className="text-[10px] tx-mu mt-0.5">
-                            {[v.color, v.talla].filter(Boolean).join(' • ') || 'Estándar'}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="font-bold text-xs">${Number(v.precio || 0).toFixed(2)}</div>
-                          <div className={`text-[10px] font-bold ${disponible <= 0 ? 'text-rose-500' : disponible <= 5 ? 'text-amber-500' : 'text-emerald-500'}`}>
-                            {disponible} disponibles
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
       )}
     </div>
   );

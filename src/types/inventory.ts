@@ -38,6 +38,13 @@ export interface KardexMovement {
   created_at: string;
 }
 
+export interface ToddProductConfig {
+  todd_pitch?: string;
+  todd_instrucciones?: string;
+  todd_keywords?: string;
+  activo_todd?: boolean;
+}
+
 export interface ProductFormData {
   sku: string;
   nombre: string;
@@ -46,6 +53,9 @@ export interface ProductFormData {
   stock_inicial: number;
   stock_minimo: number;
   image_url?: string;
+  todd_pitch?: string;
+  todd_instrucciones?: string;
+  todd_keywords?: string;
 }
 
 export interface EntradaMercaderiaFormData {
@@ -57,3 +67,4 @@ export interface EntradaMercaderiaFormData {
   asentar_en_finanzas: boolean;
   cuenta_finanzas_id?: string;
 }
+
