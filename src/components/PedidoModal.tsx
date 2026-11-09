@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { X, Loader2, Save, AlertCircle, Plus, Edit, Package, Search, Check, RefreshCw, Sparkles, Tag, ChevronDown, CheckCircle2 } from "lucide-react";
+import { X, Loader2, Save, AlertCircle, Plus, Edit, Package, Search, Check, RefreshCw, Sparkles, Tag, ChevronDown, CheckCircle2, Calendar, Clock } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Pedido } from "@/pages/Pedidos";
 import { fetchStockItems } from "@/lib/inventory";
@@ -11,6 +11,39 @@ interface Props {
   onClose: () => void;
   onSaved: () => void;
   pedido?: Pedido | null; // Si existe, editamos
+}
+
+function getProximoSabado(): string {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = (6 - day + 7) % 7 || 7;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+
+function getProximaQuincena(): string {
+  const d = new Date();
+  const dia = d.getDate();
+  if (dia < 15) {
+    d.setDate(15);
+  } else {
+    const ultimo = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(Math.min(30, ultimo));
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+function getFinDeMes(): string {
+  const d = new Date();
+  const ultimo = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(ultimo);
+  return d.toISOString().slice(0, 10);
+}
+
+function getEnNDias(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 const FORM_INICIAL = {
@@ -25,6 +58,8 @@ const FORM_INICIAL = {
   notas: "",
   courier: "Motorista Central 1",
   departamento: "San Salvador",
+  es_encargo: false,
+  fecha_programada: "",
 };
 
 type FormKey = keyof typeof FORM_INICIAL;
@@ -74,6 +109,8 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
       const catSkuResuelto = (pedido as any).catalogo_sku || 
         resolveCatalogSku(pedido.sku, pedido.codigo_anuncio, null, knownSkus) || "";
 
+      const esEncargo = pedido.estado === "programado" || Boolean((pedido as any).es_encargo) || Boolean((pedido as any).fecha_programada);
+
       setForm({
         nombre_cliente: pedido.nombre_cliente || "",
         telefono: pedido.telefono || "",
@@ -86,6 +123,8 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
         notas: pedido.notas || "",
         courier: (pedido as any).courier || "Motorista Central 1",
         departamento: (pedido as any).departamento || "San Salvador",
+        es_encargo: esEncargo,
+        fecha_programada: (pedido as any).fecha_programada || (esEncargo ? getProximoSabado() : ""),
       });
 
       if (!catSkuResuelto && pedido.sku) {
@@ -149,6 +188,7 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
     if (!form.sku.trim() && !form.catalogo_sku.trim()) return setError("Debes seleccionar un producto del catálogo o ingresar el nombre.");
     if (!form.direccion.trim()) return setError("La dirección es obligatoria.");
     if (!form.metodo_pago) return setError("Selecciona un método de pago.");
+    if (form.es_encargo && !form.fecha_programada) return setError("Debes seleccionar una fecha programada para el encargo.");
 
     const totalNum = Number(String(form.total).replace(/[^\d.-]/g, ""));
     if (!Number.isFinite(totalNum) || totalNum <= 0) {
@@ -157,6 +197,8 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
 
     const skuFinal = form.sku.trim() || form.catalogo_sku.trim();
     const catalogoSkuFinal = form.catalogo_sku.trim() || null;
+    const estadoFinal = form.es_encargo ? "programado" : (pedido?.estado === "programado" ? "nuevo" : (pedido?.estado || "nuevo"));
+    const fechaProgramada = form.es_encargo && form.fecha_programada ? form.fecha_programada : null;
 
     /* ---------- Insert o Update ---------- */
     setGuardando(true);
@@ -169,6 +211,7 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
       metodo_pago: form.metodo_pago,
       codigo_anuncio: form.codigo_anuncio.trim() || null,
       notas: form.notas.trim() || null,
+      estado: estadoFinal,
     };
 
     const fullPayload = {
@@ -176,6 +219,8 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
       catalogo_sku: catalogoSkuFinal,
       courier: form.courier,
       departamento: form.departamento,
+      fecha_programada: fechaProgramada,
+      es_encargo: form.es_encargo,
     };
 
     let dbError = null;
@@ -198,12 +243,10 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
       // Crear con fallback
       let res = await supabase.from("whatsapp_orders").insert({
         ...fullPayload,
-        estado: "nuevo",
       });
       if (res.error && res.error.message?.includes("column")) {
         res = await supabase.from("whatsapp_orders").insert({
           ...basePayload,
-          estado: "nuevo",
         });
       }
       dbError = res.error;
@@ -613,6 +656,107 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
                 <option value="Morazán">Morazán</option>
                 <option value="La Unión">La Unión</option>
               </select>
+            </div>
+
+            {/* SECCIÓN DE ENCARGOS & FECHA PROGRAMADA */}
+            <div className="sm:col-span-2 rounded-xl border border-[var(--bd)] bg-sf/60 p-3.5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-indigo-500" />
+                  <div>
+                    <span className="text-xs font-bold text-[var(--tx)] block">
+                      ¿Es un Encargo o Entrega para Fecha Futura?
+                    </span>
+                    <span className="text-[10px] opacity-60 block">
+                      Para clientes que piden para el sábado, quincena o fin de mes.
+                    </span>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.es_encargo}
+                    onChange={(e) => {
+                      const activo = e.target.checked;
+                      setForm(f => ({
+                        ...f,
+                        es_encargo: activo,
+                        fecha_programada: activo ? (f.fecha_programada || getProximoSabado()) : "",
+                      }));
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-black/20 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+              </div>
+
+              {form.es_encargo && (
+                <div className="space-y-2.5 pt-2 border-t border-[var(--bd)]">
+                  <p className="text-[11px] opacity-70">
+                    💡 Este pedido no estorbará en la cola de empaque de hoy; esperará en la pestaña <strong>📅 Encargos / Futuros</strong> hasta que llegue la fecha.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className={labelCls} htmlFor="fecha_programada">
+                        Fecha Programada de Entrega *
+                      </label>
+                      <input
+                        id="fecha_programada"
+                        type="date"
+                        min={new Date().toISOString().slice(0, 10)}
+                        value={form.fecha_programada}
+                        onChange={set("fecha_programada")}
+                        className={inputCls}
+                        required={form.es_encargo}
+                      />
+                    </div>
+
+                    <div>
+                      <label className={labelCls}>
+                        Atajos rápidos de fecha
+                      </label>
+                      <div className="flex flex-wrap gap-1 mt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, fecha_programada: getProximoSabado() }))}
+                          className="px-2 py-1 bg-cd hover:bg-black/5 border border-[var(--bd)] rounded-md text-[10px] font-bold"
+                        >
+                          Sábado
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, fecha_programada: getProximaQuincena() }))}
+                          className="px-2 py-1 bg-cd hover:bg-black/5 border border-[var(--bd)] rounded-md text-[10px] font-bold text-indigo-500"
+                        >
+                          Quincena (15)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, fecha_programada: getFinDeMes() }))}
+                          className="px-2 py-1 bg-cd hover:bg-black/5 border border-[var(--bd)] rounded-md text-[10px] font-bold text-amber-600"
+                        >
+                          Fin de Mes (30)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, fecha_programada: getEnNDias(7) }))}
+                          className="px-2 py-1 bg-cd hover:bg-black/5 border border-[var(--bd)] rounded-md text-[10px] font-bold"
+                        >
+                          +7 días
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, fecha_programada: getEnNDias(15) }))}
+                          className="px-2 py-1 bg-cd hover:bg-black/5 border border-[var(--bd)] rounded-md text-[10px] font-bold"
+                        >
+                          +15 días
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="sm:col-span-2">

@@ -38,7 +38,13 @@ import {
   Bot,
   Layers,
   Send,
-  ExternalLink
+  ExternalLink,
+  Calendar,
+  CalendarClock,
+  BellRing,
+  Sparkles,
+  Zap,
+  ArrowRight
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import PedidoModal from "@/components/PedidoModal";
@@ -68,13 +74,16 @@ export interface Pedido {
   motivo_cancelacion?: string | null;
   liquidado?: boolean | null;
   origen?: string | null;
+  fecha_programada?: string | null;
+  es_encargo?: boolean | null;
 }
 
-const ESTADOS = ["nuevo", "por_empacar", "en_camino", "entregado", "cancelado"] as const;
+const ESTADOS = ["nuevo", "programado", "por_empacar", "en_camino", "entregado", "cancelado"] as const;
 type Estado = (typeof ESTADOS)[number];
 
 const COLUMNAS: { key: Estado; titulo: string; emoji: string; accent: string }[] = [
-  { key: "nuevo", titulo: "Nuevos", emoji: "📥", accent: "border-t-sky-500" },
+  { key: "nuevo", titulo: "Nuevos Hoy", emoji: "📥", accent: "border-t-sky-500" },
+  { key: "programado", titulo: "Encargos / Futuros", emoji: "📅", accent: "border-t-indigo-500" },
   { key: "por_empacar", titulo: "Por Empacar", emoji: "📦", accent: "border-t-amber-500" },
   { key: "en_camino", titulo: "En Camino", emoji: "🛵", accent: "border-t-violet-500" },
   { key: "entregado", titulo: "Entregados", emoji: "✅", accent: "border-t-emerald-500" },
@@ -83,6 +92,7 @@ const COLUMNAS: { key: Estado; titulo: string; emoji: string; accent: string }[]
 
 const ETIQUETA_ESTADO: Record<Estado, string> = {
   nuevo: "Nuevo",
+  programado: "Encargo / Programado",
   por_empacar: "Por empacar",
   en_camino: "En camino",
   entregado: "Entregado",
@@ -117,8 +127,11 @@ const DEPARTAMENTOS = [
   "La Unión"
 ];
 
-const normalizarEstado = (e: string | null | undefined): Estado =>
-  ESTADOS.includes((e ?? "") as Estado) ? ((e as Estado) ?? "nuevo") : "nuevo";
+const normalizarEstado = (e: string | null | undefined): Estado => {
+  if (!e) return "nuevo";
+  if (ESTADOS.includes(e as Estado)) return e as Estado;
+  return "nuevo";
+};
 
 const dinero = (n: number | null | undefined) => `$${Number(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -128,6 +141,69 @@ const fechaCorta = (iso: string | null | undefined) => {
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("es-SV", { day: "2-digit", month: "short" });
 };
+
+/**
+ * Detecta si un pedido es un encargo / pedido programado
+ */
+export function esPedidoEncargo(p: Pedido): boolean {
+  if (p.estado === 'programado' || Boolean(p.es_encargo) || Boolean(p.fecha_programada)) {
+    return true;
+  }
+  const notas = (p.notas || '').toLowerCase();
+  if (
+    notas.includes('para sabado') ||
+    notas.includes('para el sabado') ||
+    notas.includes('quincena') ||
+    notas.includes('para el 15') ||
+    notas.includes('fin de mes') ||
+    notas.includes('otra semana') ||
+    notas.includes('para el lunes') ||
+    notas.includes('en 15 dias') ||
+    notas.includes('para el viernes')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Calcula días restantes y nivel de urgencia de un encargo programado
+ */
+export function infoEncargo(p: Pedido): { texto: string; urgencia: 'hoy' | 'manana' | 'proximo' | 'futuro' | 'vencido' | 'normal'; dias: number } {
+  if (!p.fecha_programada) {
+    const notas = (p.notas || '').toLowerCase();
+    let hint = 'Fecha pendiente';
+    if (notas.includes('sabado') || notas.includes('sábado')) hint = 'Para sábado';
+    else if (notas.includes('quincena') || notas.includes('15')) hint = 'Para quincena';
+    else if (notas.includes('fin de mes') || notas.includes('30')) hint = 'Fin de mes';
+    else if (notas.includes('lunes')) hint = 'Para lunes';
+    return { texto: hint, urgencia: 'normal', dias: 99 };
+  }
+
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const partes = p.fecha_programada.split('-').map(Number);
+  if (partes.length < 3) return { texto: p.fecha_programada, urgencia: 'normal', dias: 99 };
+
+  const [y, m, d] = partes;
+  const fechaEntrega = new Date(y, m - 1, d);
+  const diffMs = fechaEntrega.getTime() - hoy.getTime();
+  const dias = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+  if (dias < 0) {
+    return { texto: `Venció hace ${Math.abs(dias)}d`, urgencia: 'vencido', dias };
+  }
+  if (dias === 0) {
+    return { texto: '¡Despachar Hoy!', urgencia: 'hoy', dias: 0 };
+  }
+  if (dias === 1) {
+    return { texto: 'Despachar Mañana', urgencia: 'manana', dias: 1 };
+  }
+  if (dias <= 5) {
+    return { texto: `Faltan ${dias} días`, urgencia: 'proximo', dias };
+  }
+  return { texto: `En ${dias}d (${fechaEntrega.toLocaleDateString('es-SV', { day: 'numeric', month: 'short' })})`, urgencia: 'futuro', dias };
+}
 
 /* ------------------------------------------------------------------ */
 /* Página principal                                                    */
@@ -143,6 +219,8 @@ export function PedidosPage() {
 
   // Vistas y Filtros Pro
   const [vista, setVista] = useState<'kanban' | 'tabla'>('kanban');
+  const [pestañaEtapa, setPestañaEtapa] = useState<'todas' | Estado>('todas');
+  const [filtroEncargos, setFiltroEncargos] = useState<'todos' | 'urgentes' | 'semana' | 'quincena'>('todos');
   const [filtroCourier, setFiltroCourier] = useState("Todos los Couriers");
   const [filtroDepto, setFiltroDepto] = useState("Todas las Zonas");
 
@@ -222,6 +300,9 @@ export function PedidosPage() {
     let porDespachar = 0;
     let totalHistorico = 0;
     let pendientesLiquidacion = 0;
+    let totalEncargos = 0;
+    let montoEncargos = 0;
+    let encargosUrgentes = 0;
     
     const hoy = new Date();
     const hoyStr = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
@@ -237,8 +318,19 @@ export function PedidosPage() {
         }
       }
 
+      // Pedidos activos para despachar hoy (excluye encargos futuros)
       if (p.estado === "nuevo" || p.estado === "por_empacar") {
         porDespachar++;
+      }
+
+      // Encargos programados
+      if (p.estado === "programado" || (p.estado !== 'cancelado' && p.estado !== 'entregado' && esPedidoEncargo(p) && p.estado !== 'por_empacar' && p.estado !== 'en_camino')) {
+        totalEncargos++;
+        montoEncargos += total;
+        const info = infoEncargo(p);
+        if (info.urgencia === 'hoy' || info.urgencia === 'manana' || info.urgencia === 'vencido') {
+          encargosUrgentes++;
+        }
       }
 
       if ((p.estado === "en_camino" || p.estado === "entregado") && !p.liquidado) {
@@ -250,7 +342,10 @@ export function PedidosPage() {
       ventasHoy,
       porDespachar,
       ticketPromedio: pedidos.length > 0 ? totalHistorico / pedidos.length : 0,
-      pendientesLiquidacion
+      pendientesLiquidacion,
+      totalEncargos,
+      montoEncargos,
+      encargosUrgentes
     };
   }, [pedidos]);
 
@@ -266,7 +361,8 @@ export function PedidosPage() {
         (p.sku ?? "").toLowerCase().includes(q) ||
         (p.telefono ?? "").toLowerCase().includes(q) ||
         (p.codigo_anuncio ?? "").toLowerCase().includes(q) ||
-        (p.direccion ?? "").toLowerCase().includes(q)
+        (p.direccion ?? "").toLowerCase().includes(q) ||
+        (p.notas ?? "").toLowerCase().includes(q)
       );
     }
 
@@ -283,15 +379,54 @@ export function PedidosPage() {
     return list;
   }, [pedidos, busqueda, filtroCourier, filtroDepto]);
 
+  // Lista según pestaña de etapa
+  const pedidosParaVista = useMemo(() => {
+    if (pestañaEtapa === 'todas') return pedidosFiltrados;
+
+    let filtrados = pedidosFiltrados.filter(p => {
+      const st = normalizarEstado(p.estado);
+      if (pestañaEtapa === 'programado') {
+        return st === 'programado' || esPedidoEncargo(p);
+      }
+      return st === pestañaEtapa;
+    });
+
+    // Subfiltro específico de encargos
+    if (pestañaEtapa === 'programado') {
+      if (filtroEncargos === 'urgentes') {
+        filtrados = filtrados.filter(p => {
+          const inf = infoEncargo(p);
+          return inf.urgencia === 'hoy' || inf.urgencia === 'manana' || inf.urgencia === 'vencido';
+        });
+      } else if (filtroEncargos === 'semana') {
+        filtrados = filtrados.filter(p => {
+          const inf = infoEncargo(p);
+          return inf.dias <= 7;
+        });
+      } else if (filtroEncargos === 'quincena') {
+        filtrados = filtrados.filter(p => {
+          const inf = infoEncargo(p);
+          return inf.dias > 7;
+        });
+      }
+    }
+
+    return filtrados;
+  }, [pedidosFiltrados, pestañaEtapa, filtroEncargos]);
+
   const porEstado = useMemo(() => {
     const map: Record<Estado, Pedido[]> = {
       nuevo: [],
+      programado: [],
       por_empacar: [],
       en_camino: [],
       entregado: [],
       cancelado: [],
     };
-    for (const p of pedidosFiltrados) map[normalizarEstado(p.estado)].push(p);
+    for (const p of pedidosFiltrados) {
+      const st = normalizarEstado(p.estado);
+      map[st].push(p);
+    }
     return map;
   }, [pedidosFiltrados]);
 
@@ -357,6 +492,62 @@ export function PedidosPage() {
         });
       } catch {
         // Ignorar error en emisión secundaria
+      }
+
+      await cargarPedidos(true);
+    }
+    setMoviendoId(null);
+  };
+
+  /* --------------------------- Cambiar Estado Directo (Jump) --------------------------- */
+  const cambiarEstadoDirecto = async (pedido: Pedido, nuevoEstado: Estado) => {
+    if (nuevoEstado === 'cancelado') {
+      setPedidoACancelar(pedido);
+      return;
+    }
+
+    setMoviendoId(pedido.id);
+    const previos = pedidos;
+    setPedidos((prev) =>
+      prev.map((p) => (p.id === pedido.id ? { ...p, estado: nuevoEstado } : p))
+    );
+
+    const { error } = await supabase
+      .from("whatsapp_orders")
+      .update({ estado: nuevoEstado })
+      .eq("id", pedido.id);
+
+    if (error) {
+      setPedidos(previos);
+      setError(`No se pudo actualizar el estado: ${error.message}`);
+    } else {
+      try {
+        const { emitOsEvent } = await import('@/lib/osEvents');
+        const eventMap: Record<string, string> = {
+          nuevo: 'order.created',
+          programado: 'order.scheduled',
+          por_empacar: 'order.confirmed',
+          en_camino: 'order.shipped',
+          entregado: 'order.delivered',
+          cancelado: 'order.cancelled'
+        };
+        emitOsEvent({
+          type: eventMap[nuevoEstado] || 'order.confirmed',
+          source_table: 'whatsapp_orders',
+          source_id: pedido.id,
+          payload: {
+            order_id: pedido.id,
+            nombre_cliente: pedido.nombre_cliente,
+            telefono: pedido.telefono,
+            sku: pedido.sku,
+            total: pedido.total,
+            estado_anterior: pedido.estado,
+            estado: nuevoEstado,
+            codigo_anuncio: pedido.codigo_anuncio
+          }
+        });
+      } catch {
+        // Ignorar
       }
 
       await cargarPedidos(true);
@@ -667,44 +858,76 @@ export function PedidosPage() {
       </div>
 
       {/* Tarjetas KPI Operativas */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div className="flex items-center gap-3.5 rounded-2xl border border-[var(--bd)] bg-cd p-4 shadow-sm">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5 mb-5">
+        <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
             <TrendingUp className="h-5 w-5" />
           </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Ventas de Hoy</p>
-            <p className="text-xl font-black">{dinero(kpis.ventasHoy)}</p>
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Ventas Hoy</p>
+            <p className="text-lg font-black truncate">{dinero(kpis.ventasHoy)}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3.5 rounded-2xl border border-[var(--bd)] bg-cd p-4 shadow-sm">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-500">
+        <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-500">
             <Clock className="h-5 w-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Por Despachar</p>
-            <p className="text-xl font-black">{kpis.porDespachar} <span className="text-xs font-normal opacity-60">pedidos</span></p>
+            <p className="text-lg font-black truncate">{kpis.porDespachar} <span className="text-xs font-normal opacity-60">hoy</span></p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3.5 rounded-2xl border border-[var(--bd)] bg-cd p-4 shadow-sm">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500">
+        {/* KPI 3: Bóveda de Encargos Programados */}
+        <button
+          type="button"
+          onClick={() => setPestañaEtapa('programado')}
+          className={`flex items-center gap-3 rounded-2xl border p-3.5 shadow-sm text-left transition-all ${
+            pestañaEtapa === 'programado'
+              ? 'border-indigo-500 bg-indigo-500/10 ring-2 ring-indigo-500/20'
+              : 'border-[var(--bd)] bg-cd hover:border-indigo-500/40'
+          }`}
+          title="Ver pedidos programados para quincena / fin de mes"
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500 relative">
+            <CalendarClock className="h-5 w-5" />
+            {kpis.encargosUrgentes > 0 && (
+              <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-rose-500 animate-ping" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-1">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Encargos</p>
+              {kpis.encargosUrgentes > 0 && (
+                <span className="text-[9px] font-black px-1 rounded bg-rose-500 text-white animate-pulse">
+                  {kpis.encargosUrgentes} HOY
+                </span>
+              )}
+            </div>
+            <p className="text-lg font-black truncate text-indigo-700 dark:text-indigo-300">
+              {kpis.totalEncargos} <span className="text-xs font-normal opacity-70">({dinero(kpis.montoEncargos)})</span>
+            </p>
+          </div>
+        </button>
+
+        <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500">
             <DollarSign className="h-5 w-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Cobros en Calle</p>
-            <p className="text-xl font-black text-purple-600 dark:text-purple-400">{dinero(kpis.pendientesLiquidacion)}</p>
+            <p className="text-lg font-black text-purple-600 dark:text-purple-400 truncate">{dinero(kpis.pendientesLiquidacion)}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3.5 rounded-2xl border border-[var(--bd)] bg-cd p-4 shadow-sm">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500">
+        <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-500/10 text-zinc-500">
             <BarChart3 className="h-5 w-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Ticket Promedio</p>
-            <p className="text-xl font-black">{dinero(kpis.ticketPromedio)}</p>
+            <p className="text-lg font-black truncate">{dinero(kpis.ticketPromedio)}</p>
           </div>
         </div>
       </div>
@@ -719,6 +942,189 @@ export function PedidosPage() {
         </div>
       )}
 
+      {/* Pestañas de Etapas del Flujo Operativo (Pipeline Tabs) */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-4 scrollbar-none">
+        <button
+          onClick={() => setPestañaEtapa('todas')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
+            pestañaEtapa === 'todas'
+              ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow'
+              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
+          }`}
+        >
+          <span>📋 Todos</span>
+          <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-black/10 dark:bg-white/20 font-black">
+            {pedidosFiltrados.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setPestañaEtapa('nuevo')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
+            pestañaEtapa === 'nuevo'
+              ? 'bg-sky-600 text-white border-transparent shadow'
+              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
+          }`}
+        >
+          <span>📥 Nuevos Hoy</span>
+          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+            pestañaEtapa === 'nuevo' ? 'bg-white/20 text-white' : 'bg-sky-500/15 text-sky-600'
+          }`}>
+            {porEstado.nuevo.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setPestañaEtapa('programado')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
+            pestañaEtapa === 'programado'
+              ? 'bg-indigo-600 text-white border-transparent shadow'
+              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
+          }`}
+        >
+          <span>📅 Encargos / Futuros</span>
+          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+            pestañaEtapa === 'programado' ? 'bg-white/20 text-white' : 'bg-indigo-500/15 text-indigo-600'
+          }`}>
+            {porEstado.programado.length}
+          </span>
+          {kpis.encargosUrgentes > 0 && (
+            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-rose-500 text-white animate-pulse">
+              {kpis.encargosUrgentes} URGENTE
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setPestañaEtapa('por_empacar')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
+            pestañaEtapa === 'por_empacar'
+              ? 'bg-amber-600 text-white border-transparent shadow'
+              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
+          }`}
+        >
+          <span>📦 Por Empacar</span>
+          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+            pestañaEtapa === 'por_empacar' ? 'bg-white/20 text-white' : 'bg-amber-500/15 text-amber-600'
+          }`}>
+            {porEstado.por_empacar.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setPestañaEtapa('en_camino')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
+            pestañaEtapa === 'en_camino'
+              ? 'bg-violet-600 text-white border-transparent shadow'
+              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
+          }`}
+        >
+          <span>🛵 En Camino</span>
+          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+            pestañaEtapa === 'en_camino' ? 'bg-white/20 text-white' : 'bg-violet-500/15 text-violet-600'
+          }`}>
+            {porEstado.en_camino.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setPestañaEtapa('entregado')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
+            pestañaEtapa === 'entregado'
+              ? 'bg-emerald-600 text-white border-transparent shadow'
+              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
+          }`}
+        >
+          <span>✅ Entregados</span>
+          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+            pestañaEtapa === 'entregado' ? 'bg-white/20 text-white' : 'bg-emerald-500/15 text-emerald-600'
+          }`}>
+            {porEstado.entregado.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setPestañaEtapa('cancelado')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
+            pestañaEtapa === 'cancelado'
+              ? 'bg-rose-600 text-white border-transparent shadow'
+              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
+          }`}
+        >
+          <span>❌ Cancelados</span>
+          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+            pestañaEtapa === 'cancelado' ? 'bg-white/20 text-white' : 'bg-rose-500/15 text-rose-600'
+          }`}>
+            {porEstado.cancelado.length}
+          </span>
+        </button>
+      </div>
+
+      {/* Banner Especial de Encargos / Pedidos Programados */}
+      {pestañaEtapa === 'programado' && (
+        <div className="bg-gradient-to-r from-indigo-500/15 via-purple-500/10 to-transparent border border-indigo-500/30 rounded-2xl p-4 mb-5 shadow-sm">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-indigo-500" />
+                <h2 className="text-base font-black text-[var(--tx)]">Bóveda de Encargos & Pedidos Programados</h2>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
+                  Aislados del despacho diario
+                </span>
+              </div>
+              <p className="text-xs tx-mu mt-1 max-w-2xl">
+                Pedidos agendados para quincena (15 o 30), fin de semana o en 15 días. Se mantienen aislados para no saturar la cola de bodega hasta que llegue su fecha de entrega.
+              </p>
+            </div>
+
+            {/* Sub-filtros temporales de encargos */}
+            <div className="flex flex-wrap items-center gap-1.5 bg-cd p-1 rounded-xl border border-[var(--bd)] text-xs font-bold self-start md:self-auto">
+              <button
+                type="button"
+                onClick={() => setFiltroEncargos('todos')}
+                className={`px-3 py-1.5 rounded-lg transition-colors ${
+                  filtroEncargos === 'todos' ? 'bg-indigo-600 text-white' : 'tx-mu hover:text-[var(--tx)]'
+                }`}
+              >
+                Todos ({porEstado.programado.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFiltroEncargos('urgentes')}
+                className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                  filtroEncargos === 'urgentes' ? 'bg-rose-600 text-white' : 'tx-mu hover:text-[var(--tx)]'
+                }`}
+              >
+                <span>🔥 Despachar Hoy/Mañana</span>
+                {kpis.encargosUrgentes > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 font-black">
+                    {kpis.encargosUrgentes}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setFiltroEncargos('semana')}
+                className={`px-3 py-1.5 rounded-lg transition-colors ${
+                  filtroEncargos === 'semana' ? 'bg-indigo-600 text-white' : 'tx-mu hover:text-[var(--tx)]'
+                }`}
+              >
+                🗓️ Esta Semana (≤ 7d)
+              </button>
+              <button
+                type="button"
+                onClick={() => setFiltroEncargos('quincena')}
+                className={`px-3 py-1.5 rounded-lg transition-colors ${
+                  filtroEncargos === 'quincena' ? 'bg-indigo-600 text-white' : 'tx-mu hover:text-[var(--tx)]'
+                }`}
+              >
+                📆 Quincena & Más (&gt; 7d)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CONTENIDO VISTA 1: TABLERO KANBAN */}
       {cargando ? (
         <div className="flex flex-col items-center justify-center py-24 opacity-60 flex-1">
@@ -726,50 +1132,106 @@ export function PedidosPage() {
           <p className="text-sm">Cargando pedidos logísticos...</p>
         </div>
       ) : vista === 'kanban' ? (
-        <div className="flex gap-4 overflow-x-auto pb-4 -mx-1 px-1 flex-1 items-start">
-          {columnasVisibles.map((col) => (
-            <section
-              key={col.key}
-              className={`flex flex-col shrink-0 min-w-[300px] w-[300px] xl:w-auto xl:flex-1 rounded-2xl border border-[var(--bd)] border-t-4 ${col.accent} bg-cd shadow-sm`}
-            >
-              <header className="flex items-center justify-between px-4 py-3 border-b border-[var(--bd)] bg-sf/40">
-                <h2 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[var(--tx)]">
-                  <span aria-hidden>{col.emoji}</span>
-                  {col.titulo}
-                </h2>
-                <span className="text-xs font-black px-2 py-0.5 rounded-full bg-cd border border-[var(--bd)]">
-                  {porEstado[col.key].length}
-                </span>
-              </header>
+        pestañaEtapa === 'todas' ? (
+          /* Kanban Completo Multicolumna */
+          <div className="flex gap-4 overflow-x-auto pb-4 -mx-1 px-1 flex-1 items-start">
+            {columnasVisibles.map((col) => (
+              <section
+                key={col.key}
+                className={`flex flex-col shrink-0 min-w-[300px] w-[300px] xl:w-auto xl:flex-1 rounded-2xl border border-[var(--bd)] border-t-4 ${col.accent} bg-cd shadow-sm`}
+              >
+                <header className="flex items-center justify-between px-4 py-3 border-b border-[var(--bd)] bg-sf/40">
+                  <h2 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[var(--tx)]">
+                    <span aria-hidden>{col.emoji}</span>
+                    {col.titulo}
+                  </h2>
+                  <span className="text-xs font-black px-2 py-0.5 rounded-full bg-cd border border-[var(--bd)]">
+                    {porEstado[col.key].length}
+                  </span>
+                </header>
 
-              <div className="p-3 space-y-3 overflow-y-auto min-h-[160px] max-h-[calc(100vh-380px)]">
-                {porEstado[col.key].length === 0 ? (
-                  <p className="text-center text-xs opacity-40 py-8">Sin pedidos en esta fase</p>
-                ) : (
-                  porEstado[col.key].map((pedido) => (
-                    <PedidoCard
-                      key={pedido.id}
-                      pedido={pedido}
-                      moviendo={moviendoId === pedido.id}
-                      esDuplicado={telefonosDuplicados.has((pedido.telefono || '').replace(/\D/g, ''))}
-                      seleccionado={seleccionados.has(pedido.id)}
-                      onToggleSelect={() => toggleSeleccionar(pedido.id)}
-                      onGuia={(p) => setPedidosGuia([p as GuiaPedido])}
-                      onDetalle={setPedidoDetalle}
-                      onMover={moverPedido}
-                      onEditar={setPedidoAEditar}
-                      onBorrar={borrarPedido}
-                      onLiquidar={setPedidoALiquidar}
-                      onOpenWhatsapp={setPedidoWhatsapp}
-                    />
-                  ))
-                )}
+                <div className="p-3 space-y-3 overflow-y-auto min-h-[160px] max-h-[calc(100vh-380px)]">
+                  {porEstado[col.key].length === 0 ? (
+                    <p className="text-center text-xs opacity-40 py-8">Sin pedidos en esta fase</p>
+                  ) : (
+                    porEstado[col.key].map((pedido) => (
+                      <PedidoCard
+                        key={pedido.id}
+                        pedido={pedido}
+                        moviendo={moviendoId === pedido.id}
+                        esDuplicado={telefonosDuplicados.has((pedido.telefono || '').replace(/\D/g, ''))}
+                        seleccionado={seleccionados.has(pedido.id)}
+                        onToggleSelect={() => toggleSeleccionar(pedido.id)}
+                        onGuia={(p) => setPedidosGuia([p as GuiaPedido])}
+                        onDetalle={setPedidoDetalle}
+                        onMover={moverPedido}
+                        onCambiarDirecto={cambiarEstadoDirecto}
+                        onEditar={setPedidoAEditar}
+                        onBorrar={borrarPedido}
+                        onLiquidar={setPedidoALiquidar}
+                        onOpenWhatsapp={setPedidoWhatsapp}
+                      />
+                    ))
+                  )}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          /* Vista Kanban Enfocada por Etapa (Grilla Limpia y Desahogada) */
+          <div className="flex-1 flex flex-col">
+            <div className="flex items-center justify-between mb-3 px-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-black text-[var(--tx)]">
+                  Fase: {ETIQUETA_ESTADO[pestañaEtapa]}
+                </span>
+                <span className="text-xs font-black px-2 py-0.5 rounded-full bg-cd border border-[var(--bd)]">
+                  {pedidosParaVista.length} pedidos
+                </span>
               </div>
-            </section>
-          ))}
-        </div>
+              {pedidosParaVista.length > 0 && (
+                <button
+                  type="button"
+                  onClick={seleccionarTodos}
+                  className="text-xs font-bold text-indigo-500 hover:underline"
+                >
+                  {seleccionados.size === pedidosParaVista.length ? 'Deseleccionar todos' : 'Seleccionar todos en esta etapa'}
+                </button>
+              )}
+            </div>
+
+            {pedidosParaVista.length === 0 ? (
+              <div className="rounded-2xl border border-[var(--bd)] bg-cd p-16 text-center shadow-sm">
+                <Package className="w-12 h-12 mx-auto opacity-30 mb-3" />
+                <h3 className="text-sm font-bold">No hay pedidos en "{ETIQUETA_ESTADO[pestañaEtapa]}"</h3>
+                <p className="text-xs tx-mu mt-1">Los pedidos asignados a esta etapa aparecerán aquí organizados.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {pedidosParaVista.map((pedido) => (
+                  <PedidoCard
+                    key={pedido.id}
+                    pedido={pedido}
+                    moviendo={moviendoId === pedido.id}
+                    esDuplicado={telefonosDuplicados.has((pedido.telefono || '').replace(/\D/g, ''))}
+                    seleccionado={seleccionados.has(pedido.id)}
+                    onToggleSelect={() => toggleSeleccionar(pedido.id)}
+                    onGuia={(p) => setPedidosGuia([p as GuiaPedido])}
+                    onDetalle={setPedidoDetalle}
+                    onMover={moverPedido}
+                    onCambiarDirecto={cambiarEstadoDirecto}
+                    onEditar={setPedidoAEditar}
+                    onBorrar={borrarPedido}
+                    onLiquidar={setPedidoALiquidar}
+                    onOpenWhatsapp={setPedidoWhatsapp}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )
       ) : (
-        /* CONTENIDO VISTA 2: TABLA DETALLADA */
+        /* CONTENIDO VISTA 2: TABLA DETALLADA CON FILTRO POR ETAPA */
         <div className="bg-cd border border-[var(--bd)] rounded-2xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
@@ -778,7 +1240,7 @@ export function PedidosPage() {
                   <th className="p-3 text-center w-10">
                     <input
                       type="checkbox"
-                      checked={seleccionados.size > 0 && seleccionados.size === pedidosFiltrados.length}
+                      checked={seleccionados.size > 0 && seleccionados.size === pedidosParaVista.length}
                       onChange={seleccionarTodos}
                       className="rounded"
                     />
@@ -788,22 +1250,24 @@ export function PedidosPage() {
                   <th className="p-3">Zona / Courier</th>
                   <th className="p-3">SKU / Producto</th>
                   <th className="p-3 text-right">Monto</th>
-                  <th className="p-3 text-center">Estado</th>
+                  <th className="p-3 text-center">Estado / Programación</th>
                   <th className="p-3 text-center">Liquidación</th>
                   <th className="p-3 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--bd)]">
-                {pedidosFiltrados.length === 0 ? (
+                {pedidosParaVista.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="py-12 text-center tx-mu">
-                      No se encontraron pedidos con los filtros aplicados.
+                      No se encontraron pedidos con los filtros aplicados en esta etapa.
                     </td>
                   </tr>
                 ) : (
-                  pedidosFiltrados.map((p) => {
+                  pedidosParaVista.map((p) => {
                     const isDup = telefonosDuplicados.has((p.telefono || '').replace(/\D/g, ''));
                     const isSel = seleccionados.has(p.id);
+                    const esEncargo = esPedidoEncargo(p);
+                    const encargoInfo = esEncargo ? infoEncargo(p) : null;
 
                     return (
                       <tr key={p.id} className={`hover:bg-sf/50 transition-colors ${isSel ? 'bg-indigo-500/5' : ''}`}>
@@ -830,6 +1294,11 @@ export function PedidosPage() {
                           </div>
                           <span className="text-[10px] tx-mu font-mono">{p.telefono || "—"}</span>
                           <span className="text-[10px] tx-mu block truncate max-w-xs">{p.direccion || "—"}</span>
+                          {p.notas && (
+                            <span className="text-[10px] italic text-indigo-500/80 block truncate max-w-xs">
+                              💬 {p.notas}
+                            </span>
+                          )}
                         </td>
                         <td className="p-3">
                           <span className="text-xs font-semibold block">{p.departamento || "San Salvador"}</span>
@@ -849,9 +1318,22 @@ export function PedidosPage() {
                           {dinero(p.total)}
                         </td>
                         <td className="p-3 text-center">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sf border border-[var(--bd)] uppercase">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sf border border-[var(--bd)] uppercase block mb-1">
                             {ETIQUETA_ESTADO[normalizarEstado(p.estado)]}
                           </span>
+                          {encargoInfo && (
+                            <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border ${
+                              encargoInfo.urgencia === 'hoy'
+                                ? 'bg-rose-500/15 text-rose-600 border-rose-500/30 animate-pulse font-black'
+                                : encargoInfo.urgencia === 'manana'
+                                ? 'bg-amber-500/15 text-amber-600 border-amber-500/30 font-bold'
+                                : encargoInfo.urgencia === 'vencido'
+                                ? 'bg-red-500/15 text-red-600 border-red-500/30 font-bold'
+                                : 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20'
+                            }`}>
+                              📅 {encargoInfo.texto}
+                            </span>
+                          )}
                         </td>
                         <td className="p-3 text-center">
                           {p.liquidado ? (
@@ -869,6 +1351,15 @@ export function PedidosPage() {
                         </td>
                         <td className="p-3 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1">
+                            {(p.estado === 'programado' || esEncargo) && p.estado !== 'por_empacar' && p.estado !== 'en_camino' && p.estado !== 'entregado' && (
+                              <button
+                                onClick={() => cambiarEstadoDirecto(p, 'por_empacar')}
+                                className="p-1.5 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 hover:bg-amber-500/25 border border-amber-500/30 flex items-center gap-1 text-[10px] font-black"
+                                title="Pasar inmediatamente a empaque en bodega"
+                              >
+                                <Zap size={12} /> Empacar
+                              </button>
+                            )}
                             <button
                               onClick={() => setPedidoWhatsapp(p)}
                               className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-500/10"
@@ -1207,6 +1698,30 @@ export function PedidosPage() {
                   <Send size={12} /> Enviar Reprogramación
                 </a>
               </div>
+
+              {/* Plantilla 4: Recordatorio de Encargo Programado */}
+              <div className="p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/30 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300 block">4. 📅 Recordatorio de Encargo Programado</span>
+                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-bold">
+                    Quincena / Futuro
+                  </span>
+                </div>
+                <p className="text-[11px] tx-mu italic bg-cd p-2 rounded-lg border border-[var(--bd)]">
+                  "¡Hola {pedidoWhatsapp.nombre_cliente}! 👋 Te saludamos de TODOENUNO. Te recordamos que tu encargo de *{pedidoWhatsapp.sku || 'tu producto'}* por *{dinero(pedidoWhatsapp.total)}* está programado para entrega este {pedidoWhatsapp.fecha_programada || 'día acordado'}. ¿Nos confirmas si todo sigue en pie para despacharlo con el motorista?"
+                </p>
+                <a
+                  href={`https://wa.me/${(pedidoWhatsapp.telefono || '').replace(/\D/g, '')}?text=${encodeURIComponent(
+                    `¡Hola ${pedidoWhatsapp.nombre_cliente || ''}! 👋 Te saludamos de TODOENUNO. Te recordamos que tu encargo de *${pedidoWhatsapp.sku || 'tu producto'}* por *${dinero(pedidoWhatsapp.total)}* está programado para entrega este ${pedidoWhatsapp.fecha_programada || 'día acordado'}. ¿Nos confirmas si todo sigue en pie para despacharlo con el motorista?`
+                  )}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => setPedidoWhatsapp(null)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold shadow-sm"
+                >
+                  <Send size={12} /> Enviar Recordatorio de Encargo
+                </a>
+              </div>
             </div>
           </div>
         </div>
@@ -1228,6 +1743,7 @@ function PedidoCard({
   onGuia,
   onDetalle,
   onMover,
+  onCambiarDirecto,
   onEditar,
   onBorrar,
   onLiquidar,
@@ -1241,6 +1757,7 @@ function PedidoCard({
   onGuia: (p: Pedido) => void;
   onDetalle: (p: Pedido) => void;
   onMover: (p: Pedido, dir: -1 | 1) => void;
+  onCambiarDirecto?: (p: Pedido, destino: Estado) => void;
   onEditar: (p: Pedido) => void;
   onBorrar: (p: Pedido) => void;
   onLiquidar: (p: Pedido) => void;
@@ -1248,6 +1765,8 @@ function PedidoCard({
 }) {
   const estado = normalizarEstado(pedido.estado);
   const idx = ESTADOS.indexOf(estado);
+  const encargo = esPedidoEncargo(pedido);
+  const encargoInfo = encargo ? infoEncargo(pedido) : null;
 
   const btnBase =
     "flex items-center justify-center rounded-lg border border-[var(--bd)] bg-sf py-1.5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-cd";
@@ -1316,6 +1835,43 @@ function PedidoCard({
           </span>
         )}
       </div>
+
+      {/* Badge de Encargo / Programación */}
+      {encargoInfo && (
+        <div className={`mt-2 flex items-center justify-between gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold ${
+          encargoInfo.urgencia === 'hoy'
+            ? 'bg-rose-500/15 text-rose-600 border-rose-500/30 animate-pulse font-black'
+            : encargoInfo.urgencia === 'manana'
+            ? 'bg-amber-500/15 text-amber-600 border-amber-500/30'
+            : encargoInfo.urgencia === 'vencido'
+            ? 'bg-red-500/15 text-red-600 border-red-500/30'
+            : 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20'
+        }`}>
+          <span className="flex items-center gap-1">
+            <CalendarClock size={12} />
+            <span>{pedido.fecha_programada ? `Para ${pedido.fecha_programada}` : 'Encargo programado'}</span>
+          </span>
+          <span className="uppercase text-[9px] font-black">{encargoInfo.texto}</span>
+        </div>
+      )}
+
+      {/* Notas del cliente */}
+      {pedido.notas && (
+        <p className="mt-1.5 text-[10px] italic tx-mu truncate bg-sf px-2 py-0.5 rounded border border-[var(--bd)]">
+          💬 {pedido.notas}
+        </p>
+      )}
+
+      {/* Botón directo de "Pasar a Empacar" para encargos listos */}
+      {(estado === "programado" || (encargo && estado === "nuevo")) && onCambiarDirecto && (
+        <button
+          onClick={() => onCambiarDirecto(pedido, 'por_empacar')}
+          className="mt-2.5 w-full py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 rounded-lg text-[10px] font-black flex items-center justify-center gap-1.5 transition-colors border border-amber-500/30 shadow-sm"
+          title="Mover inmediatamente a Por Empacar en Bodega"
+        >
+          <Zap size={12} /> ⚡ Pasar a Empacar en Bodega
+        </button>
+      )}
 
       {/* Botones de acción */}
       <div className="mt-3 grid grid-cols-5 gap-1">
@@ -1414,6 +1970,15 @@ function DetallePedido({ pedido, onClose }: { pedido: Pedido; onClose: () => voi
     { icon: <Hash className="w-4 h-4" />, label: "Código anuncio", valor: pedido.codigo_anuncio || "—" },
     { icon: <StickyNote className="w-4 h-4" />, label: "Notas", valor: pedido.notas || "Sin notas" },
   ];
+
+  if (pedido.fecha_programada || esPedidoEncargo(pedido)) {
+    const info = infoEncargo(pedido);
+    filas.splice(3, 0, {
+      icon: <Calendar className="w-4 h-4 text-indigo-500" />,
+      label: "Programación / Encargo",
+      valor: `${pedido.fecha_programada ? `Para ${pedido.fecha_programada}` : 'Encargo'} (${info.texto})`
+    });
+  }
 
   if (pedido.motivo_cancelacion) {
     filas.push({
