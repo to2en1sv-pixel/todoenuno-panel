@@ -19,6 +19,8 @@ const FORM_INICIAL = {
   metodo_pago: "Contra entrega",
   codigo_anuncio: "",
   notas: "",
+  courier: "Motorista Central 1",
+  departamento: "San Salvador",
 };
 
 type FormKey = keyof typeof FORM_INICIAL;
@@ -45,6 +47,8 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
         metodo_pago: pedido.metodo_pago || "Contra entrega",
         codigo_anuncio: pedido.codigo_anuncio || "",
         notas: pedido.notas || "",
+        courier: (pedido as any).courier || "Motorista Central 1",
+        departamento: (pedido as any).departamento || "San Salvador",
       });
     }
   }, [pedido]);
@@ -84,7 +88,7 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
 
     /* ---------- Insert o Update ---------- */
     setGuardando(true);
-    const payload = {
+    const basePayload = {
       nombre_cliente: form.nombre_cliente.trim(),
       telefono: form.telefono.trim(),
       sku: form.sku.trim(),
@@ -95,23 +99,43 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
       notas: form.notas.trim() || null,
     };
 
+    const fullPayload = {
+      ...basePayload,
+      courier: form.courier,
+      departamento: form.departamento,
+    };
+
     let dbError = null;
 
     if (pedido) {
-      // Actualizar
-      const { error } = await supabase
+      // Actualizar con fallback si columnas no existen en DB
+      let res = await supabase
         .from("whatsapp_orders")
-        .update(payload)
+        .update(fullPayload)
         .eq("id", pedido.id);
-      dbError = error;
+      
+      if (res.error && res.error.message?.includes("column")) {
+        res = await supabase
+          .from("whatsapp_orders")
+          .update(basePayload)
+          .eq("id", pedido.id);
+      }
+      dbError = res.error;
     } else {
-      // Crear
-      const { error } = await supabase.from("whatsapp_orders").insert({
-        ...payload,
+      // Crear con fallback
+      let res = await supabase.from("whatsapp_orders").insert({
+        ...fullPayload,
         estado: "nuevo",
       });
-      dbError = error;
+      if (res.error && res.error.message?.includes("column")) {
+        res = await supabase.from("whatsapp_orders").insert({
+          ...basePayload,
+          estado: "nuevo",
+        });
+      }
+      dbError = res.error;
     }
+
 
     setGuardando(false);
 
@@ -128,7 +152,7 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
         source_table: 'whatsapp_orders',
         source_id: pedido ? pedido.id : `new-${Date.now()}`,
         payload: {
-          ...payload,
+          ...fullPayload,
           estado: pedido ? (pedido.estado || 'por_empacar') : 'nuevo',
           nombre_cliente: form.nombre_cliente.trim()
         }
@@ -282,6 +306,52 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
                 placeholder="Opcional"
                 className={inputCls}
               />
+            </div>
+
+            <div>
+              <label className={labelCls} htmlFor="courier">
+                Transportista / Courier
+              </label>
+              <select
+                id="courier"
+                value={form.courier}
+                onChange={set("courier")}
+                className={inputCls}
+              >
+                <option value="Motorista Central 1">Motorista Central 1</option>
+                <option value="Motorista Central 2">Motorista Central 2</option>
+                <option value="Cargo Expreso El Salvador">Cargo Expreso El Salvador</option>
+                <option value="Urbano Express">Urbano Express</option>
+                <option value="C807 Xpress">C807 Xpress</option>
+                <option value="Retiro en Oficina">Retiro en Oficina</option>
+              </select>
+            </div>
+
+            <div>
+              <label className={labelCls} htmlFor="departamento">
+                Zona / Departamento
+              </label>
+              <select
+                id="departamento"
+                value={form.departamento}
+                onChange={set("departamento")}
+                className={inputCls}
+              >
+                <option value="San Salvador">San Salvador</option>
+                <option value="La Libertad">La Libertad</option>
+                <option value="Santa Ana">Santa Ana</option>
+                <option value="San Miguel">San Miguel</option>
+                <option value="Sonsonate">Sonsonate</option>
+                <option value="Ahuachapán">Ahuachapán</option>
+                <option value="Usulután">Usulután</option>
+                <option value="La Paz">La Paz</option>
+                <option value="Chalatenango">Chalatenango</option>
+                <option value="Cuscatlán">Cuscatlán</option>
+                <option value="Cabañas">Cabañas</option>
+                <option value="San Vicente">San Vicente</option>
+                <option value="Morazán">Morazán</option>
+                <option value="La Unión">La Unión</option>
+              </select>
             </div>
 
             <div className="sm:col-span-2">
