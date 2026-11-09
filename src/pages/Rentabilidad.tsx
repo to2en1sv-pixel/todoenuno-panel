@@ -57,7 +57,7 @@ export function RentabilidadPage() {
         .order('created_at', { ascending: false }),
       supabase
         .from('whatsapp_orders')
-        .select('id,total,codigo_anuncio,created_at')
+        .select('id,total,sku,catalogo_sku,codigo_anuncio,created_at')
         .gte('created_at', rango.isoInicio)
         .lt('created_at', rango.isoFinExclusivo),
     ])
@@ -466,7 +466,12 @@ export function RentabilidadPage() {
                 {filasRoas.map((fila) => (
                   <tr key={fila.codigo_anuncio} className="hover:bg-slate-50">
                     <td className="whitespace-nowrap px-6 py-3 font-medium text-slate-900">
-                      {fila.codigo_anuncio}
+                      <span>{fila.codigo_anuncio}</span>
+                      {fila.producto_catalogo && (
+                        <span className="block text-[10px] font-mono font-bold text-indigo-600 mt-0.5">
+                          🏷️ Catálogo: #{fila.producto_catalogo}
+                        </span>
+                      )}
                     </td>
                     <td className="whitespace-nowrap px-6 py-3 text-right text-slate-700">
                       {formatNumber(fila.pedidos)}

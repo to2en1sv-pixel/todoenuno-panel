@@ -4,6 +4,7 @@ import type {
   PuntoVentas,
   RoasRow,
 } from '@/types/rentabilidad'
+import { resolveCatalogSku } from './catalogAliases'
 
 /** Cambiá acá la moneda si no usás USD. */
 export const MONEDA = 'USD'
@@ -111,7 +112,8 @@ function redondear(valor: number, decimales = 2): number {
 }
 
 /**
- * JOIN lógico entre whatsapp_orders y gastos_publicidad agrupado por codigo_anuncio.
+ * JOIN lógico entre whatsapp_orders y gastos_publicidad agrupado por codigo_anuncio,
+ * vinculando automáticamente con el producto maestro del catálogo.
  */
 export function construirRoas(
   ordenes: OrdenWhatsapp[],
@@ -124,6 +126,7 @@ export function construirRoas(
     if (existente) return existente
     const nueva: RoasRow = {
       codigo_anuncio: codigo,
+      producto_catalogo: resolveCatalogSku(null, codigo, null),
       ventas: 0,
       gasto: 0,
       pedidos: 0,
@@ -140,6 +143,9 @@ export function construirRoas(
     const fila = obtener(codigo)
     fila.ventas += Number(orden.total) || 0
     fila.pedidos += 1
+    if (!fila.producto_catalogo) {
+      fila.producto_catalogo = resolveCatalogSku(orden.sku, orden.codigo_anuncio, orden.catalogo_sku);
+    }
   }
 
   for (const gasto of gastos) {

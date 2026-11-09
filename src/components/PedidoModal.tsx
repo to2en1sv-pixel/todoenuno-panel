@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { X, Loader2, Save, AlertCircle, Plus, Edit } from "lucide-react";
+import { X, Loader2, Save, AlertCircle, Plus, Edit, Package, Search, Check, RefreshCw, Sparkles, Tag, ChevronDown, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Pedido } from "@/pages/Pedidos";
+import { fetchStockItems } from "@/lib/inventory";
+import type { StockItem } from "@/types/inventory";
+import { resolveCatalogSku, linkRawSkuToProduct, linkAdCodeToProduct } from "@/lib/catalogAliases";
 
 interface Props {
   onClose: () => void;
@@ -14,6 +17,7 @@ const FORM_INICIAL = {
   nombre_cliente: "",
   telefono: "",
   sku: "",
+  catalogo_sku: "",
   total: "",
   direccion: "",
   metodo_pago: "Contra entrega",
@@ -35,13 +39,46 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
   const [form, setForm] = useState({ ...FORM_INICIAL });
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Catálogo maestro de productos
+  const [catalogo, setCatalogo] = useState<StockItem[]>([]);
+  const [cargandoCatalogo, setCargandoCatalogo] = useState(true);
+  const [busquedaProducto, setBusquedaProducto] = useState("");
+  const [modoManual, setModoManual] = useState(false);
+  const [selectorAbierto, setSelectorAbierto] = useState(false);
 
+  // Cargar catálogo de productos
+  useEffect(() => {
+    let cancelado = false;
+    async function loadCatalog() {
+      setCargandoCatalogo(true);
+      try {
+        const { items } = await fetchStockItems();
+        if (!cancelado) {
+          setCatalogo(items || []);
+        }
+      } catch (err) {
+        console.warn("No se pudo cargar catálogo para el selector de pedidos:", err);
+      } finally {
+        if (!cancelado) setCargandoCatalogo(false);
+      }
+    }
+    loadCatalog();
+    return () => { cancelado = true; };
+  }, []);
+
+  // Inicializar o auto-resolver producto si editamos
   useEffect(() => {
     if (pedido) {
+      const knownSkus = catalogo.map(c => c.sku);
+      const catSkuResuelto = (pedido as any).catalogo_sku || 
+        resolveCatalogSku(pedido.sku, pedido.codigo_anuncio, null, knownSkus) || "";
+
       setForm({
         nombre_cliente: pedido.nombre_cliente || "",
         telefono: pedido.telefono || "",
         sku: pedido.sku || "",
+        catalogo_sku: catSkuResuelto,
         total: pedido.total?.toString() || "",
         direccion: pedido.direccion || "",
         metodo_pago: pedido.metodo_pago || "Contra entrega",
@@ -50,8 +87,12 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
         courier: (pedido as any).courier || "Motorista Central 1",
         departamento: (pedido as any).departamento || "San Salvador",
       });
+
+      if (!catSkuResuelto && pedido.sku) {
+        setModoManual(true);
+      }
     }
-  }, [pedido]);
+  }, [pedido, catalogo]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -70,6 +111,34 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
+  // Producto seleccionado actualmente del catálogo
+  const productoSeleccionado = useMemo(() => {
+    if (!form.catalogo_sku) return null;
+    return catalogo.find(p => p.sku.toUpperCase() === form.catalogo_sku.toUpperCase()) || null;
+  }, [catalogo, form.catalogo_sku]);
+
+  // Lista filtrada para el selector
+  const productosFiltrados = useMemo(() => {
+    if (!busquedaProducto.trim()) return catalogo;
+    const q = busquedaProducto.toLowerCase().trim();
+    return catalogo.filter(p => 
+      p.sku.toLowerCase().includes(q) || 
+      p.nombre.toLowerCase().includes(q)
+    );
+  }, [catalogo, busquedaProducto]);
+
+  // Seleccionar producto del catálogo
+  const handleSeleccionarProducto = (prod: StockItem) => {
+    setForm(f => ({
+      ...f,
+      catalogo_sku: prod.sku,
+      sku: f.sku && f.sku !== FORM_INICIAL.sku ? f.sku : prod.nombre,
+      total: (!f.total || f.total === "0") && prod.precio_venta ? prod.precio_venta.toString() : f.total
+    }));
+    setSelectorAbierto(false);
+    setModoManual(false);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -77,7 +146,7 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
     /* ---------- Validaciones ---------- */
     if (!form.nombre_cliente.trim()) return setError("El nombre del cliente es obligatorio.");
     if (!form.telefono.trim()) return setError("El teléfono es obligatorio.");
-    if (!form.sku.trim()) return setError("El SKU / producto es obligatorio.");
+    if (!form.sku.trim() && !form.catalogo_sku.trim()) return setError("Debes seleccionar un producto del catálogo o ingresar el nombre.");
     if (!form.direccion.trim()) return setError("La dirección es obligatoria.");
     if (!form.metodo_pago) return setError("Selecciona un método de pago.");
 
@@ -86,12 +155,15 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
       return setError("El total debe ser un número mayor a 0.");
     }
 
+    const skuFinal = form.sku.trim() || form.catalogo_sku.trim();
+    const catalogoSkuFinal = form.catalogo_sku.trim() || null;
+
     /* ---------- Insert o Update ---------- */
     setGuardando(true);
     const basePayload = {
       nombre_cliente: form.nombre_cliente.trim(),
       telefono: form.telefono.trim(),
-      sku: form.sku.trim(),
+      sku: skuFinal,
       total: totalNum,
       direccion: form.direccion.trim(),
       metodo_pago: form.metodo_pago,
@@ -101,6 +173,7 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
 
     const fullPayload = {
       ...basePayload,
+      catalogo_sku: catalogoSkuFinal,
       courier: form.courier,
       departamento: form.departamento,
     };
@@ -136,12 +209,25 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
       dbError = res.error;
     }
 
-
     setGuardando(false);
 
     if (dbError) {
       setError(dbError.message);
       return;
+    }
+
+    // Registrar alias y código de anuncio en el motor de atribución
+    if (catalogoSkuFinal) {
+      try {
+        if (skuFinal && skuFinal.toLowerCase() !== catalogoSkuFinal.toLowerCase()) {
+          linkRawSkuToProduct(skuFinal, catalogoSkuFinal);
+        }
+        if (form.codigo_anuncio.trim()) {
+          linkAdCodeToProduct(form.codigo_anuncio.trim(), catalogoSkuFinal);
+        }
+      } catch (err) {
+        console.warn("No se pudo registrar alias de atribución:", err);
+      }
     }
 
     // Emitir evento al OS Event Store para trazabilidad en vivo
@@ -251,18 +337,193 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
               />
             </div>
 
-            <div className="sm:col-span-2">
-              <label className={labelCls} htmlFor="sku">
-                SKU / Producto *
-              </label>
-              <input
-                id="sku"
-                type="text"
-                value={form.sku}
-                onChange={set("sku")}
-                placeholder="Ej. TENIS-RUN-NEG-42"
-                className={inputCls}
-              />
+            {/* SELECTOR DE PRODUCTO MAESTRO DEL CATÁLOGO */}
+            <div className="sm:col-span-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className={labelCls} htmlFor="sku">
+                  Producto del Catálogo (Inventario & ROAS) *
+                </label>
+                {!modoManual ? (
+                  <button
+                    type="button"
+                    onClick={() => setModoManual(true)}
+                    className="text-[10px] font-bold text-indigo-500 hover:underline flex items-center gap-1"
+                  >
+                    ✏️ Ingresar texto manual
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModoManual(false);
+                      setSelectorAbierto(true);
+                    }}
+                    className="text-[10px] font-bold text-indigo-500 hover:underline flex items-center gap-1"
+                  >
+                    🔍 Seleccionar del catálogo
+                  </button>
+                )}
+              </div>
+
+              {/* Si hay un producto del catálogo seleccionado */}
+              {!modoManual && productoSeleccionado ? (
+                <div className="rounded-xl border border-indigo-500/40 bg-indigo-500/5 p-3 flex flex-col gap-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-12 h-12 rounded-lg bg-[var(--cd)] border border-[var(--bd)] overflow-hidden shrink-0 flex items-center justify-center">
+                        {productoSeleccionado.image_url ? (
+                          <img src={productoSeleccionado.image_url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-xl">📦</span>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                            {productoSeleccionado.sku}
+                          </span>
+                          <span className="text-[10px] font-bold text-emerald-600">
+                            ${Number(productoSeleccionado.precio_venta || 0).toFixed(2)}
+                          </span>
+                          <span className="text-[10px] opacity-60">
+                            · {productoSeleccionado.stock_disponible} disp.
+                          </span>
+                        </div>
+                        <h4 className="font-bold text-xs text-[var(--tx)] truncate mt-0.5">
+                          {productoSeleccionado.nombre}
+                        </h4>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForm(f => ({ ...f, catalogo_sku: "" }));
+                        setSelectorAbierto(true);
+                      }}
+                      className="px-2.5 py-1 text-xs font-bold rounded-lg border border-[var(--bd)] bg-[var(--cd)] hover:bg-black/5 text-[var(--tx)] shrink-0 transition-colors"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+
+                  {/* Descripción específica para este pedido / Combo / Variante */}
+                  <div className="border-t border-indigo-500/20 pt-2">
+                    <label className="text-[9px] font-bold uppercase tracking-wider text-[var(--mu)] block mb-1">
+                      Descripción para la Guía / Variante del Pedido:
+                    </label>
+                    <input
+                      type="text"
+                      value={form.sku}
+                      onChange={set("sku")}
+                      placeholder="Ej. Combo 3 unidades - Color Gris"
+                      className="w-full rounded-lg border border-[var(--bd)] bg-[var(--cd)] px-2.5 py-1.5 text-xs text-[var(--tx)] outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <span className="text-[9px] opacity-60 mt-0.5 block">
+                      💡 La orden se atribuirá a <strong>{productoSeleccionado.nombre} (#{productoSeleccionado.sku})</strong> para ROAS y Kárdex, aunque cambies el texto de la guía.
+                    </span>
+                  </div>
+                </div>
+              ) : !modoManual ? (
+                /* Combobox Selector desplegable del catálogo */
+                <div className="relative">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 opacity-40" />
+                    <input
+                      type="text"
+                      value={busquedaProducto}
+                      onChange={(e) => {
+                        setBusquedaProducto(e.target.value);
+                        setSelectorAbierto(true);
+                      }}
+                      onFocus={() => setSelectorAbierto(true)}
+                      placeholder={cargandoCatalogo ? "Cargando catálogo..." : "Escribe para buscar por nombre o SKU..."}
+                      className={`${inputCls} pl-9`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSelectorAbierto(!selectorAbierto)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 opacity-60 hover:opacity-100"
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {selectorAbierto && (
+                    <div className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-xl border border-[var(--bd)] bg-[var(--cd)] shadow-xl p-1 space-y-1">
+                      {cargandoCatalogo ? (
+                        <div className="p-3 text-center text-xs opacity-50 flex items-center justify-center gap-2">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando productos...
+                        </div>
+                      ) : productosFiltrados.length === 0 ? (
+                        <div className="p-3 text-center text-xs opacity-50">
+                          No se encontraron productos coincidentes.
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setForm(f => ({ ...f, sku: busquedaProducto }));
+                              setModoManual(true);
+                              setSelectorAbierto(false);
+                            }}
+                            className="block mx-auto mt-1 text-indigo-500 font-bold hover:underline"
+                          >
+                            Usar "{busquedaProducto}" como texto libre
+                          </button>
+                        </div>
+                      ) : (
+                        productosFiltrados.map((item) => (
+                          <div
+                            key={item.sku}
+                            onClick={() => handleSeleccionarProducto(item)}
+                            className="flex items-center justify-between p-2 rounded-lg hover:bg-indigo-500/10 cursor-pointer transition-colors group"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-8 h-8 rounded-lg bg-black/5 dark:bg-white/5 border border-[var(--bd)] overflow-hidden shrink-0 flex items-center justify-center">
+                                {item.image_url ? (
+                                  <img src={item.image_url} alt="" className="w-full h-full object-cover" />
+                                ) : (
+                                  <Package className="h-4 w-4 opacity-40" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-[var(--tx)] truncate group-hover:text-indigo-500">
+                                  {item.nombre}
+                                </p>
+                                <span className="text-[10px] font-mono opacity-50 uppercase">
+                                  #{item.sku}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0 pl-2">
+                              <span className="text-xs font-bold text-emerald-600 block">
+                                ${Number(item.precio_venta || 0).toFixed(2)}
+                              </span>
+                              <span className="text-[9px] opacity-50 block">
+                                {item.stock_disponible} disp.
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Modo manual de texto libre */
+                <div className="space-y-1">
+                  <input
+                    id="sku"
+                    type="text"
+                    value={form.sku}
+                    onChange={set("sku")}
+                    placeholder="Ej. TENIS-RUN-NEG-42 o Combo 3 pulseras"
+                    className={inputCls}
+                  />
+                  <span className="text-[10px] opacity-60 block">
+                    ⚠️ Ingreso como texto libre no catalogado. Podrás vincularlo luego desde la Bóveda de ROAS.
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="sm:col-span-2">

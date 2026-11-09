@@ -57,6 +57,7 @@ export interface Pedido {
   estado: string | null;
   created_at: string | null;
   sku: string | null;
+  catalogo_sku?: string | null;
   telefono: string | null;
   direccion: string | null;
   metodo_pago: string | null;
@@ -836,8 +837,13 @@ export function PedidosPage() {
                             <Truck size={10} /> {p.courier || "Motorista Central 1"}
                           </span>
                         </td>
-                        <td className="p-3 font-mono font-semibold">
-                          {p.sku || "—"}
+                        <td className="p-3">
+                          <span className="font-mono font-semibold text-xs text-[var(--tx)] block">{p.sku || "—"}</span>
+                          {p.catalogo_sku && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 mt-0.5">
+                              🏷️ Catálogo: #{p.catalogo_sku}
+                            </span>
+                          )}
                         </td>
                         <td className="p-3 text-right font-mono font-bold text-sm text-emerald-600">
                           {dinero(p.total)}
@@ -1278,11 +1284,18 @@ function PedidoCard({
 
       {/* Producto y Precio */}
       <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1 text-xs opacity-80 truncate">
-          <Package className="w-3.5 h-3.5 shrink-0" />
-          {pedido.sku || "—"}
-        </span>
-        <span className="text-base font-black text-emerald-600 font-mono">
+        <div className="min-w-0">
+          <span className="inline-flex items-center gap-1 text-xs opacity-80 truncate block">
+            <Package className="w-3.5 h-3.5 shrink-0 inline" />
+            {pedido.sku || "—"}
+          </span>
+          {pedido.catalogo_sku && (
+            <span className="inline-flex items-center gap-1 text-[8px] font-mono px-1 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+              🏷️ #{pedido.catalogo_sku}
+            </span>
+          )}
+        </div>
+        <span className="text-base font-black text-emerald-600 font-mono shrink-0">
           {dinero(pedido.total)}
         </span>
       </div>
