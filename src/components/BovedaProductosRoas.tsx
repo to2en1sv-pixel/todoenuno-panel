@@ -60,12 +60,13 @@ export function BovedaProductosRoas() {
 
   const [busqueda, setBusqueda] = useState('');
   const [filtroCiclo, setFiltroCiclo] = useState<string>('todos');
-  const [ordenarPor, setOrdenarPor] = useState<'roas' | 'ventas' | 'gasto'>('roas');
+  const [ordenarPor, setOrdenarPor] = useState<'roas' | 'utilidad' | 'margen' | 'ventas' | 'gasto'>('roas');
 
   // Modal / Drawer de detalle de producto
   const [productoSeleccionado, setProductoSeleccionado] = useState<ProductoBovedaRoas | null>(null);
   const [notaEdicion, setNotaEdicion] = useState('');
   const [estadoEdicion, setEstadoEdicion] = useState<CicloVidaProducto>('escala');
+  const [costoEdicion, setCostoEdicion] = useState<number>(0);
   const [guardadoOk, setGuardadoOk] = useState(false);
 
   // Nuevo alias o código de anuncio en el drawer
@@ -125,6 +126,7 @@ export function BovedaProductosRoas() {
       image_url: string | null;
       costo_unitario: number;
       precio_venta: number;
+      stock_actual: number;
       esOficial: boolean;
       ventasTotales: number;
       pedidosTotales: number;
@@ -147,6 +149,7 @@ export function BovedaProductosRoas() {
         image_url: item.image_url || null,
         costo_unitario: item.costo_unitario || 0,
         precio_venta: item.precio_venta || 0,
+        stock_actual: item.stock_disponible ?? item.stock_fisico ?? 0,
         esOficial: true,
         ventasTotales: 0,
         pedidosTotales: 0,
@@ -168,6 +171,7 @@ export function BovedaProductosRoas() {
           image_url: p.image_url || null,
           costo_unitario: 0,
           precio_venta: 0,
+          stock_actual: 0,
           esOficial: true,
           ventasTotales: 0,
           pedidosTotales: 0,
@@ -219,6 +223,7 @@ export function BovedaProductosRoas() {
             image_url: null,
             costo_unitario: 0,
             precio_venta: monto,
+            stock_actual: 0,
             esOficial: false,
             ventasTotales: 0,
             pedidosTotales: 0,
@@ -280,6 +285,7 @@ export function BovedaProductosRoas() {
             image_url: null,
             costo_unitario: 0,
             precio_venta: 0,
+            stock_actual: 0,
             esOficial: false,
             ventasTotales: 0,
             pedidosTotales: 0,
@@ -298,7 +304,7 @@ export function BovedaProductosRoas() {
       }
     });
 
-    // 4. Consolidar la Lista Final de la Bóveda
+    // 4. Consolidar la Lista Final de la Bóveda con Rentabilidad Contable Real
     const listaConsolidada: ProductoBovedaRoas[] = [];
 
     canonicalMap.forEach(prod => {
@@ -307,11 +313,52 @@ export function BovedaProductosRoas() {
         return;
       }
 
-      // Calcular desempeño de los 12 meses
+      const gastoTotal = prod.gastoTotal;
+      const ventasTotales = prod.ventasTotales;
+      const pedidosTotales = prod.pedidosTotales;
+
+      // Leer personalización y costo de localStorage si existe
+      let estadoCiclo: CicloVidaProducto = 'escala';
+      let notasEstrategicas = '';
+      let costoUnitario = prod.costo_unitario || 0;
+
+      try {
+        const guardado = localStorage.getItem(`roas_vault_${prod.sku}`);
+        if (guardado) {
+          const parsed = JSON.parse(guardado);
+          if (parsed.estadoCiclo) estadoCiclo = parsed.estadoCiclo;
+          if (parsed.notasEstrategicas) notasEstrategicas = parsed.notasEstrategicas;
+          if (parsed.costoUnitario !== undefined && Number(parsed.costoUnitario) >= 0) {
+            costoUnitario = Number(parsed.costoUnitario);
+          }
+        } else {
+          // Clasificación heurística automática
+          const roasTmp = gastoTotal > 0 ? ventasTotales / gastoTotal : null;
+          if (gastoTotal === 0 && ventasTotales > 0) estadoCiclo = 'hibernacion';
+          else if (gastoTotal < 50) estadoCiclo = 'testeo';
+          else if (roasTmp && roasTmp >= 2.0) estadoCiclo = 'escala';
+          else if (roasTmp && roasTmp < 1.2) estadoCiclo = 'quemado';
+          else estadoCiclo = 'hibernacion';
+        }
+      } catch {}
+
+      // Métricas contables reales
+      const cogsTotal = costoUnitario * pedidosTotales;
+      const gananciaNetaReal = ventasTotales - (cogsTotal + gastoTotal);
+      const margenNetoPorcentaje = ventasTotales > 0 ? (gananciaNetaReal / ventasTotales) * 100 : null;
+      const utilidadPorUnidad = pedidosTotales > 0 ? gananciaNetaReal / pedidosTotales : 0;
+      const roasHistorico = gastoTotal > 0 ? ventasTotales / gastoTotal : null;
+      const cpaHistorico = pedidosTotales > 0 && gastoTotal > 0 ? gastoTotal / pedidosTotales : null;
+      const ticketPromedio = pedidosTotales > 0 ? ventasTotales / pedidosTotales : 0;
+
+      // Calcular desempeño de los 12 meses incluyendo COGS y Ganancia Neta mensual
       const mesesDesempeno: RendimientoMesProducto[] = MESES_NOMBRES.map((nombreMes, idx) => {
         const vMes = prod.mesesVentas[idx]?.ventas || 0;
         const pMes = prod.mesesVentas[idx]?.pedidos || 0;
         const gMes = prod.mesesGasto[idx] || 0;
+        const cogsMes = costoUnitario * pMes;
+        const gananciaNetaMes = vMes - (cogsMes + gMes);
+        const margenNetoMes = vMes > 0 ? (gananciaNetaMes / vMes) * 100 : null;
         const roasMes = gMes > 0 ? vMes / gMes : (vMes > 0 ? 99 : null);
 
         return {
@@ -320,6 +367,9 @@ export function BovedaProductosRoas() {
           ventas: vMes,
           gasto: gMes,
           pedidos: pMes,
+          cogs: cogsMes,
+          gananciaNeta: gananciaNetaMes,
+          margenNeto: margenNetoMes,
           roas: roasMes
         };
       });
@@ -339,39 +389,20 @@ export function BovedaProductosRoas() {
         }
       });
 
-      const gastoTotal = prod.gastoTotal;
-      const ventasTotales = prod.ventasTotales;
-      const pedidosTotales = prod.pedidosTotales;
-      const roasHistorico = gastoTotal > 0 ? ventasTotales / gastoTotal : null;
-      const cpaHistorico = pedidosTotales > 0 && gastoTotal > 0 ? gastoTotal / pedidosTotales : null;
-      const ticketPromedio = pedidosTotales > 0 ? ventasTotales / pedidosTotales : 0;
-
-      // Leer estado personalizado de localStorage
-      let estadoCiclo: CicloVidaProducto = 'escala';
-      let notasEstrategicas = '';
-      try {
-        const guardado = localStorage.getItem(`roas_vault_${prod.sku}`);
-        if (guardado) {
-          const parsed = JSON.parse(guardado);
-          if (parsed.estadoCiclo) estadoCiclo = parsed.estadoCiclo;
-          if (parsed.notasEstrategicas) notasEstrategicas = parsed.notasEstrategicas;
-        } else {
-          // Clasificación heurística automática
-          if (gastoTotal === 0 && ventasTotales > 0) estadoCiclo = 'hibernacion';
-          else if (gastoTotal < 50) estadoCiclo = 'testeo';
-          else if (roasHistorico && roasHistorico >= 2.0) estadoCiclo = 'escala';
-          else if (roasHistorico && roasHistorico < 1.2) estadoCiclo = 'quemado';
-          else estadoCiclo = 'hibernacion';
-        }
-      } catch {}
-
       listaConsolidada.push({
         sku: prod.sku,
         catalogo_sku: prod.sku,
         nombre: prod.nombre,
         image_url: prod.image_url,
+        costoUnitario,
+        precioVentaSugerido: prod.precio_venta || (pedidosTotales > 0 ? ventasTotales / pedidosTotales : 0),
+        stockActual: prod.stock_actual,
         ventasTotales,
         gastoTotal,
+        cogsTotal,
+        gananciaNetaReal,
+        margenNetoPorcentaje,
+        utilidadPorUnidad,
         pedidosTotales,
         roasHistorico,
         cpaHistorico,
@@ -420,6 +451,12 @@ export function BovedaProductosRoas() {
       if (ordenarPor === 'roas') {
         return (b.roasHistorico || 0) - (a.roasHistorico || 0);
       }
+      if (ordenarPor === 'utilidad') {
+        return b.gananciaNetaReal - a.gananciaNetaReal;
+      }
+      if (ordenarPor === 'margen') {
+        return (b.margenNetoPorcentaje ?? -999) - (a.margenNetoPorcentaje ?? -999);
+      }
       if (ordenarPor === 'ventas') {
         return b.ventasTotales - a.ventasTotales;
       }
@@ -427,24 +464,33 @@ export function BovedaProductosRoas() {
     });
   }, [boveda, busqueda, filtroCiclo, ordenarPor]);
 
-  // KPIs de la Bóveda
+  // KPIs de la Bóveda con Rentabilidad Contable Real
   const kpisBoveda = useMemo(() => {
     let gastoTotal = 0;
     let ventasTotales = 0;
+    let cogsTotal = 0;
+    let gananciaNetaTotal = 0;
     let ganadores = 0;
     let hibernando = 0;
 
     boveda.forEach(p => {
       gastoTotal += p.gastoTotal;
       ventasTotales += p.ventasTotales;
+      cogsTotal += p.cogsTotal;
+      gananciaNetaTotal += p.gananciaNetaReal;
       if (p.roasHistorico && p.roasHistorico >= 2.5) ganadores++;
       if (p.estadoCiclo === 'hibernacion') hibernando++;
     });
+
+    const margenNetoGlobal = ventasTotales > 0 ? (gananciaNetaTotal / ventasTotales) * 100 : 0;
 
     return {
       totalProductos: boveda.length,
       gastoTotal,
       ventasTotales,
+      cogsTotal,
+      gananciaNetaTotal,
+      margenNetoGlobal,
       roasGlobal: gastoTotal > 0 ? ventasTotales / gastoTotal : 0,
       ganadores,
       hibernando
@@ -462,26 +508,30 @@ export function BovedaProductosRoas() {
     setProductoSeleccionado(p);
     setNotaEdicion(p.notasEstrategicas || '');
     setEstadoEdicion(p.estadoCiclo);
+    setCostoEdicion(p.costoUnitario || 0);
     setNuevoAliasTexto('');
     setNuevoAdCode('');
     setGuardadoOk(false);
   };
 
-  // Guardar estado y notas del producto en la Bóveda
+  // Guardar estado, costo unitario y notas del producto en la Bóveda
   const handleGuardarConfig = () => {
     if (!productoSeleccionado) return;
     const key = `roas_vault_${productoSeleccionado.sku}`;
     localStorage.setItem(key, JSON.stringify({
       estadoCiclo: estadoEdicion,
-      notasEstrategicas: notaEdicion
+      notasEstrategicas: notaEdicion,
+      costoUnitario: Number(costoEdicion) || 0
     }));
 
     setProductoSeleccionado(prev => prev ? ({
       ...prev,
       estadoCiclo: estadoEdicion,
-      notasEstrategicas: notaEdicion
+      notasEstrategicas: notaEdicion,
+      costoUnitario: Number(costoEdicion) || 0
     }) : null);
 
+    setVersionAtribucion(v => v + 1);
     setGuardadoOk(true);
     setTimeout(() => setGuardadoOk(false), 2000);
   };
@@ -584,14 +634,35 @@ export function BovedaProductosRoas() {
         </div>
       </div>
 
-      {/* Tarjetas KPI de la Bóveda */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Tarjetas KPI de la Bóveda con Rentabilidad Contable Real */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Productos Consolidados</span>
+          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Catálogo Consolidado</span>
           <div className="text-2xl font-black mt-1 text-[var(--tx)]">
             {kpisBoveda.totalProductos} <span className="text-xs font-normal tx-mu">Maestros</span>
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Con pedidos y pauta unificada</span>
+          <span className="text-[10px] tx-mu mt-1 block">Pedidos y pauta unificada</span>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
+          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">ROAS Acumulado Global</span>
+          <div className="text-2xl font-black mt-1 text-[var(--ac)]">
+            {formatRoas(kpisBoveda.roasGlobal)}
+          </div>
+          <span className="text-[10px] tx-mu mt-1 block">Ads: {formatCurrency(kpisBoveda.gastoTotal)} · Venta: {formatCurrency(kpisBoveda.ventasTotales)}</span>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm col-span-2 sm:col-span-1">
+          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block flex items-center justify-between">
+            <span>Utilidad Neta Real</span>
+            <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${kpisBoveda.margenNetoGlobal >= 20 ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'}`}>
+              {kpisBoveda.margenNetoGlobal.toFixed(1)}% Margen
+            </span>
+          </span>
+          <div className={`text-2xl font-black mt-1 font-mono ${kpisBoveda.gananciaNetaTotal >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+            {formatCurrency(kpisBoveda.gananciaNetaTotal)}
+          </div>
+          <span className="text-[10px] tx-mu mt-1 block">COGS mercadería: {formatCurrency(kpisBoveda.cogsTotal)}</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
@@ -608,14 +679,6 @@ export function BovedaProductosRoas() {
             {kpisBoveda.hibernando} <span className="text-xs font-normal tx-mu">listos</span>
           </div>
           <span className="text-[10px] tx-mu mt-1 block">Listos para relanzar en su temporada</span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">ROAS Acumulado Global</span>
-          <div className="text-2xl font-black mt-1 text-[var(--ac)]">
-            {formatRoas(kpisBoveda.roasGlobal)}
-          </div>
-          <span className="text-[10px] tx-mu mt-1 block">Facturado: {formatCurrency(kpisBoveda.ventasTotales)}</span>
         </div>
       </div>
 
@@ -661,6 +724,8 @@ export function BovedaProductosRoas() {
             className="p-1.5 rounded-xl border border-[var(--bd)] bg-sf text-xs font-semibold outline-none"
           >
             <option value="roas">Mayor ROAS Histórico</option>
+            <option value="utilidad">💰 Mayor Utilidad Neta Real ($)</option>
+            <option value="margen">📈 Mayor Margen Neto (%)</option>
             <option value="ventas">Mayor Facturación ($)</option>
             <option value="gasto">Mayor Inversión en Ads ($)</option>
           </select>
@@ -761,6 +826,44 @@ export function BovedaProductosRoas() {
                     </div>
                   </div>
 
+                  {/* Desglose de Rentabilidad Contable Real (COGS + Ganancia Neta) */}
+                  <div className="mt-2 p-2 rounded-xl bg-cd/60 border border-[var(--bd)] flex items-center justify-between text-[11px]">
+                    <div className="flex flex-col">
+                      <span className="text-[9px] uppercase font-bold tx-mu flex items-center gap-1">
+                        <DollarSign size={10} className="text-emerald-500" /> Utilidad Real Neta
+                      </span>
+                      <div className="flex items-baseline gap-1 mt-0.5">
+                        <span className={`font-mono font-black text-xs ${prod.gananciaNetaReal >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                          {formatCurrency(prod.gananciaNetaReal)}
+                        </span>
+                        {prod.margenNetoPorcentaje !== null && (
+                          <span className={`text-[9px] font-bold px-1 rounded ${
+                            prod.margenNetoPorcentaje >= 20 ? 'bg-emerald-500/10 text-emerald-600' :
+                            prod.margenNetoPorcentaje >= 0 ? 'bg-amber-500/10 text-amber-600' :
+                            'bg-rose-500/10 text-rose-500'
+                          }`}>
+                            {prod.margenNetoPorcentaje.toFixed(0)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-[9px] uppercase font-bold tx-mu block">
+                        Costo Mercadería
+                      </span>
+                      <span className="text-[10px] font-mono text-[var(--tx)] font-semibold mt-0.5 block">
+                        {prod.costoUnitario > 0 ? (
+                          <>
+                            {formatCurrency(prod.costoUnitario)}/u <span className="tx-mu text-[9px]">({formatCurrency(prod.cogsTotal)})</span>
+                          </>
+                        ) : (
+                          <span className="text-amber-500 text-[9px] font-medium italic">Sin costo reg.</span>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
                   {/* CALENDARIO CÍCLICO / MINIMAPA DE 12 MESES */}
                   <div className="mt-3">
                     <div className="flex items-center justify-between text-[10px] tx-mu mb-1 font-semibold">
@@ -851,31 +954,79 @@ export function BovedaProductosRoas() {
 
             {/* Contenido Scrollable */}
             <div className="p-5 overflow-y-auto space-y-5 flex-1">
-              {/* KPIs Resumen */}
-              <div className="grid grid-cols-4 gap-3 p-4 bg-sf rounded-2xl border border-[var(--bd)] text-center">
-                <div>
-                  <span className="text-[9px] uppercase font-bold tx-mu block">Gasto Total Ads</span>
-                  <span className="text-base font-black font-mono text-[var(--tx)] mt-1 block">
-                    {formatCurrency(productoSeleccionado.gastoTotal)}
-                  </span>
+              {/* KPIs Resumen: Comercial & Pauta */}
+              <div>
+                <span className="text-[10px] font-bold uppercase tx-mu tracking-wider block mb-1.5">
+                  Métricas Comerciales & Ads (ROAS)
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3.5 bg-sf rounded-2xl border border-[var(--bd)] text-center">
+                  <div>
+                    <span className="text-[9px] uppercase font-bold tx-mu block">Inversión Ads</span>
+                    <span className="text-sm sm:text-base font-black font-mono text-[var(--tx)] mt-0.5 block">
+                      {formatCurrency(productoSeleccionado.gastoTotal)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-bold tx-mu block">Ventas Brutas</span>
+                    <span className="text-sm sm:text-base font-black font-mono text-emerald-600 mt-0.5 block">
+                      {formatCurrency(productoSeleccionado.ventasTotales)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-bold tx-mu block">ROAS Acumulado</span>
+                    <span className={`text-sm sm:text-base font-black font-mono mt-0.5 block ${roasColorClass(productoSeleccionado.roasHistorico)}`}>
+                      {formatRoas(productoSeleccionado.roasHistorico)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-bold tx-mu block">CPA Promedio</span>
+                    <span className="text-sm sm:text-base font-black font-mono text-[var(--tx)] mt-0.5 block">
+                      {productoSeleccionado.cpaHistorico ? formatCurrency(productoSeleccionado.cpaHistorico) : '—'}
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-[9px] uppercase font-bold tx-mu block">Ventas Generadas</span>
-                  <span className="text-base font-black font-mono text-emerald-600 mt-1 block">
-                    {formatCurrency(productoSeleccionado.ventasTotales)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[9px] uppercase font-bold tx-mu block">ROAS Acumulado</span>
-                  <span className={`text-lg font-black font-mono mt-0.5 block ${roasColorClass(productoSeleccionado.roasHistorico)}`}>
-                    {formatRoas(productoSeleccionado.roasHistorico)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[9px] uppercase font-bold tx-mu block">CPA Promedio</span>
-                  <span className="text-base font-black font-mono text-[var(--tx)] mt-1 block">
-                    {productoSeleccionado.cpaHistorico ? formatCurrency(productoSeleccionado.cpaHistorico) : '—'}
-                  </span>
+              </div>
+
+              {/* KPIs Resumen: Rentabilidad Contable Real (COGS + Ganancia Neta) */}
+              <div>
+                <span className="text-[10px] font-bold uppercase text-emerald-600 tracking-wider block mb-1.5 flex items-center gap-1">
+                  <DollarSign size={12} /> Rentabilidad Contable Real (Costo Producto + Pauta)
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3.5 bg-emerald-500/5 rounded-2xl border border-emerald-500/20 text-center">
+                  <div>
+                    <span className="text-[9px] uppercase font-bold tx-mu block">Costo Mercadería (COGS)</span>
+                    <span className="text-sm sm:text-base font-black font-mono text-[var(--tx)] mt-0.5 block">
+                      {formatCurrency(productoSeleccionado.cogsTotal)}
+                    </span>
+                    <span className="text-[9px] tx-mu block mt-0.5">
+                      {productoSeleccionado.costoUnitario > 0 
+                        ? `${formatCurrency(productoSeleccionado.costoUnitario)} × ${productoSeleccionado.pedidosTotales} uds` 
+                        : 'Sin costo registrado'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-bold tx-mu block">Ganancia Neta Real</span>
+                    <span className={`text-sm sm:text-base font-black font-mono mt-0.5 block ${productoSeleccionado.gananciaNetaReal >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                      {formatCurrency(productoSeleccionado.gananciaNetaReal)}
+                    </span>
+                    <span className="text-[9px] tx-mu block mt-0.5">Venta − (Ads + Costo)</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-bold tx-mu block">Margen Neto Real</span>
+                    <span className={`text-sm sm:text-base font-black font-mono mt-0.5 block ${
+                      productoSeleccionado.margenNetoPorcentaje !== null && productoSeleccionado.margenNetoPorcentaje >= 0 ? 'text-emerald-600' : 'text-rose-500'
+                    }`}>
+                      {productoSeleccionado.margenNetoPorcentaje !== null ? `${productoSeleccionado.margenNetoPorcentaje.toFixed(1)}%` : '—'}
+                    </span>
+                    <span className="text-[9px] tx-mu block mt-0.5">Sobre facturación</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-bold tx-mu block">Utilidad por Pedido</span>
+                    <span className={`text-sm sm:text-base font-black font-mono mt-0.5 block ${productoSeleccionado.utilidadPorUnidad >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                      {formatCurrency(productoSeleccionado.utilidadPorUnidad)}
+                    </span>
+                    <span className="text-[9px] tx-mu block mt-0.5">Ganancia líquida / ud</span>
+                  </div>
                 </div>
               </div>
 
@@ -972,6 +1123,34 @@ export function BovedaProductosRoas() {
                 </div>
               </div>
 
+              {/* Costo Unitario de Mercadería y Rentabilidad Contable */}
+              <div className="p-4 bg-sf rounded-2xl border border-[var(--bd)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-xs font-bold text-[var(--tx)] block flex items-center gap-1.5">
+                    <DollarSign size={14} className="text-emerald-500" /> Costo Unitario de Proveedor (COGS)
+                  </span>
+                  <span className="text-[10px] tx-mu block mt-0.5">
+                    {productoSeleccionado.esCatalogoOficial 
+                      ? 'Base sincronizada con Catálogo / Kárdex. Modifícalo si el proveedor te subió o bajó el precio.'
+                      : 'Define el costo unitario de compra para este producto para calcular la ganancia contable real.'}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold font-mono tx-mu">USD $</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={costoEdicion}
+                    onChange={e => setCostoEdicion(parseFloat(e.target.value) || 0)}
+                    placeholder="0.00"
+                    className="w-28 px-3 py-1.5 bg-cd border border-[var(--bd)] rounded-xl text-xs font-mono font-bold outline-none focus:border-emerald-500 text-emerald-600"
+                  />
+                  <span className="text-[10px] tx-mu">/ unidad</span>
+                </div>
+              </div>
+
               {/* Selector de Estado del Ciclo de Vida */}
               <div className="p-4 bg-sf rounded-2xl border border-[var(--bd)] space-y-2">
                 <span className="text-xs font-bold text-[var(--tx)] block">Estado en el Ciclo de Vida del E-commerce:</span>
@@ -1012,6 +1191,9 @@ export function BovedaProductosRoas() {
                           <th className="p-2.5 text-right">Inversión Ads</th>
                           <th className="p-2.5 text-right">Ventas</th>
                           <th className="p-2.5 text-center">Pedidos</th>
+                          <th className="p-2.5 text-right">COGS (Costo)</th>
+                          <th className="p-2.5 text-right">Ganancia Neta</th>
+                          <th className="p-2.5 text-right">Margen</th>
                           <th className="p-2.5 text-right">ROAS</th>
                         </tr>
                       </thead>
@@ -1029,6 +1211,23 @@ export function BovedaProductosRoas() {
                             </td>
                             <td className="p-2.5 text-center font-mono">
                               {m.pedidos > 0 ? m.pedidos : '—'}
+                            </td>
+                            <td className="p-2.5 text-right font-mono tx-mu">
+                              {m.cogs > 0 ? formatCurrency(m.cogs) : (m.pedidos > 0 ? <span className="text-amber-500 text-[10px] italic">Sin costo</span> : '—')}
+                            </td>
+                            <td className={`p-2.5 text-right font-mono font-bold ${
+                              m.ventas > 0 || m.gasto > 0 
+                                ? (m.gananciaNeta >= 0 ? 'text-emerald-600' : 'text-rose-500') 
+                                : 'tx-mu'
+                            }`}>
+                              {m.ventas > 0 || m.gasto > 0 ? formatCurrency(m.gananciaNeta) : '—'}
+                            </td>
+                            <td className={`p-2.5 text-right font-mono text-[11px] font-bold ${
+                              m.margenNeto !== null 
+                                ? (m.margenNeto >= 0 ? 'text-emerald-600' : 'text-rose-500') 
+                                : 'tx-mu'
+                            }`}>
+                              {m.margenNeto !== null ? `${m.margenNeto.toFixed(0)}%` : '—'}
                             </td>
                             <td className={`p-2.5 text-right font-mono font-bold ${roasColorClass(m.roas)}`}>
                               {formatRoas(m.roas)}

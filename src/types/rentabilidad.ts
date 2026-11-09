@@ -42,6 +42,9 @@ export interface RendimientoMesProducto {
   ventas: number;
   gasto: number;
   pedidos: number;
+  cogs: number;
+  gananciaNeta: number;
+  margenNeto: number | null;
   roas: number | null;
 }
 
@@ -50,8 +53,15 @@ export interface ProductoBovedaRoas {
   catalogo_sku?: string;           // Identificador de catálogo
   nombre: string;                  // Nombre oficial del producto
   image_url?: string | null;
+  costoUnitario: number;
+  precioVentaSugerido: number;
+  stockActual?: number;
   ventasTotales: number;
   gastoTotal: number;
+  cogsTotal: number;
+  gananciaNetaReal: number;
+  margenNetoPorcentaje: number | null;
+  utilidadPorUnidad: number;
   pedidosTotales: number;
   roasHistorico: number | null;
   cpaHistorico: number | null;
