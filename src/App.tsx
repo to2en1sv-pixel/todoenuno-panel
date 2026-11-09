@@ -20,8 +20,10 @@ import { FinanzasPage } from '@/pages/FinanzasPage';
 export default function App() {
   return (
     <Routes>
-      {/* 👇 ESTA RUTA ESTÁ AFUERA, POR ESO NO TENDRÁ SIDEBAR */}
+      {/* 👇 RUTAS PARA REPARTIDORES MÓVILES (SIN SIDEBAR) */}
       <Route path="/entregar/:id" element={<ConfirmarEntregaPage />} />
+      <Route path="/entregar" element={<ConfirmarEntregaPage />} />
+      <Route path="/repartidor" element={<ConfirmarEntregaPage />} />
 
       {/* 👇 ESTAS RUTAS ESTÁN ADENTRO, POR ESO SÍ TIENEN SIDEBAR */}
       <Route element={<Layout />}>
