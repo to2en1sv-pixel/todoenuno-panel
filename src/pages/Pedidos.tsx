@@ -45,13 +45,17 @@ import {
   BellRing,
   Sparkles,
   Zap,
-  ArrowRight
+  ArrowRight,
+  ShieldAlert,
+  UserX
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import PedidoModal from "@/components/PedidoModal";
 import GuiaEnvio, { type GuiaPedido } from "@/components/GuiaEnvio";
 import ManifiestoDespacho from "@/components/ManifiestoDespacho";
 import { addManualTransaction } from "@/lib/finance";
+import { DirectorioListaNegra } from "@/components/analitica/DirectorioListaNegra";
+import { evaluateCustomerRisk, getBlacklistEntries } from "@/lib/blacklist";
 
 /* ------------------------------------------------------------------ */
 /* Tipos y constantes                                                  */
@@ -219,7 +223,7 @@ export function PedidosPage() {
   const [mostrarHistorial, setMostrarHistorial] = useState(false);
 
   // Vistas y Filtros Pro
-  const [vista, setVista] = useState<'kanban' | 'tabla'>('kanban');
+  const [vista, setVista] = useState<'kanban' | 'tabla' | 'lista_negra'>('kanban');
   const [pestañaEtapa, setPestañaEtapa] = useState<'todas' | Estado>('todas');
   const [filtroEncargos, setFiltroEncargos] = useState<'todos' | 'urgentes' | 'semana' | 'quincena'>('todos');
   const [filtroCourier, setFiltroCourier] = useState("Todos los Couriers");
@@ -758,8 +762,8 @@ export function PedidosPage() {
 
         {/* Acciones Superiores */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Selector de Vista: Kanban vs Tabla */}
-          <div className="flex bg-sf p-1 rounded-xl border border-[var(--bd)] text-xs font-bold">
+          {/* Selector de Vista: Kanban vs Tabla vs Lista Negra */}
+          <div className="flex bg-sf p-1 rounded-xl border border-[var(--bd)] text-xs font-bold gap-1">
             <button
               onClick={() => setVista('kanban')}
               className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors ${
@@ -775,6 +779,14 @@ export function PedidosPage() {
               }`}
             >
               <TableIcon size={14} /> Tabla ({pedidosFiltrados.length})
+            </button>
+            <button
+              onClick={() => setVista('lista_negra')}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors ${
+                vista === 'lista_negra' ? 'bg-rose-600 text-white font-black shadow' : 'text-rose-500 hover:bg-rose-500/10'
+              }`}
+            >
+              <ShieldAlert size={14} /> 🛡️ Lista Negra & DICOM
             </button>
           </div>
 
@@ -1126,12 +1138,17 @@ export function PedidosPage() {
         </div>
       )}
 
-      {/* CONTENIDO VISTA 1: TABLERO KANBAN */}
+      {/* CONTENIDO SEGÚN LA VISTA SELECCIONADA */}
       {cargando ? (
         <div className="flex flex-col items-center justify-center py-24 opacity-60 flex-1">
           <Loader2 className="w-8 h-8 animate-spin mb-3" />
           <p className="text-sm">Cargando pedidos logísticos...</p>
         </div>
+      ) : vista === 'lista_negra' ? (
+        <DirectorioListaNegra 
+          orders={pedidos} 
+          onOpenPedido={(p) => setPedidoAEditar(p)} 
+        />
       ) : vista === 'kanban' ? (
         pestañaEtapa === 'todas' ? (
           /* Kanban Completo Multicolumna */
@@ -1159,6 +1176,7 @@ export function PedidosPage() {
                       <PedidoCard
                         key={pedido.id}
                         pedido={pedido}
+                        allOrders={pedidos}
                         moviendo={moviendoId === pedido.id}
                         esDuplicado={telefonosDuplicados.has((pedido.telefono || '').replace(/\D/g, ''))}
                         seleccionado={seleccionados.has(pedido.id)}
@@ -1213,6 +1231,7 @@ export function PedidosPage() {
                   <PedidoCard
                     key={pedido.id}
                     pedido={pedido}
+                    allOrders={pedidos}
                     moviendo={moviendoId === pedido.id}
                     esDuplicado={telefonosDuplicados.has((pedido.telefono || '').replace(/\D/g, ''))}
                     seleccionado={seleccionados.has(pedido.id)}
@@ -1285,8 +1304,32 @@ export function PedidosPage() {
                           <span className="text-[10px] tx-mu block">{fechaCorta(p.created_at)}</span>
                         </td>
                         <td className="p-3">
-                          <div className="font-bold text-[var(--tx)] flex items-center gap-1.5">
-                            {p.nombre_cliente || "—"}
+                          <div className="font-bold text-[var(--tx)] flex items-center gap-1.5 flex-wrap">
+                            <span>{p.nombre_cliente || "—"}</span>
+                            {(() => {
+                              const risk = evaluateCustomerRisk(p.telefono, pedidos);
+                              if (risk.nivelRiesgo === 'rojo') {
+                                return (
+                                  <span 
+                                    className="text-[9px] bg-rose-500/15 text-rose-600 px-1.5 py-0.2 rounded font-black border border-rose-500/30 flex items-center gap-0.5" 
+                                    title={risk.alertaMensaje || 'Cliente con alto riesgo de cancelación'}
+                                  >
+                                    <ShieldAlert size={10} /> {risk.enListaNegra ? 'Lista Negra' : `${risk.cancelados} Canc.`}
+                                  </span>
+                                );
+                              }
+                              if (risk.nivelRiesgo === 'verde') {
+                                return (
+                                  <span 
+                                    className="text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.2 rounded font-bold border border-emerald-500/20"
+                                    title={`${risk.entregados} entregas exitosas`}
+                                  >
+                                    ✓ Confiable
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
                             {isDup && (
                               <span className="text-[9px] bg-amber-500/10 text-amber-600 px-1.5 py-0.2 rounded font-bold" title="Mismo teléfono en otro pedido">
                                 ⚠️ Duplicado
@@ -1471,6 +1514,7 @@ export function PedidosPage() {
       {(modalNuevo || pedidoAEditar) && (
         <PedidoModal
           pedido={pedidoAEditar}
+          pedidosExistentes={pedidos}
           onClose={() => {
             setModalNuevo(false);
             setPedidoAEditar(null);
@@ -1751,6 +1795,7 @@ export function PedidosPage() {
 
 function PedidoCard({
   pedido,
+  allOrders,
   moviendo,
   esDuplicado,
   seleccionado,
@@ -1765,6 +1810,7 @@ function PedidoCard({
   onOpenWhatsapp,
 }: {
   pedido: Pedido;
+  allOrders?: Pedido[];
   moviendo: boolean;
   esDuplicado: boolean;
   seleccionado: boolean;
@@ -1782,6 +1828,7 @@ function PedidoCard({
   const idx = ESTADOS.indexOf(estado);
   const encargo = esPedidoEncargo(pedido);
   const encargoInfo = encargo ? infoEncargo(pedido) : null;
+  const risk = useMemo(() => evaluateCustomerRisk(pedido.telefono, allOrders || []), [pedido.telefono, allOrders]);
 
   const btnBase =
     "flex items-center justify-center rounded-lg border border-[var(--bd)] bg-sf py-1.5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-cd";
@@ -1792,7 +1839,7 @@ function PedidoCard({
     }`}>
       {/* Cabecera de la tarjeta con Checkbox de selección */}
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
           <input
             type="checkbox"
             checked={seleccionado}
@@ -1802,12 +1849,30 @@ function PedidoCard({
           <h3 className="text-xs font-bold leading-tight text-[var(--tx)] truncate">
             {pedido.nombre_cliente || "Sin nombre"}
           </h3>
+          {risk.nivelRiesgo === 'verde' && (
+            <span className="text-[9px] bg-emerald-500/10 text-emerald-600 px-1 py-0.2 rounded font-bold border border-emerald-500/20" title={`${risk.entregados} entregas exitosas`}>
+              ✓ Confiable
+            </span>
+          )}
         </div>
 
         <span className="shrink-0 text-[10px] font-mono opacity-50">
           {fechaCorta(pedido.created_at)}
         </span>
       </div>
+
+      {/* Alerta de Lista Negra / DICOM Interno o Cancelador Recurrente */}
+      {risk.nivelRiesgo === 'rojo' && (
+        <div className="mt-1.5 flex items-center justify-between gap-1 text-[9px] font-bold text-rose-600 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/30">
+          <span className="flex items-center gap-1 min-w-0 truncate">
+            <ShieldAlert size={12} className="shrink-0 text-rose-600" />
+            <span className="truncate">{risk.enListaNegra ? 'Boletinado en Lista Negra' : `${risk.cancelados} cancelaciones previas`}</span>
+          </span>
+          <span className="text-[8px] font-mono font-black uppercase px-1 py-0.2 rounded bg-rose-600 text-white shrink-0">
+            {risk.enListaNegra ? 'DICOM' : 'ALTO RIESGO'}
+          </span>
+        </div>
+      )}
 
       {/* Alerta de teléfono duplicado */}
       {esDuplicado && (

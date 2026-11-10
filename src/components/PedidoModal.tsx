@@ -1,16 +1,18 @@
 import { useEffect, useState, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { X, Loader2, Save, AlertCircle, Plus, Edit, Package, Search, Check, RefreshCw, Sparkles, Tag, ChevronDown, CheckCircle2, Calendar, Clock } from "lucide-react";
+import { X, Loader2, Save, AlertCircle, Plus, Edit, Package, Search, Check, RefreshCw, Sparkles, Tag, ChevronDown, CheckCircle2, Calendar, Clock, ShieldAlert, AlertTriangle, UserX } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Pedido } from "@/pages/Pedidos";
 import { fetchStockItems } from "@/lib/inventory";
 import type { StockItem } from "@/types/inventory";
 import { resolveCatalogSku, linkRawSkuToProduct, linkAdCodeToProduct } from "@/lib/catalogAliases";
+import { evaluateCustomerRisk, addOrUpdateBlacklist, removeBlacklistEntry, cleanPhone } from "@/lib/blacklist";
 
 interface Props {
   onClose: () => void;
   onSaved: () => void;
   pedido?: Pedido | null; // Si existe, editamos
+  pedidosExistentes?: any[];
 }
 
 function getProximoSabado(): string {
@@ -70,7 +72,7 @@ const inputCls =
 const labelCls =
   "mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60";
 
-export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
+export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistentes }: Props) {
   const [form, setForm] = useState({ ...FORM_INICIAL });
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +83,26 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
   const [busquedaProducto, setBusquedaProducto] = useState("");
   const [modoManual, setModoManual] = useState(false);
   const [selectorAbierto, setSelectorAbierto] = useState(false);
+
+  // Historial de órdenes para evaluación antifraude y detección de lista negra
+  const [historialOrdenes, setHistorialOrdenes] = useState<any[]>(pedidosExistentes || []);
+  const [versionBlacklist, setVersionBlacklist] = useState(0);
+
+  useEffect(() => {
+    if (!pedidosExistentes || pedidosExistentes.length === 0) {
+      supabase
+        .from('whatsapp_orders')
+        .select('id,telefono,nombre_cliente,estado,motivo_cancelacion,notas')
+        .then(res => {
+          if (res.data) setHistorialOrdenes(res.data);
+        });
+    }
+  }, [pedidosExistentes]);
+
+  // Score de riesgo calculado en tiempo real
+  const riskProfile = useMemo(() => {
+    return evaluateCustomerRisk(form.telefono, historialOrdenes);
+  }, [form.telefono, historialOrdenes, versionBlacklist]);
 
   // Cargar catálogo de productos
   useEffect(() => {
@@ -379,6 +401,80 @@ export default function PedidoModal({ onClose, onSaved, pedido }: Props) {
                 className={inputCls}
               />
             </div>
+
+            {/* EVALUACIÓN ANTIFRAUDE Y LISTA NEGRA EN VIVO */}
+            {riskProfile.telefonoLimpio.length >= 8 && (
+              <div className="sm:col-span-2">
+                {riskProfile.nivelRiesgo === 'rojo' && (
+                  <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-2xl space-y-2 text-xs animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-rose-600 font-bold">
+                        <ShieldAlert size={16} />
+                        <span>⚠️ ALERTA DE RIESGO: Cliente en Lista Negra / Cancelador Recurrente</span>
+                      </div>
+                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-600 text-white shadow-sm">
+                        Score {riskProfile.score}/100
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-rose-700 dark:text-rose-300 font-semibold leading-relaxed">
+                      {riskProfile.alertaMensaje || `${riskProfile.cancelados} pedidos cancelados en el historial.`}
+                    </p>
+
+                    <div className="p-2 bg-rose-500/15 rounded-xl text-[10px] text-rose-800 dark:text-rose-200 font-bold flex items-center justify-between">
+                      <span>💡 Recomendación: {riskProfile.recomendacion}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (riskProfile.enListaNegra) {
+                            removeBlacklistEntry(riskProfile.telefonoLimpio);
+                          } else {
+                            addOrUpdateBlacklist({
+                              telefono: riskProfile.telefonoLimpio,
+                              nombreCliente: form.nombre_cliente || 'Cliente',
+                              aliasNombres: form.nombre_cliente ? [form.nombre_cliente] : [],
+                              motivo: 'Boletinado desde el modal de pedidos',
+                              severidad: 'alta',
+                              reportadoPor: 'Administración',
+                              fecha: new Date().toISOString()
+                            });
+                          }
+                          setVersionBlacklist(v => v + 1);
+                        }}
+                        className="underline text-[10px] ml-2 text-rose-700 dark:text-rose-300 hover:text-white"
+                      >
+                        {riskProfile.enListaNegra ? 'Rehabilitar cliente' : 'Boletinar formalmente'}
+                      </button>
+                    </div>
+
+                    {riskProfile.nombresConocidos.length > 1 && (
+                      <span className="text-[10px] tx-mu block pt-0.5">
+                        Otros nombres registrados con este número: <strong>{riskProfile.nombresConocidos.join(', ')}</strong>
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {riskProfile.nivelRiesgo === 'amarillo' && (
+                  <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs flex items-center justify-between text-amber-700 dark:text-amber-300 animate-in fade-in">
+                    <span className="flex items-center gap-1.5 font-bold">
+                      <AlertTriangle size={14} className="text-amber-500" />
+                      Observación: 1 cancelación previa registrada ({riskProfile.entregados} entregadas).
+                    </span>
+                    <span className="text-[10px] font-mono font-bold">Score {riskProfile.score}/100</span>
+                  </div>
+                )}
+
+                {riskProfile.nivelRiesgo === 'verde' && (
+                  <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs flex items-center justify-between text-emerald-600 animate-in fade-in">
+                    <span className="flex items-center gap-1.5 font-bold">
+                      <CheckCircle2 size={14} /> Cliente Confiable ({riskProfile.entregados} entregas exitosas).
+                    </span>
+                    <span className="text-[10px] font-mono font-black">Score {riskProfile.score}/100</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* SELECTOR DE PRODUCTO MAESTRO DEL CATÁLOGO */}
             <div className="sm:col-span-2 space-y-2">

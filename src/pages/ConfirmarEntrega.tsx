@@ -24,9 +24,11 @@ import {
   X,
   Check,
   Send,
-  FileText
+  FileText,
+  ShieldAlert
 } from "lucide-react";
 import { compressImageFile } from "@/lib/inventory";
+import { addOrUpdateBlacklist, evaluateCustomerRisk } from "@/lib/blacklist";
 
 export function ConfirmarEntregaPage() {
   const { id } = useParams();
@@ -47,10 +49,11 @@ export function ConfirmarEntregaPage() {
   const [pagaCon, setPagaCon] = useState<string>("");
   const [mostrarCalculadora, setMostrarCalculadora] = useState(false);
 
-  // Novedades
+  // Novedades y Lista Negra
   const [mostrarNovedadModal, setMostrarNovedadModal] = useState(false);
   const [tipoNovedad, setTipoNovedad] = useState("Cliente no contestó llamadas/mensajes");
   const [notaNovedad, setNotaNovedad] = useState("");
+  const [boletinarEnListaNegra, setBoletinarEnListaNegra] = useState(true);
   const [enviandoNovedad, setEnviandoNovedad] = useState(false);
 
   // Prueba de Entrega (Foto y Firma)
@@ -217,6 +220,20 @@ export function ConfirmarEntregaPage() {
         })
         .eq("id", pedido.id);
 
+      // Boletinar cliente en la Lista Negra / DICOM interno si el motorista lo marcó
+      if (boletinarEnListaNegra && pedido.telefono) {
+        addOrUpdateBlacklist({
+          telefono: pedido.telefono,
+          nombreCliente: pedido.nombre_cliente || 'Cliente en Ruta',
+          aliasNombres: pedido.nombre_cliente ? [pedido.nombre_cliente] : [],
+          motivo: `[Reporte Motorista ${pedido.courier || 'Móvil'}]: ${tipoNovedad}. ${notaNovedad}`.trim(),
+          severidad: 'alta',
+          reportadoPor: pedido.courier || 'Motorista en Ruta',
+          fecha: new Date().toISOString(),
+          pedidoId: pedido.id
+        });
+      }
+
       // Emitir evento de alerta
       try {
         const { emitOsEvent } = await import('@/lib/osEvents');
@@ -228,13 +245,15 @@ export function ConfirmarEntregaPage() {
             order_id: pedido.id,
             cliente: pedido.nombre_cliente,
             tipo_novedad: tipoNovedad,
-            notas: notaNovedad
+            notas: notaNovedad,
+            boletinado: boletinarEnListaNegra
           }
         });
       } catch {}
 
       setMostrarNovedadModal(false);
-      alert("Novedad registrada. La oficina y el Bot Todd han sido notificados.");
+      const msgExtra = boletinarEnListaNegra ? " y el cliente ha sido boletinado en la Lista Negra interna" : "";
+      alert(`Novedad registrada${msgExtra}. La oficina y el Bot Todd han sido notificados.`);
       navigate("/repartidor");
       await cargarDatos();
     } catch (err) {
@@ -790,6 +809,31 @@ export function ConfirmarEntregaPage() {
                   placeholder="Ej. Estuve 15 minutos en el portón pero no salió nadie..."
                   className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-xs outline-none text-white focus:border-rose-500 resize-none"
                 />
+              </div>
+
+              {/* Checkbox para boletinar en la Lista Negra / DICOM */}
+              <div 
+                onClick={() => setBoletinarEnListaNegra(!boletinarEnListaNegra)}
+                className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-start gap-2.5 select-none ${
+                  boletinarEnListaNegra 
+                    ? 'border-rose-500/50 bg-rose-500/10 text-rose-300' 
+                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={boletinarEnListaNegra}
+                  onChange={e => setBoletinarEnListaNegra(e.target.checked)}
+                  className="mt-0.5 rounded text-rose-600 focus:ring-0 accent-rose-600 cursor-pointer"
+                />
+                <div>
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <ShieldAlert size={14} className="text-rose-500" /> Boletinar en Lista Negra (DICOM Interno)
+                  </span>
+                  <span className="text-[10px] text-slate-400 block mt-0.5 leading-snug">
+                    Alerta a la oficina para bloquear futuros pedidos o exigir flete anticipado a este número de WhatsApp.
+                  </span>
+                </div>
               </div>
 
               <div className="pt-2 flex justify-end gap-2">
