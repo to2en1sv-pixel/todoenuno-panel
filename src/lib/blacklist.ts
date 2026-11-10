@@ -12,6 +12,9 @@ export interface BlacklistEntry {
   fecha: string;
   pedidoId?: string | null;
   activo: boolean;
+  notificado?: boolean;
+  fechaNotificacion?: string | null;
+  evidenciaUrls?: string[];
 }
 
 export interface CustomerRiskEvaluation {
@@ -75,7 +78,10 @@ export async function syncBlacklistFromSupabase(): Promise<BlacklistEntry[]> {
         reportadoPor: row.reportado_por || 'Equipo Operativo',
         fecha: row.created_at ? row.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
         pedidoId: row.pedido_id,
-        activo: row.activo ?? true
+        activo: row.activo ?? true,
+        notificado: Boolean(row.notificado),
+        fechaNotificacion: row.fecha_notificacion || null,
+        evidenciaUrls: Array.isArray(row.evidencia_urls) ? row.evidencia_urls : []
       }));
 
       // Guardar en cache local
@@ -122,14 +128,20 @@ export function addOrUpdateBlacklist(entry: Omit<BlacklistEntry, 'telefonoDispla
     telefono: telefonoLimpio,
     telefonoDisplay: formatPhoneDisplay(telefonoLimpio),
     activo: entry.activo ?? true,
-    aliasNombres: Array.from(new Set([entry.nombreCliente, ...(entry.aliasNombres || [])])).filter(Boolean)
+    aliasNombres: Array.from(new Set([entry.nombreCliente, ...(entry.aliasNombres || [])])).filter(Boolean),
+    notificado: entry.notificado ?? false,
+    fechaNotificacion: entry.fechaNotificacion || null,
+    evidenciaUrls: entry.evidenciaUrls || []
   };
 
   if (index >= 0) {
     actual[index] = {
       ...actual[index],
       ...nuevaEntrada,
-      aliasNombres: Array.from(new Set([...(actual[index].aliasNombres || []), ...nuevaEntrada.aliasNombres]))
+      aliasNombres: Array.from(new Set([...(actual[index].aliasNombres || []), ...nuevaEntrada.aliasNombres])),
+      notificado: nuevaEntrada.notificado ?? actual[index].notificado,
+      fechaNotificacion: nuevaEntrada.fechaNotificacion ?? actual[index].fechaNotificacion,
+      evidenciaUrls: Array.from(new Set([...(actual[index].evidenciaUrls || []), ...(nuevaEntrada.evidenciaUrls || [])]))
     };
   } else {
     actual.unshift(nuevaEntrada);
@@ -151,6 +163,9 @@ export function addOrUpdateBlacklist(entry: Omit<BlacklistEntry, 'telefonoDispla
         reportado_por: entry.reportadoPor,
         pedido_id: entry.pedidoId || null,
         activo: true,
+        notificado: nuevaEntrada.notificado,
+        fecha_notificacion: nuevaEntrada.fechaNotificacion,
+        evidencia_urls: nuevaEntrada.evidenciaUrls,
         updated_at: new Date().toISOString()
       }, { onConflict: 'telefono' });
     } catch {}
@@ -172,6 +187,110 @@ export function addOrUpdateBlacklist(entry: Omit<BlacklistEntry, 'telefonoDispla
   } catch {}
 
   return nuevaEntrada;
+}
+
+// Marca un cliente de la lista negra como formalmente notificado por WhatsApp
+export function marcarNotificadoBlacklist(telefono: string, evidenciaUrls: string[] = []): boolean {
+  const clean = cleanPhone(telefono);
+  if (!clean) return false;
+
+  const actual = getBlacklistEntries();
+  const index = actual.findIndex(e => cleanPhone(e.telefono) === clean);
+  if (index < 0) return false;
+
+  const ahora = new Date().toISOString();
+  actual[index].notificado = true;
+  actual[index].fechaNotificacion = ahora;
+  if (evidenciaUrls.length > 0) {
+    actual[index].evidenciaUrls = Array.from(new Set([...(actual[index].evidenciaUrls || []), ...evidenciaUrls]));
+  }
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(actual));
+  window.dispatchEvent(new Event('blacklist_updated'));
+
+  (async () => {
+    try {
+      await (supabase.from('client_blacklist') as any)
+        .update({
+          notificado: true,
+          fecha_notificacion: ahora,
+          evidencia_urls: actual[index].evidenciaUrls,
+          updated_at: ahora
+        })
+        .eq('telefono', clean);
+    } catch {}
+  })();
+
+  return true;
+}
+
+// Generador de plantillas institucionales de notificación WhatsApp
+export type TipoPlantillaBlacklist = 'bloqueo' | 'rehabilitacion' | 'aviso_flete';
+
+export function generarMensajeNotificacionBlacklist(params: {
+  tipo: TipoPlantillaBlacklist;
+  nombreCliente: string;
+  telefono: string;
+  motivo: string;
+  reportadoPor?: string;
+  evidenciaUrls?: string[];
+}): string {
+  const { tipo, nombreCliente, telefono, motivo, reportadoPor, evidenciaUrls = [] } = params;
+  const displayTel = formatPhoneDisplay(telefono);
+
+  const evidenciasTexto = evidenciaUrls.filter(Boolean).length > 0
+    ? `\n📸 *Evidencia documental en ruta:*\n${evidenciaUrls.filter(Boolean).map((u, i) => `• Prueba #${i + 1}: ${u.trim()}`).join('\n')}\n`
+    : '';
+
+  if (tipo === 'bloqueo') {
+    return (
+`⚖️ *AVISO INSTITUCIONAL — CONTROL DE RIESGO Y LOGÍSTICA*
+*TODOENUNO EL SALVADOR*
+
+Estimado/a *${nombreCliente}*,
+
+Le notificamos formalmente que su número telefónico *${displayTel}* ha sido ingresado a nuestro *Registro Interno de Restricción e Incidencias Comerciales*.
+
+📋 *Detalle del incidente:* ${motivo}
+📌 *Reportado por:* ${reportadoPor || 'Red de Repartidores en Ruta'}${evidenciasTexto}
+⚠️ *Resolución operativa:*
+A partir de este momento, nuestra red de mensajería suspende la admisión de pedidos bajo la modalidad de pago contra entrega para este número de contacto y sus direcciones registradas.
+
+_Departamento de Auditoría & Envíos COD_`
+    );
+  }
+
+  if (tipo === 'rehabilitacion') {
+    return (
+`⚖️ *DEPARTAMENTO DE OPERACIONES & LOGÍSTICA — TODOENUNO*
+
+Estimado/a *${nombreCliente}*,
+
+Registramos una incidencia operativa con la entrega de su pedido en nuestra red de mensajería contra entrega en El Salvador.
+
+📋 *Detalle del reporte:* ${motivo}
+📌 *Reporte del repartidor:* ${reportadoPor || 'Motorista en Ruta'}${evidenciasTexto}
+💡 *Oportunidad de Rehabilitación:*
+Comprendemos que pueden ocurrir imprevistos o emergencias de fuerza mayor. Para regularizar su récord como cliente confiable y evitar restricciones en futuros pedidos, puede cubrir el costo operativo del flete no recaudado (*$3.50 USD*) vía transferencia bancaria o Chivo Wallet.
+
+Si desea regularizar su expediente con nuestro equipo de despacho, por favor responda a este mensaje formal.`
+    );
+  }
+
+  // aviso_flete
+  return (
+`📦 *DEPARTAMENTO DE DESPACHO — TODOENUNO EL SALVADOR*
+
+Estimado/a *${nombreCliente}*,
+
+Le informamos que debido a incidencias previas registradas con pedidos no concretados a su número telefónico (*${displayTel}*):
+
+📋 *Historial de incidencia:* ${motivo}${evidenciasTexto}
+⚠️ *Política de Despacho:*
+Para autorizar y procesar cualquier futuro encargo o solicitud de producto a su nombre, será requisito indispensable el abono del costo de envío por adelantado ($3.50 USD).
+
+Agradecemos su comprensión con las políticas de seguridad y control operativo en ruta.`
+  );
 }
 
 // Remueve o rehabilita un cliente de la lista negra (Local + Supabase si existe)

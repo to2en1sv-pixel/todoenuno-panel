@@ -747,7 +747,7 @@ export function PedidosPage() {
   return (
     <div className="min-h-screen bg-[var(--cd)] text-[var(--tx)] p-4 md:p-6 flex flex-col relative pb-28">
       {/* Encabezado Principal */}
-      <header className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-5">
+      <header className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-4 mb-5">
         <div className="shrink-0 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight whitespace-normal sm:whitespace-nowrap">
@@ -763,7 +763,7 @@ export function PedidosPage() {
         </div>
 
         {/* Acciones Superiores */}
-        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+        <div className="flex flex-wrap items-center gap-2 2xl:justify-end">
           {/* Selector de Vista: Kanban vs Tabla vs Lista Negra */}
           <div className="flex bg-sf p-1 rounded-xl border border-[var(--bd)] text-xs font-bold gap-1 flex-wrap sm:flex-nowrap">
             <button

@@ -15,9 +15,18 @@ create table if not exists public.client_blacklist (
   reportado_por text default 'Administración',
   pedido_id uuid,
   activo boolean not null default true,
+  notificado boolean not null default false,
+  fecha_notificacion timestamptz,
+  evidencia_urls text[] default '{}',
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+-- Si la tabla ya existía de antes, asegurar que tenga las nuevas columnas
+alter table if exists public.client_blacklist
+  add column if not exists notificado boolean not null default false,
+  add column if not exists fecha_notificacion timestamptz,
+  add column if not exists evidencia_urls text[] default '{}';
 
 -- 2. Índices para consultas ultra rápidas por teléfono y estado
 create index if not exists idx_client_blacklist_telefono 

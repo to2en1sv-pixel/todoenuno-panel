@@ -16,7 +16,11 @@ import {
   Clock,
   Shield,
   Layers,
-  FileWarning
+  FileWarning,
+  Send,
+  Image as ImageIcon,
+  Copy,
+  Check
 } from 'lucide-react';
 import { 
   getBlacklistEntries, 
@@ -25,7 +29,10 @@ import {
   cleanPhone, 
   formatPhoneDisplay, 
   BlacklistEntry, 
-  evaluateCustomerRisk 
+  evaluateCustomerRisk,
+  marcarNotificadoBlacklist,
+  generarMensajeNotificacionBlacklist,
+  TipoPlantillaBlacklist
 } from '@/lib/blacklist';
 import { formatCurrency } from '@/lib/rentabilidad';
 
@@ -39,6 +46,12 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
   const [busqueda, setBusqueda] = useState('');
   const [filtroSeveridad, setFiltroSeveridad] = useState<string>('todos');
   const [modalAbierto, setModalAbierto] = useState(false);
+
+  // Modal Notificación WhatsApp
+  const [notificarItem, setNotificarItem] = useState<BlacklistEntry | null>(null);
+  const [tipoPlantilla, setTipoPlantilla] = useState<TipoPlantillaBlacklist>('bloqueo');
+  const [evidenciasInput, setEvidenciasInput] = useState<string[]>(['']);
+  const [copiado, setCopiado] = useState(false);
 
   // Formulario de nuevo reporte
   const [telefonoNuevo, setTelefonoNuevo] = useState('');
@@ -185,6 +198,48 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
     }
   };
 
+  // Abrir modal de notificación de WhatsApp
+  const handleAbrirNotificar = (entry: BlacklistEntry) => {
+    setNotificarItem(entry);
+    setTipoPlantilla('bloqueo');
+    setEvidenciasInput(entry.evidenciaUrls && entry.evidenciaUrls.length > 0 ? entry.evidenciaUrls : ['']);
+    setCopiado(false);
+  };
+
+  // Mensaje generado dinámico
+  const mensajeGenerado = useMemo(() => {
+    if (!notificarItem) return '';
+    return generarMensajeNotificacionBlacklist({
+      tipo: tipoPlantilla,
+      nombreCliente: notificarItem.nombreCliente,
+      telefono: notificarItem.telefono,
+      motivo: notificarItem.motivo,
+      reportadoPor: notificarItem.reportadoPor,
+      evidenciaUrls: evidenciasInput.filter(u => u && u.trim().length > 0)
+    });
+  }, [notificarItem, tipoPlantilla, evidenciasInput]);
+
+  // Copiar al portapapeles
+  const handleCopiarMensaje = () => {
+    if (!mensajeGenerado) return;
+    navigator.clipboard.writeText(mensajeGenerado);
+    setCopiado(true);
+    setTimeout(() => setCopiado(false), 2500);
+  };
+
+  // Enviar por WhatsApp Web/App
+  const handleEnviarWhatsApp = () => {
+    if (!notificarItem) return;
+    const urlsValidas = evidenciasInput.map(u => u.trim()).filter(Boolean);
+    marcarNotificadoBlacklist(notificarItem.telefono, urlsValidas);
+    recargar();
+
+    const clean = cleanPhone(notificarItem.telefono);
+    const encoded = encodeURIComponent(mensajeGenerado);
+    window.open(`https://wa.me/503${clean}?text=${encoded}`, '_blank');
+    setNotificarItem(null);
+  };
+
   return (
     <div className="space-y-6">
       {/* HEADER DEL SUBMÓDULO DICOM INTERNO */}
@@ -317,7 +372,8 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
                   <th className="p-3">Motivo del Reporte</th>
                   <th className="p-3">Reportado Por</th>
                   <th className="p-3 text-center">Severidad</th>
-                  <th className="p-3 text-right">Acción</th>
+                  <th className="p-3 text-center">Estado Notif.</th>
+                  <th className="p-3 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--bd)]">
@@ -328,14 +384,14 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
                     <tr key={e.telefono} className="hover:bg-sf/40 transition-colors">
                       {/* Teléfono */}
                       <td className="p-3 font-mono font-bold text-rose-600 dark:text-rose-400">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <span>{e.telefonoDisplay}</span>
                           <a
                             href={`https://wa.me/503${e.telefono}`}
                             target="_blank"
                             rel="noreferrer"
                             className="text-emerald-500 hover:text-emerald-400 p-1 rounded-lg bg-emerald-500/10"
-                            title="Ver en WhatsApp"
+                            title="Abrir chat directo en WhatsApp"
                           >
                             <MessageCircle size={12} />
                           </a>
@@ -381,15 +437,42 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
                         </span>
                       </td>
 
+                      {/* Estado Notificación WhatsApp */}
+                      <td className="p-3 text-center">
+                        {e.notificado ? (
+                          <span 
+                            className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-sky-500/10 text-sky-600 border border-sky-500/20 inline-flex items-center gap-1"
+                            title={e.fechaNotificacion ? `Notificado el ${new Date(e.fechaNotificacion).toLocaleDateString('es-SV', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : 'Notificado'}
+                          >
+                            <CheckCircle2 size={10} className="text-sky-500" /> Notificado
+                          </span>
+                        ) : (
+                          <span className="text-[10px] tx-mu inline-flex items-center gap-1">
+                            <Clock size={10} /> Sin notificar
+                          </span>
+                        )}
+                      </td>
+
                       {/* Acciones */}
                       <td className="p-3 text-right">
-                        <button
-                          onClick={() => handleQuitar(e.telefono)}
-                          className="px-2.5 py-1 text-[11px] font-bold text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg transition-colors"
-                          title="Quitar de lista negra"
-                        >
-                          Rehabilitar
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleAbrirNotificar(e)}
+                            className="px-2.5 py-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg flex items-center gap-1 transition-all shadow-sm"
+                            title="Redactar y enviar notificación formal por WhatsApp"
+                          >
+                            <MessageCircle size={12} />
+                            <span>Notificar</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleQuitar(e.telefono)}
+                            className="px-2 py-1 text-[11px] font-semibold text-rose-500 hover:text-rose-600 border border-rose-500/20 hover:bg-rose-500/10 rounded-lg transition-colors"
+                            title="Quitar de lista negra"
+                          >
+                            Rehabilitar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -569,6 +652,217 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL NOTIFICAR AL CLIENTE POR WHATSAPP (DICOM / REHABILITACIÓN) */}
+      {notificarItem && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-cd border border-[var(--bd)] rounded-2xl max-w-xl w-full p-5 space-y-4 shadow-2xl relative my-auto animate-in fade-in">
+            {/* Header del Modal */}
+            <div className="flex items-start justify-between border-b border-[var(--bd)] pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-center justify-center shrink-0">
+                  <MessageCircle size={22} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-black text-[var(--tx)]">
+                      Notificación Oficial por WhatsApp
+                    </h3>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 uppercase">
+                      DICOM Interno
+                    </span>
+                  </div>
+                  <p className="text-xs tx-mu mt-0.5">
+                    Cliente: <strong>{notificarItem.nombreCliente}</strong> · {notificarItem.telefonoDisplay}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setNotificarItem(null)}
+                className="p-1 rounded-lg hover:bg-sf text-slate-400 hover:text-[var(--tx)] transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Expediente Breve del Cliente */}
+            <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] text-xs grid grid-cols-2 gap-2">
+              <div>
+                <span className="text-[10px] uppercase font-bold tx-mu block">Motivo Registrado</span>
+                <span className="font-semibold text-rose-600 dark:text-rose-400 block truncate">
+                  {notificarItem.motivo}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] uppercase font-bold tx-mu block">Reportado Por</span>
+                <span className="font-semibold text-[var(--tx)] block truncate">
+                  {notificarItem.reportadoPor}
+                </span>
+              </div>
+            </div>
+
+            {/* Selector de Plantilla Institucional */}
+            <div className="space-y-1.5">
+              <label className="block text-[10px] uppercase font-bold tx-mu">
+                Selecciona el Tipo de Mensaje Formal:
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTipoPlantilla('bloqueo')}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    tipoPlantilla === 'bloqueo'
+                      ? 'border-rose-500 bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-2 ring-rose-500/20'
+                      : 'border-[var(--bd)] bg-sf hover:bg-cd tx-mu'
+                  }`}
+                >
+                  <span className="font-bold text-xs flex items-center gap-1.5 block">
+                    🚫 Bloqueo Formal
+                  </span>
+                  <span className="text-[10px] block mt-1 opacity-80 leading-snug">
+                    Aviso institucional de ingreso a lista de restricción.
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTipoPlantilla('rehabilitacion')}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    tipoPlantilla === 'rehabilitacion'
+                      ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/20'
+                      : 'border-[var(--bd)] bg-sf hover:bg-cd tx-mu'
+                  }`}
+                >
+                  <span className="font-bold text-xs flex items-center gap-1.5 block">
+                    🔄 Rehabilitación
+                  </span>
+                  <span className="text-[10px] block mt-1 opacity-80 leading-snug">
+                    Ofrece pagar $3.50 de flete para limpiar su récord.
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTipoPlantilla('aviso_flete')}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    tipoPlantilla === 'aviso_flete'
+                      ? 'border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-2 ring-amber-500/20'
+                      : 'border-[var(--bd)] bg-sf hover:bg-cd tx-mu'
+                  }`}
+                >
+                  <span className="font-bold text-xs flex items-center gap-1.5 block">
+                    📦 Flete Previo
+                  </span>
+                  <span className="text-[10px] block mt-1 opacity-80 leading-snug">
+                    Exige flete anticipado para futuros pedidos.
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* Enlaces de Evidencias (Fotos de Repartidores / Capturas) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] uppercase font-bold tx-mu flex items-center gap-1">
+                  <ImageIcon size={12} className="text-indigo-500" />
+                  Enlaces de Evidencia / Fotos (Opcional):
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setEvidenciasInput(prev => [...prev, ''])}
+                  className="text-[10px] font-bold text-indigo-500 hover:underline"
+                >
+                  + Agregar otro enlace
+                </button>
+              </div>
+
+              <div className="space-y-1.5 max-h-28 overflow-y-auto pr-1">
+                {evidenciasInput.map((url, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5">
+                    <input
+                      type="url"
+                      placeholder={`Pegar enlace de foto #${idx + 1} (ej. foto de puerta cerrada o chat de confirmación)...`}
+                      value={url}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setEvidenciasInput(prev => {
+                          const copia = [...prev];
+                          copia[idx] = val;
+                          return copia;
+                        });
+                      }}
+                      className="flex-1 p-2 bg-sf border border-[var(--bd)] rounded-xl text-xs outline-none focus:border-indigo-500"
+                    />
+                    {evidenciasInput.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEvidenciasInput(prev => prev.filter((_, i) => i !== idx));
+                        }}
+                        className="p-2 hover:bg-rose-500/10 text-rose-500 rounded-lg"
+                        title="Eliminar este enlace"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] tx-mu">
+                Los enlaces se insertarán automáticamente formateados en el cuerpo del mensaje de WhatsApp.
+              </p>
+            </div>
+
+            {/* Vista Previa del Mensaje de WhatsApp */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase font-bold tx-mu">
+                  Vista Previa del Mensaje:
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCopiarMensaje}
+                  className="text-[10px] font-bold text-slate-500 hover:text-[var(--tx)] flex items-center gap-1"
+                >
+                  {copiado ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                  <span>{copiado ? '¡Copiado!' : 'Copiar texto'}</span>
+                </button>
+              </div>
+
+              <div className="p-3.5 bg-[#dcf8c6]/20 dark:bg-emerald-950/20 border border-emerald-500/20 rounded-2xl text-xs text-[var(--tx)] font-sans whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto select-text shadow-inner">
+                {mensajeGenerado}
+              </div>
+            </div>
+
+            {/* Botones de Acción */}
+            <div className="pt-3 border-t border-[var(--bd)] flex items-center justify-between gap-2">
+              <span className="text-[10px] tx-mu hidden sm:inline">
+                Se registrará la fecha y hora de notificación en el expediente.
+              </span>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setNotificarItem(null)}
+                  className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold hover:bg-sf"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleEnviarWhatsApp}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition-all w-full sm:w-auto"
+                >
+                  <MessageCircle size={15} />
+                  <span>Abrir WhatsApp y Enviar</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
