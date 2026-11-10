@@ -222,6 +222,9 @@ export function ConfirmarEntregaPage() {
 
       // Boletinar cliente en la Lista Negra / DICOM interno si el motorista lo marcó
       if (boletinarEnListaNegra && pedido.telefono) {
+        const prod = pedido.producto || (pedido.items && pedido.items.length > 0 ? pedido.items.map((i: any) => `${i.cantidad || 1}x ${i.nombre}`).join(', ') : pedido.sku) || '';
+        const dir = [pedido.direccion, pedido.municipio, pedido.departamento].filter(Boolean).join(', ') || '';
+
         addOrUpdateBlacklist({
           telefono: pedido.telefono,
           nombreCliente: pedido.nombre_cliente || 'Cliente en Ruta',
@@ -230,7 +233,9 @@ export function ConfirmarEntregaPage() {
           severidad: 'alta',
           reportadoPor: pedido.courier || 'Motorista en Ruta',
           fecha: new Date().toISOString(),
-          pedidoId: pedido.id
+          pedidoId: pedido.id,
+          producto: prod,
+          direccion: dir
         });
       }
 

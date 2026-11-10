@@ -15,6 +15,8 @@ export interface BlacklistEntry {
   notificado?: boolean;
   fechaNotificacion?: string | null;
   evidenciaUrls?: string[];
+  producto?: string | null;
+  direccion?: string | null;
 }
 
 export interface CustomerRiskEvaluation {
@@ -81,7 +83,9 @@ export async function syncBlacklistFromSupabase(): Promise<BlacklistEntry[]> {
         activo: row.activo ?? true,
         notificado: Boolean(row.notificado),
         fechaNotificacion: row.fecha_notificacion || null,
-        evidenciaUrls: Array.isArray(row.evidencia_urls) ? row.evidencia_urls : []
+        evidenciaUrls: Array.isArray(row.evidencia_urls) ? row.evidencia_urls : [],
+        producto: row.producto || null,
+        direccion: row.direccion || null
       }));
 
       // Guardar en cache local
@@ -131,7 +135,9 @@ export function addOrUpdateBlacklist(entry: Omit<BlacklistEntry, 'telefonoDispla
     aliasNombres: Array.from(new Set([entry.nombreCliente, ...(entry.aliasNombres || [])])).filter(Boolean),
     notificado: entry.notificado ?? false,
     fechaNotificacion: entry.fechaNotificacion || null,
-    evidenciaUrls: entry.evidenciaUrls || []
+    evidenciaUrls: entry.evidenciaUrls || [],
+    producto: entry.producto || null,
+    direccion: entry.direccion || null
   };
 
   if (index >= 0) {
@@ -141,7 +147,9 @@ export function addOrUpdateBlacklist(entry: Omit<BlacklistEntry, 'telefonoDispla
       aliasNombres: Array.from(new Set([...(actual[index].aliasNombres || []), ...nuevaEntrada.aliasNombres])),
       notificado: nuevaEntrada.notificado ?? actual[index].notificado,
       fechaNotificacion: nuevaEntrada.fechaNotificacion ?? actual[index].fechaNotificacion,
-      evidenciaUrls: Array.from(new Set([...(actual[index].evidenciaUrls || []), ...(nuevaEntrada.evidenciaUrls || [])]))
+      evidenciaUrls: Array.from(new Set([...(actual[index].evidenciaUrls || []), ...(nuevaEntrada.evidenciaUrls || [])])),
+      producto: nuevaEntrada.producto ?? actual[index].producto ?? null,
+      direccion: nuevaEntrada.direccion ?? actual[index].direccion ?? null
     };
   } else {
     actual.unshift(nuevaEntrada);
@@ -166,6 +174,8 @@ export function addOrUpdateBlacklist(entry: Omit<BlacklistEntry, 'telefonoDispla
         notificado: nuevaEntrada.notificado,
         fecha_notificacion: nuevaEntrada.fechaNotificacion,
         evidencia_urls: nuevaEntrada.evidenciaUrls,
+        producto: nuevaEntrada.producto,
+        direccion: nuevaEntrada.direccion,
         updated_at: new Date().toISOString()
       }, { onConflict: 'telefono' });
     } catch {}
@@ -190,7 +200,12 @@ export function addOrUpdateBlacklist(entry: Omit<BlacklistEntry, 'telefonoDispla
 }
 
 // Marca un cliente de la lista negra como formalmente notificado por WhatsApp
-export function marcarNotificadoBlacklist(telefono: string, evidenciaUrls: string[] = []): boolean {
+export function marcarNotificadoBlacklist(
+  telefono: string, 
+  evidenciaUrls: string[] = [], 
+  producto?: string, 
+  direccion?: string
+): boolean {
   const clean = cleanPhone(telefono);
   if (!clean) return false;
 
@@ -204,6 +219,12 @@ export function marcarNotificadoBlacklist(telefono: string, evidenciaUrls: strin
   if (evidenciaUrls.length > 0) {
     actual[index].evidenciaUrls = Array.from(new Set([...(actual[index].evidenciaUrls || []), ...evidenciaUrls]));
   }
+  if (producto !== undefined) {
+    actual[index].producto = producto.trim() || null;
+  }
+  if (direccion !== undefined) {
+    actual[index].direccion = direccion.trim() || null;
+  }
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(actual));
   window.dispatchEvent(new Event('blacklist_updated'));
@@ -215,6 +236,8 @@ export function marcarNotificadoBlacklist(telefono: string, evidenciaUrls: strin
           notificado: true,
           fecha_notificacion: ahora,
           evidencia_urls: actual[index].evidenciaUrls,
+          producto: actual[index].producto,
+          direccion: actual[index].direccion,
           updated_at: ahora
         })
         .eq('telefono', clean);
@@ -234,10 +257,14 @@ export function generarMensajeNotificacionBlacklist(params: {
   motivo: string;
   reportadoPor?: string;
   evidenciaUrls?: string[];
+  producto?: string;
+  direccion?: string;
 }): string {
-  const { tipo, nombreCliente, telefono, motivo, reportadoPor, evidenciaUrls = [] } = params;
+  const { tipo, nombreCliente, telefono, motivo, reportadoPor, evidenciaUrls = [], producto, direccion } = params;
   const displayTel = formatPhoneDisplay(telefono);
 
+  const productoTexto = producto && producto.trim() ? `\n📦 *Producto ordenado:* ${producto.trim()}` : '';
+  const direccionTexto = direccion && direccion.trim() ? `\n📍 *Dirección registrada:* ${direccion.trim()}` : '';
   const evidenciasTexto = evidenciaUrls.filter(Boolean).length > 0
     ? `\n📸 *Evidencia documental en ruta:*\n${evidenciaUrls.filter(Boolean).map((u, i) => `• Prueba #${i + 1}: ${u.trim()}`).join('\n')}\n`
     : '';
@@ -250,7 +277,7 @@ export function generarMensajeNotificacionBlacklist(params: {
 Estimado/a *${nombreCliente}*,
 
 Le notificamos formalmente que su número telefónico *${displayTel}* ha sido ingresado a nuestro *Registro Interno de Restricción e Incidencias Comerciales*.
-
+${productoTexto}${direccionTexto}
 📋 *Detalle del incidente:* ${motivo}
 📌 *Reportado por:* ${reportadoPor || 'Red de Repartidores en Ruta'}${evidenciasTexto}
 ⚠️ *Resolución operativa:*
@@ -267,7 +294,7 @@ _Departamento de Auditoría & Envíos COD_`
 Estimado/a *${nombreCliente}*,
 
 Registramos una incidencia operativa con la entrega de su pedido en nuestra red de mensajería contra entrega en El Salvador.
-
+${productoTexto}${direccionTexto}
 📋 *Detalle del reporte:* ${motivo}
 📌 *Reporte del repartidor:* ${reportadoPor || 'Motorista en Ruta'}${evidenciasTexto}
 💡 *Oportunidad de Rehabilitación:*
@@ -284,7 +311,7 @@ Si desea regularizar su expediente con nuestro equipo de despacho, por favor res
 Estimado/a *${nombreCliente}*,
 
 Le informamos que debido a incidencias previas registradas con pedidos no concretados a su número telefónico (*${displayTel}*):
-
+${productoTexto}${direccionTexto}
 📋 *Historial de incidencia:* ${motivo}${evidenciasTexto}
 ⚠️ *Política de Despacho:*
 Para autorizar y procesar cualquier futuro encargo o solicitud de producto a su nombre, será requisito indispensable el abono del costo de envío por adelantado ($3.50 USD).

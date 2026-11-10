@@ -20,7 +20,9 @@ import {
   Send,
   Image as ImageIcon,
   Copy,
-  Check
+  Check,
+  Package,
+  MapPin
 } from 'lucide-react';
 import { 
   getBlacklistEntries, 
@@ -52,6 +54,8 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
   const [tipoPlantilla, setTipoPlantilla] = useState<TipoPlantillaBlacklist>('bloqueo');
   const [evidenciasInput, setEvidenciasInput] = useState<string[]>(['']);
   const [copiado, setCopiado] = useState(false);
+  const [productoInput, setProductoInput] = useState('');
+  const [direccionInput, setDireccionInput] = useState('');
 
   // Formulario de nuevo reporte
   const [telefonoNuevo, setTelefonoNuevo] = useState('');
@@ -59,6 +63,8 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
   const [motivoNuevo, setMotivoNuevo] = useState('Cliente no contestó llamadas/mensajes al llegar');
   const [severidadNueva, setSeveridadNueva] = useState<'alta' | 'media' | 'baja'>('alta');
   const [reportadoPorNuevo, setReportadoPorNuevo] = useState('Motorista en Ruta');
+  const [productoNuevo, setProductoNuevo] = useState('');
+  const [direccionNuevo, setDireccionNuevo] = useState('');
 
   // Recargar entradas
   const recargar = () => {
@@ -167,17 +173,27 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
       motivo: motivoNuevo.trim(),
       severidad: severidadNueva,
       reportadoPor: reportadoPorNuevo.trim() || 'Administración',
-      fecha: new Date().toISOString()
+      fecha: new Date().toISOString(),
+      producto: productoNuevo.trim() || null,
+      direccion: direccionNuevo.trim() || null
     });
 
     setModalAbierto(false);
     setTelefonoNuevo('');
     setNombreNuevo('');
+    setProductoNuevo('');
+    setDireccionNuevo('');
     recargar();
   };
 
   // Boletinar rápido un cliente auto-detectado
   const handleBoletinarAutoDetectado = (item: any) => {
+    const matchingOrder = orders.find(o => cleanPhone(o.telefono) === item.clean);
+    const prod = matchingOrder?.producto || 
+      (matchingOrder?.items && matchingOrder.items.length > 0 ? matchingOrder.items.map((i: any) => `${i.cantidad || 1}x ${i.nombre}`).join(', ') : matchingOrder?.sku) || 
+      null;
+    const dir = [matchingOrder?.direccion, matchingOrder?.municipio, matchingOrder?.departamento].filter(Boolean).join(', ') || null;
+
     addOrUpdateBlacklist({
       telefono: item.clean,
       nombreCliente: item.nombre,
@@ -185,7 +201,10 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
       motivo: item.motivos.length > 0 ? item.motivos[0] : `${item.cancelados} cancelaciones registradas en sistema`,
       severidad: item.cancelados >= 2 ? 'alta' : 'media',
       reportadoPor: 'Sistema COD Engine (Cancelaciones Recurrentes)',
-      fecha: new Date().toISOString()
+      fecha: new Date().toISOString(),
+      pedidoId: matchingOrder?.id || null,
+      producto: prod,
+      direccion: dir
     });
     recargar();
   };
@@ -204,6 +223,26 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
     setTipoPlantilla('bloqueo');
     setEvidenciasInput(entry.evidenciaUrls && entry.evidenciaUrls.length > 0 ? entry.evidenciaUrls : ['']);
     setCopiado(false);
+
+    // Auto-detectar producto y dirección desde la entrada o desde el historial de órdenes
+    const matchingOrder = orders.find(o => 
+      (entry.pedidoId && o.id === entry.pedidoId) ||
+      cleanPhone(o.telefono) === cleanPhone(entry.telefono)
+    );
+
+    const detectedProduct = entry.producto || 
+      matchingOrder?.producto || 
+      (matchingOrder?.items && matchingOrder.items.length > 0 
+        ? matchingOrder.items.map((i: any) => `${i.cantidad || 1}x ${i.nombre}`).join(', ') 
+        : matchingOrder?.sku) || 
+      '';
+
+    const detectedAddress = entry.direccion || 
+      [matchingOrder?.direccion, matchingOrder?.municipio, matchingOrder?.departamento].filter(Boolean).join(', ') || 
+      '';
+
+    setProductoInput(detectedProduct);
+    setDireccionInput(detectedAddress);
   };
 
   // Mensaje generado dinámico
@@ -215,9 +254,11 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
       telefono: notificarItem.telefono,
       motivo: notificarItem.motivo,
       reportadoPor: notificarItem.reportadoPor,
-      evidenciaUrls: evidenciasInput.filter(u => u && u.trim().length > 0)
+      evidenciaUrls: evidenciasInput.filter(u => u && u.trim().length > 0),
+      producto: productoInput,
+      direccion: direccionInput
     });
-  }, [notificarItem, tipoPlantilla, evidenciasInput]);
+  }, [notificarItem, tipoPlantilla, evidenciasInput, productoInput, direccionInput]);
 
   // Copiar al portapapeles
   const handleCopiarMensaje = () => {
@@ -231,7 +272,7 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
   const handleEnviarWhatsApp = () => {
     if (!notificarItem) return;
     const urlsValidas = evidenciasInput.map(u => u.trim()).filter(Boolean);
-    marcarNotificadoBlacklist(notificarItem.telefono, urlsValidas);
+    marcarNotificadoBlacklist(notificarItem.telefono, urlsValidas, productoInput, direccionInput);
     recargar();
 
     const clean = cleanPhone(notificarItem.telefono);
@@ -565,7 +606,25 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
                   type="text"
                   placeholder="Ej. 7123-4567 o 50371234567"
                   value={telefonoNuevo}
-                  onChange={e => setTelefonoNuevo(e.target.value)}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setTelefonoNuevo(val);
+                    const clean = cleanPhone(val);
+                    if (clean.length >= 8) {
+                      const match = orders.find(o => cleanPhone(o.telefono) === clean);
+                      if (match) {
+                        if (!nombreNuevo && match.nombre_cliente) setNombreNuevo(match.nombre_cliente);
+                        if (!productoNuevo) {
+                          const prod = match.producto || (match.items && match.items.length > 0 ? match.items.map((i: any) => `${i.cantidad || 1}x ${i.nombre}`).join(', ') : match.sku) || '';
+                          if (prod) setProductoNuevo(prod);
+                        }
+                        if (!direccionNuevo) {
+                          const dir = [match.direccion, match.municipio, match.departamento].filter(Boolean).join(', ');
+                          if (dir) setDireccionNuevo(dir);
+                        }
+                      }
+                    }
+                  }}
                   required
                   className="w-full p-2.5 bg-sf border border-[var(--bd)] rounded-xl font-mono text-xs font-bold outline-none focus:border-rose-500"
                 />
@@ -582,6 +641,33 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
                   onChange={e => setNombreNuevo(e.target.value)}
                   className="w-full p-2.5 bg-sf border border-[var(--bd)] rounded-xl text-xs outline-none focus:border-rose-500"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tx-mu mb-1 flex items-center gap-1">
+                    <Package size={11} className="text-indigo-500" /> Producto (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej. Portabebé Ergonómico..."
+                    value={productoNuevo}
+                    onChange={e => setProductoNuevo(e.target.value)}
+                    className="w-full p-2 bg-sf border border-[var(--bd)] rounded-xl text-xs outline-none focus:border-rose-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tx-mu mb-1 flex items-center gap-1">
+                    <MapPin size={11} className="text-rose-500" /> Dirección (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej. Col. Médica, San Salvador..."
+                    value={direccionNuevo}
+                    onChange={e => setDireccionNuevo(e.target.value)}
+                    className="w-full p-2 bg-sf border border-[var(--bd)] rounded-xl text-xs outline-none focus:border-rose-500"
+                  />
+                </div>
               </div>
 
               <div>
@@ -703,6 +789,52 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
                   {notificarItem.reportadoPor}
                 </span>
               </div>
+            </div>
+
+            {/* Datos del Pedido Asociado (Producto y Dirección) */}
+            <div className="space-y-2 p-3 bg-sf/60 rounded-xl border border-[var(--bd)] text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase font-bold tx-mu flex items-center gap-1.5">
+                  <Package size={12} className="text-indigo-500" />
+                  Datos del Pedido Asociado:
+                </span>
+                <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                  Se inserta en el WhatsApp
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-bold tx-mu block mb-1 flex items-center gap-1">
+                    <Package size={11} className="text-indigo-500" />
+                    Producto ordenado:
+                  </label>
+                  <input
+                    type="text"
+                    value={productoInput}
+                    onChange={e => setProductoInput(e.target.value)}
+                    placeholder="Ej. Portabebé Ergonómico / Reloj T900..."
+                    className="w-full p-2 bg-cd border border-[var(--bd)] rounded-lg text-xs outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold tx-mu block mb-1 flex items-center gap-1">
+                    <MapPin size={11} className="text-rose-500" />
+                    Dirección de entrega:
+                  </label>
+                  <input
+                    type="text"
+                    value={direccionInput}
+                    onChange={e => setDireccionInput(e.target.value)}
+                    placeholder="Ej. Col. Médica, Av. Universitaria #12, San Salvador..."
+                    className="w-full p-2 bg-cd border border-[var(--bd)] rounded-lg text-xs outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] tx-mu leading-tight">
+                💡 Al detallar el producto y su dirección exacta, el cliente no puede desconocer la orden ni negar el pedido no recibido.
+              </p>
             </div>
 
             {/* Selector de Plantilla Institucional */}

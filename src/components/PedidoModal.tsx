@@ -429,6 +429,9 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                           if (riskProfile.enListaNegra) {
                             removeBlacklistEntry(riskProfile.telefonoLimpio);
                           } else {
+                            const prod = form.producto || (form.items && form.items.length > 0 ? form.items.map((i: any) => `${i.cantidad || 1}x ${i.nombre}`).join(', ') : form.sku) || '';
+                            const dir = [form.direccion, form.municipio, form.departamento].filter(Boolean).join(', ') || '';
+
                             addOrUpdateBlacklist({
                               telefono: riskProfile.telefonoLimpio,
                               nombreCliente: form.nombre_cliente || 'Cliente',
@@ -436,7 +439,10 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                               motivo: 'Boletinado desde el modal de pedidos',
                               severidad: 'alta',
                               reportadoPor: 'Administración',
-                              fecha: new Date().toISOString()
+                              fecha: new Date().toISOString(),
+                              pedidoId: pedido?.id || null,
+                              producto: prod,
+                              direccion: dir
                             });
                           }
                           setVersionBlacklist(v => v + 1);
