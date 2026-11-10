@@ -625,21 +625,23 @@ export function FinanzasPage() {
   return (
     <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-14">
       {/* Encabezado General */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Wallet className="text-[var(--ac)]" size={24} />
-            <h1 className="text-2xl font-black">Finanzas & Money Engine</h1>
-            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
+        <div className="min-w-0 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Wallet className="text-[var(--ac)] shrink-0" size={24} />
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight whitespace-normal sm:whitespace-nowrap">
+              Finanzas & Money Engine
+            </h1>
+            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
               Sprint 2
             </span>
           </div>
-          <p className="text-xs text-[var(--mu)] mt-1">
+          <p className="text-xs text-[var(--mu)] mt-1 max-w-xl">
             Gestión de liquidez, cuentas de dinero, control de presupuestos y registro de gastos/pagos manuales.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
           <button
             onClick={() => {
               setTransferError(null);

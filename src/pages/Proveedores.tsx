@@ -452,21 +452,23 @@ export function ProveedoresPage() {
   return (
     <div className="max-w-6xl mx-auto flex flex-col gap-5 pb-14 min-h-screen">
       {/* HEADER PRINCIPAL */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Building2 className="text-orange-500" size={24} />
-            <h1 className="text-2xl font-black">Centro de Proveedores & Subasta Inversa</h1>
-            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-600 border border-orange-500/30">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
+        <div className="min-w-0 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Building2 className="text-orange-500 shrink-0" size={24} />
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight whitespace-normal sm:whitespace-nowrap">
+              Centro de Proveedores & Subasta Inversa
+            </h1>
+            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-600 border border-orange-500/30 shrink-0">
               n8n + Evolution API
             </span>
           </div>
-          <p className="text-xs text-[var(--mu)] mt-1">
+          <p className="text-xs text-[var(--mu)] mt-1 max-w-xl">
             Licitación masiva a almacenes por WhatsApp, comparador de precios en vivo y registro de adjudicaciones.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
           <button
             onClick={handleOpenNewProvider}
             className="flex-1 sm:flex-none px-3.5 py-2 border border-[var(--bd)] bg-sf hover:bg-cd rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"

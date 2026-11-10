@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { 
   ShieldAlert, 
   Search, 
@@ -51,6 +51,13 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
   const recargar = () => {
     setEntries(getBlacklistEntries());
   };
+
+  // Escuchar sincronizaciones de Supabase / cambios en vivo
+  useEffect(() => {
+    const handleUpdate = () => setEntries(getBlacklistEntries());
+    window.addEventListener('blacklist_updated', handleUpdate);
+    return () => window.removeEventListener('blacklist_updated', handleUpdate);
+  }, []);
 
   // Clientes detectados automáticamente con cancelaciones en whatsapp_orders
   const clientesAutoDetectados = useMemo(() => {
@@ -181,23 +188,23 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
   return (
     <div className="space-y-6">
       {/* HEADER DEL SUBMÓDULO DICOM INTERNO */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-cd p-5 rounded-2xl border border-rose-500/20 gap-4 shadow-sm relative overflow-hidden">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-cd p-4 sm:p-5 rounded-2xl border border-rose-500/20 gap-4 shadow-sm relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-full blur-2xl pointer-events-none" />
 
-        <div className="flex items-start gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-500 shrink-0 mt-0.5">
-            <ShieldAlert size={24} />
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="w-10 sm:w-12 h-10 sm:h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-500 shrink-0 mt-0.5">
+            <ShieldAlert size={22} />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-black text-[var(--tx)]">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base sm:text-lg font-black text-[var(--tx)] tracking-tight">
                 Directorio Antifraude & DICOM Interno COD
               </h2>
-              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/30">
+              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/30 shrink-0">
                 Protección de Fletes
               </span>
             </div>
-            <p className="text-xs tx-mu mt-1">
+            <p className="text-xs tx-mu mt-1 max-w-2xl">
               Registro preventivo de clientes con cancelaciones en puerta, teléfonos falsos o reportes de motoristas para exigir flete previo o bloquear despacho.
             </p>
           </div>
@@ -205,7 +212,7 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
 
         <button
           onClick={() => setModalAbierto(true)}
-          className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-rose-600/20 transition-all shrink-0"
+          className="w-full md:w-auto px-4 py-2.5 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-rose-600/20 transition-all shrink-0"
         >
           <Plus size={15} /> Boletinar Número
         </button>

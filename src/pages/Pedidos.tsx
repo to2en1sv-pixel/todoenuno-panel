@@ -747,26 +747,28 @@ export function PedidosPage() {
   return (
     <div className="min-h-screen bg-[var(--cd)] text-[var(--tx)] p-4 md:p-6 flex flex-col relative pb-28">
       {/* Encabezado Principal */}
-      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl md:text-3xl font-black tracking-tight">Centro de Pedidos & Logística</h1>
-            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+      <header className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-5">
+        <div className="shrink-0 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight whitespace-normal sm:whitespace-nowrap">
+              Centro de Pedidos & Logística
+            </h1>
+            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 shrink-0">
               COD Engine
             </span>
           </div>
-          <p className="text-xs md:text-sm opacity-60 mt-0.5">
+          <p className="text-xs md:text-sm opacity-60 mt-0.5 max-w-xl">
             Despachos, rutas de motoristas, guías en lote y cuadre de efectivo contra entrega en El Salvador.
           </p>
         </div>
 
         {/* Acciones Superiores */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
           {/* Selector de Vista: Kanban vs Tabla vs Lista Negra */}
-          <div className="flex bg-sf p-1 rounded-xl border border-[var(--bd)] text-xs font-bold gap-1">
+          <div className="flex bg-sf p-1 rounded-xl border border-[var(--bd)] text-xs font-bold gap-1 flex-wrap sm:flex-nowrap">
             <button
               onClick={() => setVista('kanban')}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors ${
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                 vista === 'kanban' ? 'bg-cd shadow text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
               }`}
             >
@@ -774,7 +776,7 @@ export function PedidosPage() {
             </button>
             <button
               onClick={() => setVista('tabla')}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors ${
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                 vista === 'tabla' ? 'bg-cd shadow text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
               }`}
             >
@@ -782,49 +784,52 @@ export function PedidosPage() {
             </button>
             <button
               onClick={() => setVista('lista_negra')}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors ${
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                 vista === 'lista_negra' ? 'bg-rose-600 text-white font-black shadow' : 'text-rose-500 hover:bg-rose-500/10'
               }`}
+              title="Directorio Anti-Fraude & DICOM Interno"
             >
               <ShieldAlert size={14} /> 🛡️ Lista Negra & DICOM
             </button>
           </div>
 
-          <button
-            onClick={exportarCSV}
-            className="px-3 py-2 border border-[var(--bd)] hover:bg-sf rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
-            title="Exportar a Excel / CSV"
-          >
-            <Download size={14} /> Exportar CSV
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={exportarCSV}
+              className="px-3 py-2 border border-[var(--bd)] hover:bg-sf rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              title="Exportar a Excel / CSV"
+            >
+              <Download size={14} /> Exportar CSV
+            </button>
 
-          <button
-            onClick={() => cargarPedidos(true)}
-            disabled={refrescando}
-            className="p-2.5 rounded-xl border border-[var(--bd)] bg-cd hover:bg-sf transition-colors"
-            title="Recargar"
-          >
-            <RefreshCw className={`w-4 h-4 ${refrescando ? "animate-spin" : ""}`} />
-          </button>
+            <button
+              onClick={() => cargarPedidos(true)}
+              disabled={refrescando}
+              className="p-2.5 rounded-xl border border-[var(--bd)] bg-cd hover:bg-sf transition-colors shrink-0"
+              title="Recargar"
+            >
+              <RefreshCw className={`w-4 h-4 ${refrescando ? "animate-spin" : ""}`} />
+            </button>
 
-          <button
-            onClick={() => setMostrarHistorial(!mostrarHistorial)}
-            className={`inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-bold transition-colors whitespace-nowrap ${
-              mostrarHistorial
-                ? "border-indigo-500 bg-indigo-500/10 text-indigo-500"
-                : "border-[var(--bd)] bg-cd text-[var(--tx)] hover:bg-sf"
-            }`}
-          >
-            {mostrarHistorial ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-            <span>{mostrarHistorial ? "Ocultar Historial" : "Ver Historial"}</span>
-          </button>
+            <button
+              onClick={() => setMostrarHistorial(!mostrarHistorial)}
+              className={`inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-bold transition-colors whitespace-nowrap ${
+                mostrarHistorial
+                  ? "border-indigo-500 bg-indigo-500/10 text-indigo-500"
+                  : "border-[var(--bd)] bg-cd text-[var(--tx)] hover:bg-sf"
+              }`}
+            >
+              {mostrarHistorial ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              <span>{mostrarHistorial ? "Ocultar Historial" : "Ver Historial"}</span>
+            </button>
 
-          <button
-            onClick={() => setModalNuevo(true)}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-xs font-bold text-white shadow-md transition-colors"
-          >
-            <Plus className="w-4 h-4" /> Nuevo Pedido
-          </button>
+            <button
+              onClick={() => setModalNuevo(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-xs font-bold text-white shadow-md transition-colors whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4" /> Nuevo Pedido
+            </button>
+          </div>
         </div>
       </header>
 

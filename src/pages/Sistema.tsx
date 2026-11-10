@@ -84,19 +84,21 @@ export function SistemaPage() {
   return (
     <div className="max-w-6xl mx-auto flex flex-col gap-5 pb-12">
       {/* Encabezado General */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Server size={22} className="text-[var(--ac)]" />
-            <h1 className="text-xl font-bold">Sistema & Arquitectura OS</h1>
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
+        <div className="min-w-0 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Server size={22} className="text-[var(--ac)] shrink-0" />
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight whitespace-normal sm:whitespace-nowrap">
+              Sistema & Arquitectura OS
+            </h1>
           </div>
-          <p className="text-xs text-[var(--mu)] mt-1">
+          <p className="text-xs text-[var(--mu)] mt-1 max-w-xl">
             Gestión del núcleo de eventos (Sprint 1), tareas cron programadas e infraestructura de datos.
           </p>
         </div>
 
         {/* Selector de Pestañas */}
-        <div className="flex items-center p-1 bg-sf rounded-xl border border-[var(--bd)] w-full sm:w-auto">
+        <div className="flex items-center p-1 bg-sf rounded-xl border border-[var(--bd)] w-full lg:w-auto overflow-x-auto">
           <button
             onClick={() => handleTabChange('stream')}
             className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${

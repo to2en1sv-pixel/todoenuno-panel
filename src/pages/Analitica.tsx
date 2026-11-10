@@ -187,23 +187,23 @@ export function AnaliticaPage() {
   return (
     <div className="space-y-6 p-4 md:p-6 max-w-7xl mx-auto">
       {/* HEADER DE ANALÍTICA & FILTROS */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4 shadow-sm">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4 shadow-sm">
+        <div className="min-w-0 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500 shrink-0">
               <BarChart3 size={22} />
             </span>
-            <h1 className="text-xl font-black text-[var(--tx)]">
+            <h1 className="text-lg sm:text-xl font-black text-[var(--tx)] tracking-tight whitespace-normal sm:whitespace-nowrap">
               Centro de Analítica & Mapa Demográfico COD
             </h1>
           </div>
-          <p className="text-xs text-[var(--mu)] mt-1">
+          <p className="text-xs text-[var(--mu)] mt-1 max-w-xl">
             Inteligencia territorial en los 14 departamentos de El Salvador, efectividad de entrega contra entrega y comportamiento de compra.
           </p>
         </div>
 
         {/* SELECTOR DE RANGOS TEMPORALES & REFRESH */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
           <div className="flex bg-sf p-1 rounded-xl border border-[var(--bd)] text-xs font-semibold">
             {[
               { id: 'este_mes', label: 'Este Mes' },

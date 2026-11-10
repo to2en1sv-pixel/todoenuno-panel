@@ -203,37 +203,37 @@ export function RentabilidadPage() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-        <div>
-          <div className="flex items-center gap-2">
-            <BarChart3 className="text-indigo-600" size={24} />
-            <h1 className="text-2xl font-black text-slate-900">
+      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white dark:bg-[var(--cd)] p-5 rounded-2xl border border-slate-200 dark:border-[var(--bd)] shadow-sm">
+        <div className="min-w-0 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <BarChart3 className="text-indigo-600 shrink-0" size={24} />
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-[var(--tx)] tracking-tight whitespace-normal sm:whitespace-nowrap">
               Rentabilidad, ROAS & Ciclos de Pauta
             </h1>
           </div>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-slate-500 dark:text-[var(--mu)] max-w-xl">
             Cruce de inversión publicitaria con ventas de WhatsApp y memoria histórica de rendimiento por producto.
           </p>
         </div>
 
         {/* Selector de Pestañas */}
-        <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold border border-slate-200">
+        <div className="flex bg-slate-100 dark:bg-[var(--sf)] p-1 rounded-xl text-xs font-bold border border-slate-200 dark:border-[var(--bd)] w-full lg:w-auto overflow-x-auto">
           <button
             onClick={() => setVistaActiva('mensual')}
-            className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors ${
+            className={`flex-1 lg:flex-none px-3.5 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap ${
               vistaActiva === 'mensual'
-                ? 'bg-white shadow-sm text-slate-900'
-                : 'text-slate-500 hover:text-slate-900'
+                ? 'bg-white dark:bg-[var(--cd)] shadow-sm text-slate-900 dark:text-[var(--tx)]'
+                : 'text-slate-500 dark:text-[var(--mu)] hover:text-slate-900 dark:hover:text-[var(--tx)]'
             }`}
           >
             <BarChart3 size={14} /> ROAS Mensual
           </button>
           <button
             onClick={() => setVistaActiva('boveda')}
-            className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors ${
+            className={`flex-1 lg:flex-none px-3.5 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap ${
               vistaActiva === 'boveda'
                 ? 'bg-amber-500 text-white shadow-sm'
-                : 'text-amber-700 hover:bg-amber-100/50'
+                : 'text-amber-700 dark:text-amber-400 hover:bg-amber-100/50'
             }`}
           >
             <Sparkles size={14} /> Bóveda de Productos & Ciclos

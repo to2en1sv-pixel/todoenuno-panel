@@ -1,4 +1,5 @@
 import { emitOsEvent } from './osEvents';
+import { supabase } from './supabase';
 
 export interface BlacklistEntry {
   telefono: string;          // 8 dígitos limpios (ej. 71234567)
@@ -53,8 +54,49 @@ export function formatPhoneDisplay(clean: string): string {
   return `+503 ${c.slice(0, 4)}-${c.slice(4)}`;
 }
 
-// Carga las entradas manuales de la lista negra desde localStorage con fallback inicial de prevención
+// Sincroniza desde Supabase en background (si la tabla client_blacklist existe)
+let supabaseSyncAttempted = false;
+export async function syncBlacklistFromSupabase(): Promise<BlacklistEntry[]> {
+  try {
+    const { data, error } = await supabase
+      .from('client_blacklist')
+      .select('*')
+      .eq('activo', true)
+      .order('created_at', { ascending: false });
+
+    if (!error && Array.isArray(data)) {
+      const mapeados: BlacklistEntry[] = data.map((row: any) => ({
+        telefono: cleanPhone(row.telefono),
+        telefonoDisplay: row.telefono_display || formatPhoneDisplay(row.telefono),
+        nombreCliente: row.nombre_cliente || 'Cliente',
+        aliasNombres: row.alias_nombres || [],
+        motivo: row.motivo || 'Reportado en lista negra',
+        severidad: (row.severidad as 'alta' | 'media' | 'baja') || 'alta',
+        reportadoPor: row.reportado_por || 'Equipo Operativo',
+        fecha: row.created_at ? row.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
+        pedidoId: row.pedido_id,
+        activo: row.activo ?? true
+      }));
+
+      // Guardar en cache local
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(mapeados));
+      window.dispatchEvent(new Event('blacklist_updated'));
+      return mapeados;
+    }
+  } catch (err) {
+    // Si la tabla no existe en Supabase, continúa trabajando silenciosamente con localStorage
+  }
+  return getBlacklistEntries();
+}
+
+// Carga las entradas manuales de la lista negra (localStorage instantáneo con sync opcional de Supabase)
 export function getBlacklistEntries(): BlacklistEntry[] {
+  // Disparar sincronización silenciosa con Supabase una sola vez al cargar la app
+  if (!supabaseSyncAttempted && typeof window !== 'undefined') {
+    supabaseSyncAttempted = true;
+    syncBlacklistFromSupabase().catch(() => {});
+  }
+
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -67,7 +109,7 @@ export function getBlacklistEntries(): BlacklistEntry[] {
   return [];
 }
 
-// Agrega o actualiza un cliente en la lista negra
+// Agrega o actualiza un cliente en la lista negra (Local + Supabase si existe)
 export function addOrUpdateBlacklist(entry: Omit<BlacklistEntry, 'telefonoDisplay' | 'activo'> & { activo?: boolean }): BlacklistEntry {
   const telefonoLimpio = cleanPhone(entry.telefono);
   if (!telefonoLimpio) throw new Error('El teléfono es requerido para boletinar al cliente.');
@@ -94,6 +136,25 @@ export function addOrUpdateBlacklist(entry: Omit<BlacklistEntry, 'telefonoDispla
   }
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(actual));
+  window.dispatchEvent(new Event('blacklist_updated'));
+
+  // Sincronización en segundo plano con Supabase si la tabla está creada
+  (async () => {
+    try {
+      await (supabase.from('client_blacklist') as any).upsert({
+        telefono: telefonoLimpio,
+        telefono_display: formatPhoneDisplay(telefonoLimpio),
+        nombre_cliente: entry.nombreCliente,
+        alias_nombres: nuevaEntrada.aliasNombres,
+        motivo: entry.motivo,
+        severidad: entry.severidad,
+        reportado_por: entry.reportadoPor,
+        pedido_id: entry.pedidoId || null,
+        activo: true,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'telefono' });
+    } catch {}
+  })();
 
   // Emitir evento al sistema operativo
   try {
@@ -113,7 +174,7 @@ export function addOrUpdateBlacklist(entry: Omit<BlacklistEntry, 'telefonoDispla
   return nuevaEntrada;
 }
 
-// Remueve o rehabilita un cliente de la lista negra
+// Remueve o rehabilita un cliente de la lista negra (Local + Supabase si existe)
 export function removeBlacklistEntry(telefono: string): boolean {
   const clean = cleanPhone(telefono);
   if (!clean) return false;
@@ -121,6 +182,16 @@ export function removeBlacklistEntry(telefono: string): boolean {
   const actual = getBlacklistEntries();
   const filtrados = actual.filter(e => cleanPhone(e.telefono) !== clean);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(filtrados));
+  window.dispatchEvent(new Event('blacklist_updated'));
+
+  // Sincronizar en segundo plano con Supabase
+  (async () => {
+    try {
+      await (supabase.from('client_blacklist') as any)
+        .delete()
+        .eq('telefono', clean);
+    } catch {}
+  })();
 
   try {
     emitOsEvent({

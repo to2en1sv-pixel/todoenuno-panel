@@ -79,7 +79,7 @@ export function HoyPage() {
             <CircleDot size={12} style={{ color: systemAlive ? 'var(--ok)' : 'var(--er)' }} />
             {now.toLocaleDateString('es-SV', { weekday: 'long', day: 'numeric', month: 'long' })} · {now.toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit' })}
           </div>
-          <h1 className="text-3xl lg:text-4xl font-bold mt-3 tracking-tight">
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-2 sm:mt-3 tracking-tight">
             {queue.isLoading ? '…' : systemAlive ? `${greeting}, todo en marcha` : 'El sistema está parado'}
           </h1>
         </div>

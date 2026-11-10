@@ -678,24 +678,26 @@ export function CatalogoPage() {
       />
 
       {/* Encabezado Principal */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Boxes className="text-[var(--ac)]" size={24} />
-            <h1 className="text-2xl font-black">Catálogo & Inventario Nativo</h1>
-            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
+        <div className="min-w-0 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Boxes className="text-[var(--ac)] shrink-0" size={24} />
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight whitespace-normal sm:whitespace-nowrap">
+              Catálogo & Inventario Nativo
+            </h1>
+            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
               Sprint 3 Core
             </span>
-            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/30 flex items-center gap-1">
+            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/30 flex items-center gap-1 shrink-0">
               <Bot size={12} /> Todd Ready
             </span>
           </div>
-          <p className="text-xs text-[var(--mu)] mt-1">
+          <p className="text-xs text-[var(--mu)] mt-1 max-w-xl">
             Gestión de stock físico, Kárdex inmutable, carga de fotos y preparación de catálogo para el Bot de WhatsApp Todd.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
           <button
             onClick={() => setShowEntradaModal(true)}
             className="flex-1 sm:flex-none px-3.5 py-2 bg-[var(--tx)] text-[var(--cd)] rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 hover:opacity-90 shadow-sm"
