@@ -259,6 +259,23 @@ export async function adjustStock(params: {
     currentItem.stock_disponible = Math.max(params.nuevo_stock - currentItem.stock_reservado, 0);
   }
 
+  // Emitir evento al OS Event Store
+  try {
+    await emitOsEvent({
+      type: 'inventory.adjustment',
+      source_table: 'inventory_stock',
+      source_id: params.sku,
+      payload: {
+        sku: params.sku,
+        stock_anterior: stockAnterior,
+        nuevo_stock: params.nuevo_stock,
+        diferencia,
+        tipo_movimiento: tipoMovimiento,
+        motivo: params.motivo
+      }
+    });
+  } catch {}
+
   return { success: true };
 }
 
@@ -404,6 +421,22 @@ export async function updateProductDetails(payload: UpdateProductPayload): Promi
     // fallback
   }
 
+  // Emitir evento al OS Event Store
+  try {
+    await emitOsEvent({
+      type: 'product.updated',
+      source_table: 'productos',
+      source_id: templateId,
+      payload: {
+        template_id: templateId,
+        nombre: payload.nombre_base,
+        precio_venta: payload.precio_venta,
+        costo_unitario: payload.costo_unitario,
+        activo: payload.active
+      }
+    });
+  } catch {}
+
   return { success: true };
 }
 
@@ -511,6 +544,22 @@ export async function saveProductItem(product: ProductFormData): Promise<{ succe
   } else {
     localStock.push(item);
   }
+
+  // Emitir evento al OS Event Store
+  try {
+    await emitOsEvent({
+      type: existingIdx >= 0 ? 'product.updated' : 'product.created',
+      source_table: 'inventory_stock',
+      source_id: sku,
+      payload: {
+        sku,
+        nombre: product.nombre.trim(),
+        precio_venta: product.precio_venta,
+        costo_unitario: product.costo_unitario,
+        stock_inicial: product.stock_inicial
+      }
+    });
+  } catch {}
 
   return { success: true };
 }

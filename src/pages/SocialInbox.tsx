@@ -229,6 +229,23 @@ export function SocialInbox() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || 'No se pudo enviar el mensaje');
 
+      // Emitir evento al OS Event Store
+      try {
+        const { emitOsEvent } = await import('@/lib/osEvents');
+        await emitOsEvent({
+          type: 'social.reply.sent',
+          source_table: 'fb_messages',
+          source_id: selected.contactId,
+          payload: {
+            page_id: selected.pageId,
+            contact_id: selected.contactId,
+            contact_name: selected.contactName,
+            text,
+            channel: 'meta_dm'
+          }
+        });
+      } catch {}
+
       setDraft('');
       await load();
     } catch (e: any) {

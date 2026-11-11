@@ -440,6 +440,24 @@ export function EventStreamViewer() {
           label: 'FINANZAS',
           dot: 'bg-blue-500'
         };
+      case 'inventory':
+        return {
+          bg: 'bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/30',
+          label: 'INVENTARIO',
+          dot: 'bg-teal-500'
+        };
+      case 'customer':
+        return {
+          bg: 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30',
+          label: 'DICOM',
+          dot: 'bg-rose-500'
+        };
+      case 'ltv':
+        return {
+          bg: 'bg-fuchsia-500/15 text-fuchsia-600 dark:text-fuchsia-400 border-fuchsia-500/30',
+          label: 'LTV FLASH',
+          dot: 'bg-fuchsia-500'
+        };
       default:
         return {
           bg: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border-zinc-500/30',
@@ -602,8 +620,11 @@ export function EventStreamViewer() {
               { id: 'chat', label: '💬 Chat' },
               { id: 'lead', label: '🎯 Leads' },
               { id: 'marketing', label: '📢 Marketing' },
+              { id: 'inventory', label: '🏷️ Inventario' },
               { id: 'supplier', label: '🏢 Proveedores' },
               { id: 'finance', label: '💰 Finanzas' },
+              { id: 'customer', label: '🛡️ DICOM' },
+              { id: 'ltv', label: '⚡ LTV' },
               { id: 'system', label: '⚙️ Sistema' },
             ].map((d) => (
               <button

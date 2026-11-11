@@ -53,6 +53,24 @@ export function UniChatPage() {
               if (prev.some(m => m.id === newMsg.id)) return prev;
               return [...prev, newMsg];
             });
+
+            // Emitir evento si es mensaje entrante del cliente
+            if (!newMsg.from_me) {
+              import('@/lib/osEvents').then(({ emitOsEvent }) => {
+                emitOsEvent({
+                  type: 'chat.message.received',
+                  source_table: 'bb_messages',
+                  source_id: newMsg.id || current.id,
+                  payload: {
+                    conversation_id: current.id,
+                    contact_name: current.contact_name,
+                    contact_phone: current.contact_phone,
+                    text: newMsg.body,
+                    channel: 'whatsapp'
+                  }
+                }).catch(() => {});
+              });
+            }
           }
           return current;
         });
@@ -102,6 +120,22 @@ export function UniChatPage() {
       setSelectedConv(updatedConv);
       setConversations(prev => prev.map(c => c.id === selectedConv.id ? updatedConv : c));
 
+      // Emitir evento OS
+      try {
+        const { emitOsEvent } = await import('@/lib/osEvents');
+        await emitOsEvent({
+          type: 'chat.bot.toggled',
+          source_table: 'bb_conversations',
+          source_id: selectedConv.id,
+          payload: {
+            conversation_id: selectedConv.id,
+            contact_name: selectedConv.contact_name,
+            contact_phone: selectedConv.contact_phone,
+            status: newStatus
+          }
+        });
+      } catch {}
+
     } catch (error: any) {
       console.error(error);
       alert(`No se pudo cambiar el modo: ${error.message}`);
@@ -133,6 +167,23 @@ export function UniChatPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.details || data.error || 'Error en el servidor');
       
+      // Emitir evento OS
+      try {
+        const { emitOsEvent } = await import('@/lib/osEvents');
+        await emitOsEvent({
+          type: 'chat.message.sent',
+          source_table: 'bb_messages',
+          source_id: selectedConv.id,
+          payload: {
+            conversation_id: selectedConv.id,
+            contact_name: selectedConv.contact_name,
+            contact_phone: selectedConv.contact_phone,
+            text: textToSend,
+            agent_type: 'human'
+          }
+        });
+      } catch {}
+
     } catch (error: any) {
       console.error('Error al enviar:', error);
       setInputText(textToSend); 

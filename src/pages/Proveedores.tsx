@@ -210,6 +210,21 @@ export function ProveedoresPage() {
     if (error) {
       setMessage({ type: 'error', text: 'Error al guardar: ' + error.message });
     } else {
+      if (!editingProviderId) {
+        try {
+          await emitOsEvent({
+            type: 'supplier.created',
+            source_table: 'proveedores',
+            source_id: provNombre.trim(),
+            payload: {
+              nombre: provNombre.trim(),
+              telefono: provTelefono.trim(),
+              etiquetas: etiquetasArray
+            }
+          });
+        } catch {}
+      }
+
       setMessage({ type: 'ok', text: `Proveedor ${editingProviderId ? 'actualizado' : 'creado'} correctamente.` });
       setIsProviderModalOpen(false);
       cargarDatos();
@@ -381,6 +396,23 @@ export function ProveedoresPage() {
           estado: 'respondido',
           respondido_at: new Date().toISOString()
         });
+
+      // Emitir evento al OS Event Store
+      try {
+        await emitOsEvent({
+          type: 'supplier.bid.received',
+          source_table: 'licitacion_proveedores',
+          source_id: `${licitacionDetalle.id}:${ofertaProveedorId}`,
+          payload: {
+            licitacion_id: licitacionDetalle.id,
+            sku: licitacionDetalle.sku,
+            proveedor_id: ofertaProveedorId,
+            precio_ofertado: parseFloat(ofertaPrecio),
+            cantidad: parseInt(ofertaCantidad || String(licitacionDetalle.cantidad)),
+            tiempo_entrega: ofertaTiempo
+          }
+        });
+      } catch {}
 
       setModalNuevaOferta(false);
       setOfertaProveedorId('');

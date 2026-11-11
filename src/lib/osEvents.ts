@@ -127,24 +127,53 @@ let localEvents: OsEvent[] = [...SAMPLE_EVENTS];
 const subscribers: Set<(event: OsEvent) => void> = new Set();
 
 export const DEFAULT_EVENT_TYPES: OsEventType[] = [
+  // Pedidos & Logística
   { type: 'order.created', domain: 'order', description: 'Nuevo pedido registrado', enabled: true },
   { type: 'order.confirmed', domain: 'order', description: 'Pedido confirmado / por empacar', enabled: true },
   { type: 'order.shipped', domain: 'order', description: 'Pedido despachado / en camino', enabled: true },
   { type: 'order.delivered', domain: 'order', description: 'Pedido entregado exitosamente', enabled: true },
   { type: 'order.cancelled', domain: 'order', description: 'Pedido cancelado', enabled: true },
+  { type: 'order.scheduled', domain: 'order', description: 'Pedido programado / encargo a futuro', enabled: true },
+
+  // Mensajería, Conversaciones & Omnicanal
   { type: 'chat.message.received', domain: 'chat', description: 'Mensaje entrante de cliente', enabled: true },
   { type: 'chat.message.sent', domain: 'chat', description: 'Mensaje saliente de agente/bot', enabled: true },
-  { type: 'lead.generated', domain: 'lead', description: 'Prospecto captado', enabled: true },
-  { type: 'marketing.post.created', domain: 'marketing', description: 'Publicación programada', enabled: true },
+  { type: 'chat.bot.toggled', domain: 'chat', description: 'Cambio de modo Bot vs Humano', enabled: true },
+  { type: 'social.reply.sent', domain: 'chat', description: 'Respuesta enviada a DM o comentario social', enabled: true },
+  { type: 'lead.generated', domain: 'lead', description: 'Prospecto captado desde chat/redes', enabled: true },
+
+  // Marketing & Pauta Publicitaria
+  { type: 'marketing.post.created', domain: 'marketing', description: 'Publicación programada en cola', enabled: true },
   { type: 'marketing.post.published', domain: 'marketing', description: 'Publicación emitida en redes', enabled: true },
   { type: 'marketing.lead.generated', domain: 'marketing', description: 'Lead de campaña publicitaria', enabled: true },
   { type: 'marketing.ad.expense', domain: 'marketing', description: 'Gasto publicitario registrado', enabled: true },
+
+  // Inventario & Catálogo
+  { type: 'inventory.adjustment', domain: 'inventory', description: 'Ajuste manual de stock / merma', enabled: true },
+  { type: 'product.created', domain: 'inventory', description: 'Nuevo producto creado en catálogo', enabled: true },
+  { type: 'product.updated', domain: 'inventory', description: 'Producto actualizado en catálogo / Todd', enabled: true },
+
+  // Proveedores & Compras
   { type: 'supplier.created', domain: 'supplier', description: 'Nuevo proveedor registrado', enabled: true },
   { type: 'purchase.requested', domain: 'supplier', description: 'Licitación / compra solicitada', enabled: true },
   { type: 'supplier.bid.received', domain: 'supplier', description: 'Oferta recibida de proveedor', enabled: true },
   { type: 'supplier.selected', domain: 'supplier', description: 'Proveedor adjudicado', enabled: true },
-  { type: 'finance.income.created', domain: 'finance', description: 'Ingreso liquidado (pedido)', enabled: true },
-  { type: 'finance.expense.created', domain: 'finance', description: 'Egreso asentado (pauta/compra)', enabled: true },
+
+  // Finanzas & Caja
+  { type: 'finance.income.created', domain: 'finance', description: 'Ingreso liquidado (pedido entregado)', enabled: true },
+  { type: 'finance.expense.created', domain: 'finance', description: 'Egreso asentado (pauta/compra/operación)', enabled: true },
+  { type: 'finance.debt.created', domain: 'finance', description: 'Cuenta por pagar registrada', enabled: true },
+
+  // Clientes, Score Antifraude & DICOM
+  { type: 'customer.blacklisted', domain: 'customer', description: 'Cliente ingresado a Lista Negra / DICOM', enabled: true },
+  { type: 'customer.whitelisted', domain: 'customer', description: 'Cliente rehabilitado de Lista Negra', enabled: true },
+  { type: 'customer.notified', domain: 'customer', description: 'Cliente notificado por WhatsApp', enabled: true },
+
+  // Fidelización, LTV & Ofertas Flash Cross-Sell
+  { type: 'ltv.campaign_created', domain: 'ltv', description: 'Campaña de Oferta Flash creada', enabled: true },
+  { type: 'ltv.offer_dispatched', domain: 'ltv', description: 'Oferta Flash enviada por WhatsApp', enabled: true },
+
+  // Sistema
   { type: 'system.heartbeat', domain: 'system', description: 'Latido de monitoreo del sistema', enabled: true },
   { type: 'system.test', domain: 'system', description: 'Evento emitido para verificación manual', enabled: true },
 ];

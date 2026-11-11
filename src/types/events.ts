@@ -5,6 +5,9 @@ export type EventDomain =
   | 'marketing' 
   | 'supplier' 
   | 'finance' 
+  | 'inventory'
+  | 'customer'
+  | 'ltv'
   | 'system';
 
 export interface OsEvent {
