@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { 
   BarChart3, 
@@ -13,7 +14,8 @@ import {
   Filter,
   X,
   Sparkles,
-  Layers
+  Layers,
+  Zap
 } from 'lucide-react';
 import { VentasLineChart } from '@/components/charts/VentasLineChart';
 import { MapaElSalvadorCalor } from '@/components/analitica/MapaElSalvadorCalor';
@@ -360,8 +362,16 @@ export function AnaliticaPage() {
               : 'tx-mu hover:text-[var(--tx)]'
           }`}
         >
-          <BarChart3 size={16} /> Tendencias, Días Pico & Productos
+          <BarChart3 size={16} /> Tendencias & Productos
         </button>
+
+        <Link
+          to="/ltv"
+          className="flex-1 py-2 rounded-xl transition-all flex items-center justify-center gap-2 tx-mu hover:text-indigo-600 hover:bg-cd hover:shadow-sm"
+          title="Ir al módulo de Fidelización, LTV & Ofertas Flash"
+        >
+          <Zap size={16} className="text-amber-500" /> Fidelización & LTV
+        </Link>
       </div>
 
       {/* CONTENIDO SEGÚN LA PESTAÑA */}

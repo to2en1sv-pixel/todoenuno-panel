@@ -16,7 +16,8 @@ import {
   Inbox,      // <-- NUEVO ICONO PARA SOCIAL INBOX
   Activity,   // <-- OS Event Stream (Sprint 1)
   Server,
-  Layers
+  Layers,
+  Zap
 } from 'lucide-react';
 
 const links = [
@@ -26,6 +27,7 @@ const links = [
   { to: '/finanzas', label: 'Finanzas & Budget', icon: Wallet },
   { to: '/rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
   { to: '/analitica', label: 'Analítica', icon: PieChart },
+  { to: '/ltv', label: 'Fidelización & LTV', icon: Zap },
   { to: '/marketing', label: 'Pricing & Promo', icon: Megaphone },
   { to: '/unichat', label: 'UniChat', icon: MessageSquare }, 
   { to: '/social-inbox', label: 'Social Inbox', icon: Inbox },

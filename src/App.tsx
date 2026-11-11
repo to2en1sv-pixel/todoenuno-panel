@@ -16,6 +16,7 @@ import { SocialInbox } from '@/pages/SocialInbox';
 import { ConfirmarEntregaPage } from "@/pages/ConfirmarEntrega";
 import { EventStreamPage } from '@/pages/EventStreamPage';
 import { FinanzasPage } from '@/pages/FinanzasPage';
+import { LtvPage } from '@/pages/LtvPage';
 
 export default function App() {
   return (
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/social-inbox" element={<SocialInbox />} />
         <Route path="/rentabilidad" element={<RentabilidadPage />} />
         <Route path="/analitica" element={<AnaliticaPage />} />
+        <Route path="/ltv" element={<LtvPage />} />
       </Route>
     </Routes>
   );
