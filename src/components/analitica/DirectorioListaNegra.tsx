@@ -457,6 +457,16 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
                       {/* Motivo */}
                       <td className="p-3">
                         <span className="text-xs text-[var(--tx)] block font-medium">{e.motivo}</span>
+                        {e.producto && (
+                          <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold block mt-0.5 truncate max-w-xs" title={e.producto}>
+                            📦 {e.producto}
+                          </span>
+                        )}
+                        {e.direccion && (
+                          <span className="text-[10px] tx-mu block mt-0.5 truncate max-w-xs" title={e.direccion}>
+                            📍 {e.direccion}
+                          </span>
+                        )}
                         <span className="text-[10px] tx-mu block mt-0.5">
                           {new Date(e.fecha).toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric' })}
                         </span>

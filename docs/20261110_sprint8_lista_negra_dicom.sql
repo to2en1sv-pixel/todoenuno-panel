@@ -18,6 +18,8 @@ create table if not exists public.client_blacklist (
   notificado boolean not null default false,
   fecha_notificacion timestamptz,
   evidencia_urls text[] default '{}',
+  producto text,
+  direccion text,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -26,7 +28,9 @@ create table if not exists public.client_blacklist (
 alter table if exists public.client_blacklist
   add column if not exists notificado boolean not null default false,
   add column if not exists fecha_notificacion timestamptz,
-  add column if not exists evidencia_urls text[] default '{}';
+  add column if not exists evidencia_urls text[] default '{}',
+  add column if not exists producto text,
+  add column if not exists direccion text;
 
 -- 2. Índices para consultas ultra rápidas por teléfono y estado
 create index if not exists idx_client_blacklist_telefono 
@@ -39,6 +43,7 @@ create index if not exists idx_client_blacklist_activo
 alter table public.client_blacklist enable row level security;
 grant select, insert, update, delete on public.client_blacklist to anon, authenticated, service_role;
 
+drop policy if exists "Acceso completo a client_blacklist" on public.client_blacklist;
 create policy "Acceso completo a client_blacklist"
   on public.client_blacklist for all
   using (true)

@@ -429,8 +429,8 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                           if (riskProfile.enListaNegra) {
                             removeBlacklistEntry(riskProfile.telefonoLimpio);
                           } else {
-                            const prod = form.producto || (form.items && form.items.length > 0 ? form.items.map((i: any) => `${i.cantidad || 1}x ${i.nombre}`).join(', ') : form.sku) || '';
-                            const dir = [form.direccion, form.municipio, form.departamento].filter(Boolean).join(', ') || '';
+                            const prod = (pedido as any)?.producto || form.sku || form.catalogo_sku || '';
+                            const dir = [form.direccion, (pedido as any)?.municipio, form.departamento].filter(Boolean).join(', ') || '';
 
                             addOrUpdateBlacklist({
                               telefono: riskProfile.telefonoLimpio,
