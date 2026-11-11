@@ -30,6 +30,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<HoyPage />} />
         <Route path="/event-stream" element={<EventStreamPage />} />
+        <Route path="/os-brain" element={<EventStreamPage />} />
         <Route path="/finanzas" element={<FinanzasPage />} />
         <Route path="/pagos" element={<FinanzasPage />} />
         <Route path="/unichat" element={<UniChatPage />} />

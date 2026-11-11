@@ -23,7 +23,7 @@ import {
 const links = [
   { to: '/', label: 'Hoy' },
   { to: '/pedidos', label: 'Pedidos', icon: ClipboardList },
-  { to: '/event-stream', label: 'Event Stream', icon: Activity, isNew: true },
+  { to: '/event-stream', label: 'OS Brain & Events', icon: Activity, isNew: true },
   { to: '/finanzas', label: 'Finanzas & Budget', icon: Wallet },
   { to: '/rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
   { to: '/analitica', label: 'Analítica', icon: PieChart },
