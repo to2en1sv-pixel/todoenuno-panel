@@ -13,7 +13,12 @@ export type NodeDomain =
   | 'niche' 
   | 'finance' 
   | 'docs' 
-  | 'events';
+  | 'events'
+  | 'marketing'
+  | 'social'
+  | 'analytics'
+  | 'catalog'
+  | 'system';
 
 export interface BrainSubAction {
   id: string;
@@ -42,12 +47,24 @@ export interface BrainNode {
   supportedEvents: string[];
 }
 
+export type BrainFlowType = 
+  | 'sales_flow' 
+  | 'fulfillment_flow' 
+  | 'retention_flow' 
+  | 'supply_flow' 
+  | 'core_sync'
+  | 'marketing_flow'
+  | 'finance_flow'
+  | 'system_flow';
+
 export interface BrainConnection {
   id: string;
   from: string;
   to: string;
   label?: string;
-  flowType?: 'sales_flow' | 'fulfillment_flow' | 'retention_flow' | 'supply_flow' | 'core_sync';
+  eventType?: string;
+  description?: string;
+  flowType?: BrainFlowType;
   bandwidth?: 'high' | 'medium' | 'low';
   animated?: boolean;
 }

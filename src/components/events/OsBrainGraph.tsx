@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Cpu, 
@@ -14,22 +14,28 @@ import {
   Sparkles, 
   Activity, 
   Wallet,
+  LayoutDashboard,
+  Megaphone,
+  Inbox,
+  PieChart,
+  TrendingUp,
+  Layers,
+  Server,
   Play, 
   Pause, 
   RotateCcw, 
   ZoomIn, 
   ZoomOut, 
-  Maximize2, 
-  Filter, 
   X, 
   ExternalLink, 
   ChevronRight, 
   ChevronLeft,
   CheckCircle2, 
-  AlertCircle, 
+  ArrowRight,
+  ArrowDownRight,
+  ArrowUpRight,
   Radio,
-  Layers,
-  Info
+  Send
 } from 'lucide-react';
 import { 
   INITIAL_BRAIN_NODES, 
@@ -40,7 +46,7 @@ import {
   BRAIN_CENTER_X,
   BRAIN_CENTER_Y
 } from '@/lib/osBrainData';
-import type { BrainNode, BrainConnection, NodeStatus, SimulationStep } from '@/types/brain';
+import type { BrainNode, BrainConnection, NodeStatus, SimulationStep, BrainFlowType } from '@/types/brain';
 import type { OsEvent } from '@/types/events';
 import { emitOsEvent } from '@/lib/osEvents';
 
@@ -58,7 +64,26 @@ const ICON_MAP: Record<string, React.ElementType> = {
   Zap,
   Sparkles,
   Activity,
-  Wallet
+  Wallet,
+  LayoutDashboard,
+  Megaphone,
+  Inbox,
+  PieChart,
+  TrendingUp,
+  Layers,
+  Server
+};
+
+// Flow type label & color mappings
+const FLOW_METADATA: Record<BrainFlowType, { label: string; color: string; badge: string }> = {
+  sales_flow: { label: 'Venta & Checkout COD', color: '#38bdf8', badge: 'bg-sky-500/10 text-sky-400 border-sky-500/30' },
+  fulfillment_flow: { label: 'Almacén & Despacho', color: '#10b981', badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' },
+  finance_flow: { label: 'Finanzas & Rentabilidad', color: '#f59e0b', badge: 'bg-amber-500/10 text-amber-400 border-amber-500/30' },
+  retention_flow: { label: 'Retención & Ciclo LTV', color: '#a855f7', badge: 'bg-purple-500/10 text-purple-400 border-purple-500/30' },
+  supply_flow: { label: 'Cadena de Suministro', color: '#ec4899', badge: 'bg-pink-500/10 text-pink-400 border-pink-500/30' },
+  marketing_flow: { label: 'Marketing & Adquisición', color: '#06b6d4', badge: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30' },
+  system_flow: { label: 'Gobernanza & Sistema', color: '#94a3b8', badge: 'bg-slate-500/10 text-slate-400 border-slate-500/30' },
+  core_sync: { label: 'OS Kernel Sync', color: '#6366f1', badge: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' }
 };
 
 interface OsBrainGraphProps {
@@ -75,6 +100,7 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
   const [connections] = useState<BrainConnection[]>(INITIAL_BRAIN_CONNECTIONS);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [hoveredConnectionId, setHoveredConnectionId] = useState<string | null>(null);
   
   // Transformación del viewport (zoom y pan)
   const [zoom, setZoom] = useState(1);
@@ -88,16 +114,16 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
 
   // Filtros
   const [statusFilter, setStatusFilter] = useState<'all' | NodeStatus>('all');
-  const [flowFilter, setFlowFilter] = useState<'all' | 'sales_flow' | 'fulfillment_flow' | 'retention_flow' | 'supply_flow'>('all');
+  const [flowFilter, setFlowFilter] = useState<'all' | BrainFlowType>('all');
 
   // Modo Simulación COD Paso a Paso
   const [simulationActive, setSimulationActive] = useState(false);
   const [simulationStepIndex, setSimulationStepIndex] = useState(0);
   const [simulationAutoPlay, setSimulationAutoPlay] = useState(false);
-  const [simulationPulseTrigger, setSimulationPulseTrigger] = useState(0);
 
   // Pulso temporal por eventos entrantes
   const [activePulseEdgeId, setActivePulseEdgeId] = useState<string | null>(null);
+  const [pulsingEventName, setPulsingEventName] = useState<string | null>(null);
 
   // Nodo seleccionado actual
   const selectedNode = useMemo(() => {
@@ -117,12 +143,11 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
       timer = setInterval(() => {
         setSimulationStepIndex((prev) => {
           if (prev >= COD_SIMULATION_STEPS.length - 1) {
-            return 0; // Loop or stay at last
+            return 0; // Rebobinar al inicio o mantener
           }
           return prev + 1;
         });
-        setSimulationPulseTrigger((c) => c + 1);
-      }, 3500);
+      }, 4000);
     }
     return () => clearInterval(timer);
   }, [simulationActive, simulationAutoPlay]);
@@ -133,13 +158,19 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
       const latest = recentEvents[0];
       const type = latest.type;
 
-      // Buscar si algún nodo tiene este evento
+      // Buscar si algún nodo soporta o emite este evento
       const target = nodes.find((n) => n.supportedEvents.includes(type));
       if (target) {
-        const edge = connections.find((c) => c.to === target.id || c.from === target.id);
+        // Encontrar una conexión que use este evento o que esté vinculada a ese nodo
+        const edgeWithEvent = connections.find((c) => c.eventType === type);
+        const edge = edgeWithEvent || connections.find((c) => c.to === target.id || c.from === target.id);
         if (edge) {
           setActivePulseEdgeId(edge.id);
-          const t = setTimeout(() => setActivePulseEdgeId(null), 2500);
+          setPulsingEventName(type);
+          const t = setTimeout(() => {
+            setActivePulseEdgeId(null);
+            setPulsingEventName(null);
+          }, 3000);
           return () => clearTimeout(t);
         }
       }
@@ -214,7 +245,6 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
     setSimulationActive(true);
     setSimulationStepIndex(0);
     setSimulationAutoPlay(true);
-    setSimulationPulseTrigger((c) => c + 1);
   };
 
   const handleStopSimulation = () => {
@@ -239,9 +269,20 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
     });
   }, [connections, flowFilter]);
 
-  // Emitir pulso manual
-  const handleTriggerNodePulse = async (node: BrainNode) => {
-    const eventType = node.supportedEvents[0] || 'system.heartbeat';
+  // Sinapsis salientes y entrantes del nodo seleccionado
+  const outgoingSynapses = useMemo(() => {
+    if (!selectedNodeId) return [];
+    return connections.filter((c) => c.from === selectedNodeId);
+  }, [selectedNodeId, connections]);
+
+  const incomingSynapses = useMemo(() => {
+    if (!selectedNodeId) return [];
+    return connections.filter((c) => c.to === selectedNodeId);
+  }, [selectedNodeId, connections]);
+
+  // Emitir pulso manual de un evento específico
+  const handleTriggerNodePulse = async (node: BrainNode, specificEvent?: string) => {
+    const eventType = specificEvent || node.supportedEvents[0] || 'system.heartbeat';
     await emitOsEvent({
       type: eventType,
       source_table: 'os_brain_graph',
@@ -250,15 +291,20 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
         node_id: node.id,
         node_label: node.label,
         domain: node.domain,
-        message: `Pulso sináptico emitido manualmente desde OS Brain para ${node.label}`,
+        message: `Pulso sináptico emitido en vivo desde OS Brain para ${node.label} (${eventType})`,
         timestamp: new Date().toISOString()
       }
     });
 
-    const edge = connections.find((c) => c.to === node.id || c.from === node.id);
+    // Encender la conexión asociada
+    const edge = connections.find((c) => c.eventType === eventType || c.from === node.id || c.to === node.id);
     if (edge) {
       setActivePulseEdgeId(edge.id);
-      setTimeout(() => setActivePulseEdgeId(null), 2500);
+      setPulsingEventName(eventType);
+      setTimeout(() => {
+        setActivePulseEdgeId(null);
+        setPulsingEventName(null);
+      }, 2500);
     }
   };
 
@@ -268,7 +314,7 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
       case 'completed':
         return {
           color: '#10b981', // emerald
-          badgeText: 'Completed',
+          badgeText: 'Operativo',
           glow: 'rgba(16, 185, 129, 0.45)',
           stroke: '#059669',
           bg: 'rgba(6, 78, 59, 0.35)'
@@ -276,7 +322,7 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
       case 'in_progress':
         return {
           color: '#f59e0b', // amber
-          badgeText: 'In Progress',
+          badgeText: 'En Progreso',
           glow: 'rgba(245, 158, 11, 0.45)',
           stroke: '#d97706',
           bg: 'rgba(120, 53, 15, 0.35)'
@@ -284,7 +330,7 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
       case 'active_dev':
         return {
           color: '#06b6d4', // cyan
-          badgeText: 'Active Dev',
+          badgeText: 'Dev Activo',
           glow: 'rgba(6, 182, 212, 0.45)',
           stroke: '#0891b2',
           bg: 'rgba(22, 78, 99, 0.35)'
@@ -293,7 +339,7 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
       default:
         return {
           color: '#94a3b8', // slate
-          badgeText: 'Future',
+          badgeText: 'Planificado',
           glow: 'rgba(148, 163, 184, 0.25)',
           stroke: '#64748b',
           bg: 'rgba(30, 41, 59, 0.4)'
@@ -311,7 +357,7 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
     <div className="relative w-full rounded-2xl border border-[var(--bd)] overflow-hidden bg-[#070b14] text-slate-100 shadow-2xl flex flex-col select-none">
       
       {/* 1. Header Bar: Digital Twin Title & Telemetry */}
-      <div className="px-5 py-3.5 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md flex flex-wrap items-center justify-between gap-3 z-10">
+      <div className="px-5 py-3.5 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-md flex flex-wrap items-center justify-between gap-3 z-10">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-violet-600/20 border border-violet-500/40 flex items-center justify-center text-violet-400">
             <Cpu size={18} className="animate-pulse" />
@@ -319,10 +365,10 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
           <div>
             <div className="flex items-center gap-2">
               <span className="font-extrabold text-sm tracking-wide text-white">
-                TODOENUNO OS
+                TODOENUNO OS · GEMELO DIGITAL
               </span>
-              <span className="text-xs text-slate-400 font-normal">
-                · El Salvador · Knowledge Graph · Digital Twin
+              <span className="text-xs text-slate-400 font-normal hidden sm:inline">
+                · Red Neuronal Operativa · El Salvador
               </span>
             </div>
             <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
@@ -333,7 +379,14 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
               <span>·</span>
               <span>San Salvador, SV</span>
               <span>·</span>
-              <span className="font-mono text-slate-300">12 Nodos · 24 Sinapsis</span>
+              <span className="font-mono text-slate-300">
+                {nodes.length} Módulos · {connections.length} Sinapsis Reales
+              </span>
+              {pulsingEventName && (
+                <span className="ml-2 px-2 py-0.5 rounded-full bg-pink-500/20 text-pink-300 font-mono text-[10px] border border-pink-500/40 animate-pulse">
+                  ⚡ {pulsingEventName}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -374,10 +427,14 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
               onChange={(e) => setFlowFilter(e.target.value as any)}
               className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-medium text-slate-200 outline-none hover:border-slate-500 transition-colors cursor-pointer"
             >
-              <option value="all">⚡ Todos los Flujos</option>
-              <option value="sales_flow">🛒 Flujo Venta & Despacho COD</option>
-              <option value="retention_flow">🎯 Flujo Retención & LTV</option>
-              <option value="supply_flow">📦 Flujo Cadena de Suministro</option>
+              <option value="all">⚡ Todos los Flujos ({connections.length} Sinapsis)</option>
+              <option value="sales_flow">🛒 Venta & Checkout COD</option>
+              <option value="fulfillment_flow">🚚 Almacén, Picking & Despacho</option>
+              <option value="finance_flow">💰 Finanzas, Caja & Rentabilidad</option>
+              <option value="retention_flow">🎯 Retención & Ciclo LTV</option>
+              <option value="supply_flow">📦 Cadena de Suministro B2B</option>
+              <option value="marketing_flow">📣 Marketing & Adquisición</option>
+              <option value="system_flow">⚙️ Gobernanza & Sistema</option>
             </select>
           </div>
 
@@ -409,9 +466,9 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
       </div>
 
       {/* 2. Main Neural Network Interactive Canvas */}
-      <div className="relative w-full h-[620px] overflow-hidden bg-gradient-to-b from-[#060911] via-[#090d18] to-[#04060b] cursor-grab active:cursor-grabbing">
+      <div className="relative w-full h-[660px] overflow-hidden bg-gradient-to-b from-[#060911] via-[#090d18] to-[#04060b] cursor-grab active:cursor-grabbing">
         
-        {/* Subtle Background Grid & Star Dust */}
+        {/* Subtle Background Grid */}
         <div 
           className="absolute inset-0 pointer-events-none opacity-20"
           style={{
@@ -422,9 +479,9 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
 
         {/* Central Core Ambient Glow */}
         <div 
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[520px] h-[520px] rounded-full pointer-events-none opacity-30 blur-3xl"
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[580px] h-[580px] rounded-full pointer-events-none opacity-30 blur-3xl"
           style={{
-            background: 'radial-gradient(circle, rgba(139, 92, 246, 0.4) 0%, rgba(59, 130, 246, 0.2) 45%, transparent 70%)'
+            background: 'radial-gradient(circle, rgba(139, 92, 246, 0.45) 0%, rgba(59, 130, 246, 0.22) 45%, transparent 70%)'
           }}
         />
 
@@ -447,23 +504,13 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
               </feMerge>
             </filter>
 
-            {/* Filtro de Núcleo Central */}
-            <filter id="core-glow" x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur stdDeviation="10" result="blur" />
-              <feColorMatrix type="matrix" values="1 0 0 0 0  0 0.8 1 0 0  0 0.4 1 0 0  0 0 0 2 0" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-
             {/* Marcadores de flecha en conexiones */}
             <marker id="arrow" viewBox="0 0 10 10" refX="28" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="rgba(148, 163, 184, 0.5)" />
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="rgba(148, 163, 184, 0.4)" />
             </marker>
 
             <marker id="arrow-active" viewBox="0 0 10 10" refX="28" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M 0 1 L 9 5 L 0 9 z" fill="#8b5cf6" />
+              <path d="M 0 1 L 9 5 L 0 9 z" fill="#a855f7" />
             </marker>
           </defs>
 
@@ -479,11 +526,16 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
 
                 const isConnectedToHovered = hoveredNodeId === conn.from || hoveredNodeId === conn.to;
                 const isConnectedToSelected = selectedNodeId === conn.from || selectedNodeId === conn.to;
+                const isHoveredConnection = hoveredConnectionId === conn.id;
+
                 const isSimActiveEdge = currentSimStep && (
                   (currentSimStep.sourceNodeId === conn.from && currentSimStep.targetNodeId === conn.to) ||
                   (currentSimStep.sourceNodeId === conn.to && currentSimStep.targetNodeId === conn.from)
                 );
                 const isPulsing = activePulseEdgeId === conn.id || isSimActiveEdge;
+
+                // Color por tipo de flujo
+                const flowColor = FLOW_METADATA[conn.flowType || 'core_sync']?.color || '#94a3b8';
 
                 // Cálculo de curva bezier suave
                 const dx = target.x - source.x;
@@ -495,52 +547,96 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
                 const pathD = `M ${source.x} ${source.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${target.x} ${target.y}`;
 
                 return (
-                  <g key={conn.id}>
+                  <g 
+                    key={conn.id} 
+                    className="cursor-pointer"
+                    onMouseEnter={() => setHoveredConnectionId(conn.id)}
+                    onMouseLeave={() => setHoveredConnectionId(null)}
+                  >
+                    {/* Línea invisible más gruesa para facilitar hover */}
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke="transparent"
+                      strokeWidth={14}
+                    />
+
                     {/* Línea base de sinapsis */}
                     <path
                       d={pathD}
                       fill="none"
                       stroke={
                         isPulsing
-                          ? '#a855f7'
-                          : isConnectedToSelected
+                          ? '#ec4899'
+                          : isHoveredConnection
                           ? '#38bdf8'
+                          : isConnectedToSelected
+                          ? flowColor
                           : isConnectedToHovered
-                          ? '#94a3b8'
+                          ? '#cbd5e1'
                           : conn.flowType === 'core_sync'
-                          ? 'rgba(99, 102, 241, 0.22)'
-                          : 'rgba(71, 85, 105, 0.35)'
+                          ? 'rgba(99, 102, 241, 0.20)'
+                          : 'rgba(71, 85, 105, 0.38)'
                       }
-                      strokeWidth={isPulsing ? 3 : isConnectedToHovered || isConnectedToSelected ? 2.2 : 1.2}
+                      strokeWidth={
+                        isPulsing 
+                          ? 3.2 
+                          : isHoveredConnection 
+                          ? 2.8 
+                          : isConnectedToSelected 
+                          ? 2.4 
+                          : isConnectedToHovered 
+                          ? 1.8 
+                          : 1.1
+                      }
                       strokeDasharray={conn.flowType === 'core_sync' ? '4 3' : undefined}
-                      filter={isPulsing ? 'url(#glow)' : undefined}
-                      className="transition-colors duration-300"
+                      filter={isPulsing || isHoveredConnection ? 'url(#glow)' : undefined}
+                      className="transition-colors duration-200"
                     />
 
                     {/* Partícula de pulso animada que viaja por la sinapsis */}
-                    {(conn.animated || isPulsing) && (
-                      <circle r={isPulsing ? 4.5 : 2.5} fill={isPulsing ? '#ec4899' : '#818cf8'} filter="url(#glow)">
+                    {(conn.animated || isPulsing || isConnectedToSelected) && (
+                      <circle 
+                        r={isPulsing ? 5 : isHoveredConnection ? 3.5 : 2.5} 
+                        fill={isPulsing ? '#ec4899' : isHoveredConnection ? '#38bdf8' : flowColor} 
+                        filter="url(#glow)"
+                      >
                         <animateMotion
                           path={pathD}
-                          dur={isPulsing ? '1.4s' : conn.bandwidth === 'high' ? '2.8s' : '4.5s'}
+                          dur={isPulsing ? '1.4s' : conn.bandwidth === 'high' ? '2.8s' : '4.6s'}
                           repeatCount="indefinite"
                         />
                       </circle>
                     )}
 
-                    {/* Etiqueta de flujo en hovering */}
-                    {(isConnectedToHovered || isPulsing) && conn.label && (
-                      <text
-                        x={(source.x + target.x) / 2}
-                        y={(source.y + target.y) / 2 - 8}
-                        fill="#cbd5e1"
-                        fontSize="10"
-                        fontFamily="monospace"
-                        textAnchor="middle"
-                        className="pointer-events-none select-none bg-slate-900 px-1"
+                    {/* Etiqueta de flujo en hovering o simulación */}
+                    {(isConnectedToHovered || isHoveredConnection || isPulsing) && conn.label && (
+                      <g 
+                        transform={`translate(${(source.x + target.x) / 2}, ${(source.y + target.y) / 2 - 10})`} 
+                        className="pointer-events-none select-none"
                       >
-                        {conn.label}
-                      </text>
+                        <rect
+                          x="-85"
+                          y="-9"
+                          width="170"
+                          height="18"
+                          rx="9"
+                          fill="rgba(15, 23, 42, 0.95)"
+                          stroke={isPulsing ? '#ec4899' : flowColor}
+                          strokeWidth="1"
+                        />
+                        <text
+                          x="0"
+                          y="3"
+                          fill="#f8fafc"
+                          fontSize="9.5"
+                          fontWeight="600"
+                          fontFamily="system-ui, sans-serif"
+                          textAnchor="middle"
+                        >
+                          {conn.label}
+                        </text>
+                      </g>
                     )}
                   </g>
                 );
@@ -557,6 +653,9 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
                 const isCore = node.id === 'core_memory';
                 const IconComponent = ICON_MAP[node.iconName] || Activity;
                 const visuals = getStatusVisuals(node.status);
+
+                // Conexiones de este nodo para calcular grado
+                const connectedCount = connections.filter((c) => c.from === node.id || c.to === node.id).length;
 
                 // Ocultar si no coincide con filtro de estado
                 if (statusFilter !== 'all' && node.status !== statusFilter) {
@@ -579,12 +678,12 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
                         r={node.radius + (isCore ? 20 : 12)}
                         fill="none"
                         stroke={isSimSource ? '#ec4899' : isSimTarget ? '#10b981' : visuals.color}
-                        strokeWidth={isCore ? 2.5 : 1.5}
+                        strokeWidth={isCore ? 2.5 : 1.6}
                         strokeDasharray={isCore ? '6 4' : '4 3'}
-                        opacity="0.8"
+                        opacity="0.85"
                         filter="url(#glow)"
                         className="animate-spin"
-                        style={{ animationDuration: isCore ? '12s' : '6s' }}
+                        style={{ animationDuration: isCore ? '14s' : '6s' }}
                       />
                     )}
 
@@ -623,29 +722,47 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
                     >
                       <div className="w-full h-full flex items-center justify-center text-white">
                         <IconComponent 
-                          size={isCore ? 22 : 18} 
+                          size={isCore ? 24 : 18} 
                           color={isCore ? '#c084fc' : visuals.color} 
                         />
                       </div>
                     </foreignObject>
 
+                    {/* Badge contador de sinapsis conectadas (arriba a la derecha del círculo) */}
+                    {!isCore && (
+                      <g transform={`translate(${node.radius - 8}, ${-node.radius + 8})`} className="pointer-events-none">
+                        <circle r="8" fill="#1e293b" stroke="#475569" strokeWidth="1" />
+                        <text
+                          x="0"
+                          y="3"
+                          fill="#94a3b8"
+                          fontSize="8.5"
+                          fontWeight="700"
+                          textAnchor="middle"
+                          fontFamily="monospace"
+                        >
+                          {connectedCount}
+                        </text>
+                      </g>
+                    )}
+
                     {/* Etiqueta del Nodo (debajo del círculo) */}
                     <g transform={`translate(0, ${node.radius + 16})`} className="pointer-events-none">
                       <rect
-                        x="-60"
+                        x="-65"
                         y="-10"
-                        width="120"
+                        width="130"
                         height="20"
                         rx="10"
-                        fill="rgba(15, 23, 42, 0.85)"
-                        stroke="rgba(51, 65, 85, 0.6)"
+                        fill="rgba(15, 23, 42, 0.92)"
+                        stroke="rgba(51, 65, 85, 0.7)"
                         strokeWidth="1"
                       />
                       <text
                         x="0"
                         y="4"
                         fill="#f8fafc"
-                        fontSize="11"
+                        fontSize="10.5"
                         fontWeight="700"
                         textAnchor="middle"
                         fontFamily="system-ui, sans-serif"
@@ -739,36 +856,22 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
           </div>
         )}
 
-        {/* 2.4 Leyenda Inferior & Medidor de Cobertura */}
+        {/* 2.4 Leyenda Inferior */}
         <div className="absolute bottom-4 left-5 bg-slate-950/80 backdrop-blur-md border border-slate-800/80 rounded-xl px-3 py-2 flex items-center gap-4 text-[11px] text-slate-400 pointer-events-auto">
-          <span className="font-bold text-slate-300">Estados:</span>
+          <span className="font-bold text-slate-300">Filtro Estado:</span>
           <button 
             onClick={() => setStatusFilter(statusFilter === 'completed' ? 'all' : 'completed')}
             className={`flex items-center gap-1.5 hover:text-emerald-300 transition-colors ${statusFilter === 'completed' ? 'text-emerald-400 font-bold' : ''}`}
           >
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span>Completed (100%)</span>
+            <span>Operativo</span>
           </button>
           <button 
             onClick={() => setStatusFilter(statusFilter === 'in_progress' ? 'all' : 'in_progress')}
             className={`flex items-center gap-1.5 hover:text-amber-300 transition-colors ${statusFilter === 'in_progress' ? 'text-amber-400 font-bold' : ''}`}
           >
             <span className="w-2 h-2 rounded-full bg-amber-500" />
-            <span>In Progress</span>
-          </button>
-          <button 
-            onClick={() => setStatusFilter(statusFilter === 'active_dev' ? 'all' : 'active_dev')}
-            className={`flex items-center gap-1.5 hover:text-cyan-300 transition-colors ${statusFilter === 'active_dev' ? 'text-cyan-400 font-bold' : ''}`}
-          >
-            <span className="w-2 h-2 rounded-full bg-cyan-500" />
-            <span>Active Dev</span>
-          </button>
-          <button 
-            onClick={() => setStatusFilter(statusFilter === 'future' ? 'all' : 'future')}
-            className={`flex items-center gap-1.5 hover:text-slate-200 transition-colors ${statusFilter === 'future' ? 'text-slate-300 font-bold' : ''}`}
-          >
-            <span className="w-2 h-2 rounded-full bg-slate-500" />
-            <span>Future</span>
+            <span>En Progreso</span>
           </button>
         </div>
 
@@ -776,24 +879,24 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
         <div className="absolute bottom-4 right-5 bg-slate-950/80 backdrop-blur-md border border-slate-800/80 rounded-xl px-3.5 py-2 flex items-center gap-3 text-xs pointer-events-auto">
           <div className="text-right">
             <span className="text-[10px] text-slate-400 font-mono block">Cobertura Digital Twin</span>
-            <span className="font-black text-emerald-400 font-mono">82% Automatizado</span>
+            <span className="font-black text-emerald-400 font-mono">100% Sincronizado</span>
           </div>
           <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-black text-xs font-mono">
-            82%
+            18
           </div>
         </div>
       </div>
 
-      {/* 3. Panel Lateral: Node Inspector Drawer (Slide-Over) */}
+      {/* 3. Panel Lateral: Node Inspector Drawer (Slide-Over Completo) */}
       {selectedNode && (
-        <div className="fixed inset-y-0 right-0 w-full sm:w-[420px] bg-slate-950/95 backdrop-blur-xl border-l border-slate-800 p-6 shadow-2xl z-50 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-right duration-300 text-slate-200">
+        <div className="fixed inset-y-0 right-0 w-full sm:w-[460px] bg-slate-950/95 backdrop-blur-xl border-l border-slate-800 p-6 shadow-2xl z-50 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-right duration-300 text-slate-200">
           <div>
             {/* Cabecera del Drawer */}
             <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-800">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-white">
+                <div className="w-11 h-11 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-white shrink-0">
                   {React.createElement(ICON_MAP[selectedNode.iconName] || Activity, {
-                    size: 20,
+                    size: 22,
                     color: getStatusVisuals(selectedNode.status).color
                   })}
                 </div>
@@ -845,20 +948,131 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
             {/* Descripción Arquitectónica */}
             <div className="mb-5">
               <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider block mb-1.5">
-                Rol en la Operación COD
+                Rol en TODOENUNO OS
               </span>
               <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/40 p-3 rounded-xl border border-slate-800/60">
                 {selectedNode.description}
               </p>
             </div>
 
-            {/* Lista de Sub-Acciones del Módulo */}
+            {/* Sinapsis Activas Reales (Entrantes y Salientes) */}
             <div className="mb-5">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider">
-                  Sub-Acciones & Capacidades ({selectedNode.subActions.length})
-                </span>
+              <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider block mb-2">
+                Sinapsis Reales del Módulo ({outgoingSynapses.length + incomingSynapses.length})
+              </span>
+
+              {/* Salientes */}
+              {outgoingSynapses.length > 0 && (
+                <div className="mb-3">
+                  <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1 mb-1.5">
+                    <ArrowUpRight size={13} className="text-sky-400" /> Sinapsis Salientes (Emite Datos)
+                  </span>
+                  <div className="space-y-1.5">
+                    {outgoingSynapses.map((syn) => {
+                      const target = nodeMap.get(syn.to);
+                      return (
+                        <div
+                          key={syn.id}
+                          className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800/80 hover:border-slate-700 text-xs"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-slate-200">{syn.label}</span>
+                            {syn.eventType && (
+                              <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-violet-950/80 text-violet-300 border border-violet-800/40">
+                                {syn.eventType}
+                              </span>
+                            )}
+                          </div>
+                          {syn.description && (
+                            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                              {syn.description}
+                            </p>
+                          )}
+                          <div className="mt-1.5 flex items-center justify-between text-[10px]">
+                            <span className="text-slate-400">Hacia:</span>
+                            <button
+                              onClick={() => target && setSelectedNodeId(target.id)}
+                              className="font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1"
+                            >
+                              {target?.label || syn.to} ➔
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Entrantes */}
+              {incomingSynapses.length > 0 && (
+                <div>
+                  <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1 mb-1.5">
+                    <ArrowDownRight size={13} className="text-emerald-400" /> Sinapsis Entrantes (Recibe Datos)
+                  </span>
+                  <div className="space-y-1.5">
+                    {incomingSynapses.map((syn) => {
+                      const source = nodeMap.get(syn.from);
+                      return (
+                        <div
+                          key={syn.id}
+                          className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800/80 hover:border-slate-700 text-xs"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-slate-200">{syn.label}</span>
+                            {syn.eventType && (
+                              <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/40">
+                                {syn.eventType}
+                              </span>
+                            )}
+                          </div>
+                          {syn.description && (
+                            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                              {syn.description}
+                            </p>
+                          )}
+                          <div className="mt-1.5 flex items-center justify-between text-[10px]">
+                            <span className="text-slate-400">Desde:</span>
+                            <button
+                              onClick={() => source && setSelectedNodeId(source.id)}
+                              className="font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                            >
+                              ← {source?.label || syn.from}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Eventos Soportados & Disparadores Rápidos */}
+            <div className="mb-5">
+              <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider block mb-2">
+                Eventos del Catálogo Asociados ({selectedNode.supportedEvents.length})
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {selectedNode.supportedEvents.map((ev) => (
+                  <button
+                    key={ev}
+                    onClick={() => handleTriggerNodePulse(selectedNode, ev)}
+                    title={`Pulsar para emitir prueba de ${ev}`}
+                    className="group px-2 py-1 rounded-lg bg-slate-900 hover:bg-violet-950/70 border border-slate-800 hover:border-violet-600/50 text-[11px] font-mono text-slate-300 hover:text-violet-200 flex items-center gap-1.5 transition-colors"
+                  >
+                    <span>{ev}</span>
+                    <Send size={10} className="text-slate-400 group-hover:text-violet-400" />
+                  </button>
+                ))}
               </div>
+            </div>
+
+            {/* Sub-Acciones del Módulo */}
+            <div className="mb-5">
+              <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider block mb-2">
+                Sub-Acciones & Capacidades ({selectedNode.subActions.length})
+              </span>
               <div className="space-y-2">
                 {selectedNode.subActions.map((sub) => (
                   <div
@@ -880,14 +1094,14 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
               </div>
             </div>
 
-            {/* Eventos en Vivo Registrados para este Nodo */}
+            {/* Eventos en Vivo Recientes para este Nodo */}
             <div className="mb-5">
               <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider block mb-2">
-                Últimos Eventos en Vivo ({nodeEvents.length})
+                Eventos Recientes en Memoria ({nodeEvents.length})
               </span>
               {nodeEvents.length === 0 ? (
-                <div className="text-center p-4 bg-slate-900/30 rounded-xl border border-slate-800/40 text-xs text-slate-500">
-                  Sin eventos recientes registrados en este buffer
+                <div className="text-center p-4 bg-slate-900/30 rounded-xl border border-slate-800/40 text-xs text-slate-400">
+                  Sin eventos recientes registrados para este nodo
                 </div>
               ) : (
                 <div className="space-y-1.5 max-h-40 overflow-y-auto font-mono text-[11px]">
