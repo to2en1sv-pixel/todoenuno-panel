@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { X, Loader2, Save, AlertCircle, Plus, Edit, Package, Search, Check, RefreshCw, Sparkles, Tag, ChevronDown, CheckCircle2, Calendar, Clock, ShieldAlert, AlertTriangle, UserX } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Pedido } from "@/pages/Pedidos";
-import { fetchStockItems } from "@/lib/inventory";
+import { fetchStockItems, extractOrderQuantity } from "@/lib/inventory";
 import type { StockItem } from "@/types/inventory";
 import { resolveCatalogSku, linkRawSkuToProduct, linkAdCodeToProduct } from "@/lib/catalogAliases";
 import { evaluateCustomerRisk, addOrUpdateBlacklist, removeBlacklistEntry, cleanPhone } from "@/lib/blacklist";
@@ -53,6 +53,7 @@ const FORM_INICIAL = {
   telefono: "",
   sku: "",
   catalogo_sku: "",
+  cantidad: "1",
   total: "",
   direccion: "",
   metodo_pago: "Contra entrega",
@@ -132,12 +133,14 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
         resolveCatalogSku(pedido.sku, pedido.codigo_anuncio, null, knownSkus) || "";
 
       const esEncargo = pedido.estado === "programado" || Boolean((pedido as any).es_encargo) || Boolean((pedido as any).fecha_programada);
+      const qtyInicial = extractOrderQuantity(pedido as any);
 
       setForm({
         nombre_cliente: pedido.nombre_cliente || "",
         telefono: pedido.telefono || "",
         sku: pedido.sku || "",
         catalogo_sku: catSkuResuelto,
+        cantidad: String(qtyInicial),
         total: pedido.total?.toString() || "",
         direccion: pedido.direccion || "",
         metodo_pago: pedido.metodo_pago || "Contra entrega",
@@ -178,11 +181,12 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
     return catalogo.find(p => p.sku.toUpperCase() === form.catalogo_sku.toUpperCase()) || null;
   }, [catalogo, form.catalogo_sku]);
 
-  // Lista filtrada para el selector
+  // Lista filtrada para el selector (priorizando activos)
   const productosFiltrados = useMemo(() => {
-    if (!busquedaProducto.trim()) return catalogo;
+    const activos = catalogo.filter(p => p.activo !== false);
+    if (!busquedaProducto.trim()) return activos;
     const q = busquedaProducto.toLowerCase().trim();
-    return catalogo.filter(p => 
+    return activos.filter(p => 
       p.sku.toLowerCase().includes(q) || 
       p.nombre.toLowerCase().includes(q)
     );
@@ -190,11 +194,12 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
 
   // Seleccionar producto del catálogo
   const handleSeleccionarProducto = (prod: StockItem) => {
+    const qty = Math.max(1, Math.round(Number(form.cantidad) || 1));
     setForm(f => ({
       ...f,
       catalogo_sku: prod.sku,
       sku: f.sku && f.sku !== FORM_INICIAL.sku ? f.sku : prod.nombre,
-      total: (!f.total || f.total === "0") && prod.precio_venta ? prod.precio_venta.toString() : f.total
+      total: (!f.total || f.total === "0") && prod.precio_venta ? (prod.precio_venta * qty).toFixed(2) : f.total
     }));
     setSelectorAbierto(false);
     setModoManual(false);
@@ -219,8 +224,19 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
 
     const skuFinal = form.sku.trim() || form.catalogo_sku.trim();
     const catalogoSkuFinal = form.catalogo_sku.trim() || null;
+    const cantidadNum = Math.min(Math.max(Math.round(Number(form.cantidad) || 1), 1), 100);
     const estadoFinal = form.es_encargo ? "programado" : (pedido?.estado === "programado" ? "nuevo" : (pedido?.estado || "nuevo"));
     const fechaProgramada = form.es_encargo && form.fecha_programada ? form.fecha_programada : null;
+
+    const itemsPayload = [
+      {
+        sku: catalogoSkuFinal || skuFinal,
+        catalogo_sku: catalogoSkuFinal,
+        nombre: skuFinal,
+        cantidad: cantidadNum,
+        precio: totalNum
+      }
+    ];
 
     /* ---------- Insert o Update ---------- */
     setGuardando(true);
@@ -239,6 +255,7 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
     const fullPayload = {
       ...basePayload,
       catalogo_sku: catalogoSkuFinal,
+      items: itemsPayload,
       courier: form.courier,
       departamento: form.departamento,
       fecha_programada: fechaProgramada,
@@ -523,15 +540,25 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                         )}
                       </div>
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
                             {productoSeleccionado.sku}
                           </span>
                           <span className="text-[10px] font-bold text-emerald-600">
-                            ${Number(productoSeleccionado.precio_venta || 0).toFixed(2)}
+                            ${Number(productoSeleccionado.precio_venta || 0).toFixed(2)} c/u
                           </span>
-                          <span className="text-[10px] opacity-60">
-                            · {productoSeleccionado.stock_disponible} disp.
+                          <span
+                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                              productoSeleccionado.stock_disponible <= 0
+                                ? 'bg-rose-500/10 text-rose-500 border-rose-500/30'
+                                : productoSeleccionado.stock_disponible < Math.max(1, Number(form.cantidad) || 1)
+                                ? 'bg-amber-500/10 text-amber-500 border-amber-500/30'
+                                : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30'
+                            }`}
+                          >
+                            {productoSeleccionado.stock_disponible <= 0
+                              ? '🔴 Agotado (0 disp.)'
+                              : `${productoSeleccionado.stock_disponible} disp.`}
                           </span>
                         </div>
                         <h4 className="font-bold text-xs text-[var(--tx)] truncate mt-0.5">
@@ -552,21 +579,53 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                     </button>
                   </div>
 
-                  {/* Descripción específica para este pedido / Combo / Variante */}
-                  <div className="border-t border-indigo-500/20 pt-2">
-                    <label className="text-[9px] font-bold uppercase tracking-wider text-[var(--mu)] block mb-1">
-                      Descripción para la Guía / Variante del Pedido:
-                    </label>
-                    <input
-                      type="text"
-                      value={form.sku}
-                      onChange={set("sku")}
-                      placeholder="Ej. Combo 3 unidades - Color Gris"
-                      className="w-full rounded-lg border border-[var(--bd)] bg-[var(--cd)] px-2.5 py-1.5 text-xs text-[var(--tx)] outline-none focus:ring-1 focus:ring-indigo-500"
-                    />
-                    <span className="text-[9px] opacity-60 mt-0.5 block">
-                      💡 La orden se atribuirá a <strong>{productoSeleccionado.nombre} (#{productoSeleccionado.sku})</strong> para ROAS y Kárdex, aunque cambies el texto de la guía.
-                    </span>
+                  {/* Cantidad y Descripción para la Guía */}
+                  <div className="border-t border-indigo-500/20 pt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[9px] font-bold uppercase tracking-wider text-[var(--mu)] block mb-1">
+                        Unidades (Kárdex):
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={form.cantidad}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const num = Math.max(1, Math.round(Number(val) || 1));
+                          setForm(f => ({
+                            ...f,
+                            cantidad: val,
+                            total: !pedido && productoSeleccionado.precio_venta
+                              ? (productoSeleccionado.precio_venta * num).toFixed(2)
+                              : f.total
+                          }));
+                        }}
+                        className="w-full rounded-lg border border-[var(--bd)] bg-[var(--cd)] px-2.5 py-1.5 text-xs font-mono font-bold text-[var(--tx)] outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="text-[9px] font-bold uppercase tracking-wider text-[var(--mu)] block mb-1">
+                        Descripción para la Guía / Variante:
+                      </label>
+                      <input
+                        type="text"
+                        value={form.sku}
+                        onChange={set("sku")}
+                        placeholder="Ej. Combo 2 unidades - Color Negro"
+                        className="w-full rounded-lg border border-[var(--bd)] bg-[var(--cd)] px-2.5 py-1.5 text-xs text-[var(--tx)] outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div className="sm:col-span-3 flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-[9px] opacity-60">
+                        💡 Al pasar a empaque reservará <strong>{Math.max(1, Number(form.cantidad) || 1)} ud(s)</strong> de <strong>#{productoSeleccionado.sku}</strong> y las descontará al entregar.
+                      </span>
+                      {productoSeleccionado.stock_disponible < Math.max(1, Number(form.cantidad) || 1) && (
+                        <span className="text-[10px] font-bold text-rose-500">
+                          ⚠️ Pide {Math.max(1, Number(form.cantidad) || 1)} y solo hay {productoSeleccionado.stock_disponible} disp.
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ) : !modoManual ? (
@@ -643,8 +702,16 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                               <span className="text-xs font-bold text-emerald-600 block">
                                 ${Number(item.precio_venta || 0).toFixed(2)}
                               </span>
-                              <span className="text-[9px] opacity-50 block">
-                                {item.stock_disponible} disp.
+                              <span
+                                className={`text-[10px] font-bold block ${
+                                  item.stock_disponible <= 0
+                                    ? 'text-rose-500'
+                                    : item.stock_disponible <= (item.stock_minimo_alerta || 5)
+                                    ? 'text-amber-500'
+                                    : 'text-emerald-500'
+                                }`}
+                              >
+                                {item.stock_disponible <= 0 ? 'Agotado (0)' : `${item.stock_disponible} disp.`}
                               </span>
                             </div>
                           </div>
@@ -655,18 +722,42 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                 </div>
               ) : (
                 /* Modo manual de texto libre */
-                <div className="space-y-1">
-                  <input
-                    id="sku"
-                    type="text"
-                    value={form.sku}
-                    onChange={set("sku")}
-                    placeholder="Ej. TENIS-RUN-NEG-42 o Combo 3 pulseras"
-                    className={inputCls}
-                  />
-                  <span className="text-[10px] opacity-60 block">
-                    ⚠️ Ingreso como texto libre no catalogado. Podrás vincularlo luego desde la Bóveda de ROAS.
-                  </span>
+                <div className="space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <input
+                      id="sku"
+                      type="text"
+                      value={form.sku}
+                      onChange={set("sku")}
+                      placeholder="Ej. TENIS-RUN-NEG-42 o Combo"
+                      className={`${inputCls} sm:col-span-2`}
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={form.cantidad}
+                      onChange={set("cantidad")}
+                      placeholder="Cant."
+                      className={inputCls}
+                      title="Cantidad de unidades"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-700 dark:text-amber-300">
+                    <span>
+                      ⚠️ Sin SKU de inventario vinculado: no reservará ni descontará unidades automáticamente hasta vincularlo.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModoManual(false);
+                        setSelectorAbierto(true);
+                      }}
+                      className="shrink-0 font-black underline text-indigo-600 dark:text-indigo-400"
+                    >
+                      Vincular SKU ahora
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

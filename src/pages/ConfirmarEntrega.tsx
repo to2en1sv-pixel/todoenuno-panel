@@ -27,7 +27,7 @@ import {
   FileText,
   ShieldAlert
 } from "lucide-react";
-import { compressImageFile } from "@/lib/inventory";
+import { compressImageFile, syncOrderInventoryOnStatusChange } from "@/lib/inventory";
 import { addOrUpdateBlacklist, evaluateCustomerRisk } from "@/lib/blacklist";
 
 export function ConfirmarEntregaPage() {
@@ -55,6 +55,7 @@ export function ConfirmarEntregaPage() {
   const [notaNovedad, setNotaNovedad] = useState("");
   const [boletinarEnListaNegra, setBoletinarEnListaNegra] = useState(true);
   const [enviandoNovedad, setEnviandoNovedad] = useState(false);
+  const [novedadToast, setNovedadToast] = useState<string | null>(null);
 
   // Prueba de Entrega (Foto y Firma)
   const [fotoEntrega, setFotoEntrega] = useState<string | null>(null);
@@ -168,6 +169,7 @@ export function ConfirmarEntregaPage() {
   const handleEntregar = async () => {
     if (!pedido?.id) return;
     setActualizando(true);
+    const prevEstado = pedido.estado || 'en_camino';
 
     try {
       await supabase
@@ -177,6 +179,18 @@ export function ConfirmarEntregaPage() {
           notas: pedido.notas ? `${pedido.notas} • [Entregado en ruta con app móvil]` : "[Entregado en ruta con app móvil]"
         })
         .eq("id", pedido.id);
+
+      // Descontar unidad física / consumir reserva en Inventario & Kárdex
+      try {
+        await syncOrderInventoryOnStatusChange({
+          order: pedido,
+          prevEstado,
+          nextEstado: 'entregado',
+          usuario: pedido.courier || 'Motorista Móvil'
+        });
+      } catch (invErr) {
+        console.warn('Error sincronizando inventario en entrega móvil:', invErr);
+      }
 
       // Emitir evento al OS Event Store
       try {
@@ -258,7 +272,8 @@ export function ConfirmarEntregaPage() {
 
       setMostrarNovedadModal(false);
       const msgExtra = boletinarEnListaNegra ? " y el cliente ha sido boletinado en la Lista Negra interna" : "";
-      alert(`Novedad registrada${msgExtra}. La oficina y el Bot Todd han sido notificados.`);
+      setNovedadToast(`Novedad registrada${msgExtra}. La oficina y el Bot Todd han sido notificados.`);
+      setTimeout(() => setNovedadToast(null), 5000);
       navigate("/repartidor");
       await cargarDatos();
     } catch (err) {
@@ -339,6 +354,16 @@ export function ConfirmarEntregaPage() {
             <RotateCcw size={15} />
           </button>
         </div>
+
+        {/* Banner de confirmación de novedad */}
+        {novedadToast && (
+          <div className="mt-4 p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs font-bold flex items-center justify-between gap-2">
+            <span>{novedadToast}</span>
+            <button onClick={() => setNovedadToast(null)} className="opacity-70 hover:opacity-100">
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         {/* Selector de Courier */}
         <div className="mt-4">

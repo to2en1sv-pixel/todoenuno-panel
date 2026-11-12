@@ -9,7 +9,7 @@ export function Sprint10SqlModal({
   open: boolean;
   onClose: () => void;
 }) {
-  const [mode, setMode] = useState<'reset' | 'repair'>('reset');
+  const [mode, setMode] = useState<'reset' | 'repair'>('repair');
   const [copied, setCopied] = useState(false);
 
   if (!open) return null;

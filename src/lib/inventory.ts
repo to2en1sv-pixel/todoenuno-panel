@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { emitOsEvent } from '@/lib/osEvents';
 import { addManualTransaction } from '@/lib/finance';
+import { resolveCatalogSku } from '@/lib/catalogAliases';
 import type { 
   StockItem, 
   KardexMovement, 
@@ -271,6 +272,8 @@ async function executeMovementInDb(params: {
       nuevoFisico = stockActual + absQty;
     } else if (params.tipo_movimiento === 'reserva_pedido') {
       nuevoReservado = reservadoActual + absQty;
+    } else if (params.tipo_movimiento === 'liberar_reserva') {
+      nuevoReservado = Math.max(reservadoActual - absQty, 0);
     } else if (params.tipo_movimiento === 'venta_salida') {
       nuevoFisico = Math.max(stockActual - absQty, 0);
       nuevoReservado = Math.max(reservadoActual - absQty, 0);
@@ -325,6 +328,18 @@ async function executeMovementInDb(params: {
         costo_unitario: costo,
         saldo_fisico: nuevoFisico,
         motivo: `[Inventario Inicial] ${params.motivo}`,
+        source_table: params.source_table || 'manual',
+        source_id: params.source_id || null,
+        usuario: params.usuario || 'Panel Admin'
+      });
+    } else if (kardexErr && params.tipo_movimiento === 'liberar_reserva') {
+      await supabase.from('inventory_kardex').insert({
+        sku: skuClean,
+        tipo_movimiento: 'ajuste_positivo',
+        cantidad: deltaKardex,
+        costo_unitario: costo,
+        saldo_fisico: nuevoFisico,
+        motivo: `[Liberación Reserva] ${params.motivo}`,
         source_table: params.source_table || 'manual',
         source_id: params.source_id || null,
         usuario: params.usuario || 'Panel Admin'
@@ -1109,3 +1124,431 @@ export async function saveProductItem(
 
   return { success: true, warning, item: createdItem };
 }
+
+/* ============================================================================
+ * INTEGRACIÓN PEDIDOS <-> INVENTARIO & KÁRDEX (BODEGA + CONTRA ENTREGA)
+ * ========================================================================== */
+
+export interface OrderForInventory {
+  id: string;
+  sku?: string | null;
+  catalogo_sku?: string | null;
+  codigo_anuncio?: string | null;
+  estado?: string | null;
+  items?: any;
+  cantidad?: number | null;
+  nombre_cliente?: string | null;
+}
+
+export interface ResolvedOrderLine {
+  sku: string;
+  cantidad: number;
+  itemStock: StockItem;
+}
+
+export interface OrderLedgerState {
+  reservedNet: number;
+  soldNet: number;
+  damagedNet: number;
+}
+
+/**
+ * Extrae la cantidad de unidades de un pedido desde items[], cantidad o patrones como "2x ..."
+ */
+export function extractOrderQuantity(order: Pick<OrderForInventory, 'items' | 'cantidad' | 'sku'>): number {
+  if (order.cantidad !== undefined && order.cantidad !== null && Number(order.cantidad) > 0) {
+    return Math.min(Math.max(Math.round(Number(order.cantidad)), 1), 100);
+  }
+
+  if (Array.isArray(order.items) && order.items.length > 0) {
+    const sum = order.items.reduce((acc: number, it: any) => {
+      const q = Number(it?.cantidad ?? it?.qty ?? 1);
+      return acc + (Number.isFinite(q) && q > 0 ? Math.round(q) : 1);
+    }, 0);
+    if (sum > 0) return Math.min(sum, 100);
+  }
+
+  const raw = String(order.sku || '').trim();
+  const multMatch =
+    raw.match(/(?:^|\s)(\d+)\s*x(?:\s|$)/i) ||
+    raw.match(/(?:combo|promo|pack)\s+(?:de\s+)?(\d+)\b/i);
+  if (multMatch && multMatch[1]) {
+    const n = Number(multMatch[1]);
+    if (n >= 1 && n <= 50) return n;
+  }
+
+  return 1;
+}
+
+/**
+ * Resuelve las líneas de SKU reales existentes en inventory.stock para un pedido.
+ * Nunca inventa SKUs nuevos si el pedido trae texto libre no mapeado.
+ */
+export function resolveOrderInventoryLines(
+  order: OrderForInventory,
+  stockItems: StockItem[]
+): ResolvedOrderLine[] {
+  if (!stockItems || stockItems.length === 0) return [];
+
+  const stockMap = new Map<string, StockItem>();
+  stockItems.forEach(item => {
+    stockMap.set(normalizeSku(item.sku), item);
+  });
+  const knownSkus = Array.from(stockMap.keys());
+  const aggregated = new Map<string, ResolvedOrderLine>();
+
+  const addLine = (skuCandidate: string | null, qty: number) => {
+    if (!skuCandidate) return;
+    const clean = normalizeSku(skuCandidate);
+    const stockRow = stockMap.get(clean);
+    if (!stockRow) return;
+    const existing = aggregated.get(clean);
+    if (existing) {
+      existing.cantidad += qty;
+    } else {
+      aggregated.set(clean, { sku: clean, cantidad: Math.max(1, Math.round(qty)), itemStock: stockRow });
+    }
+  };
+
+  if (Array.isArray(order.items) && order.items.length > 0) {
+    for (const it of order.items) {
+      const rawItSku = it?.catalogo_sku || it?.sku || it?.nombre || order.sku;
+      const qty = Math.min(Math.max(Math.round(Number(it?.cantidad ?? it?.qty ?? 1) || 1), 1), 100);
+      const resolved = resolveCatalogSku(
+        rawItSku,
+        order.codigo_anuncio,
+        it?.catalogo_sku || order.catalogo_sku,
+        knownSkus
+      );
+      if (resolved) addLine(resolved, qty);
+    }
+  }
+
+  if (aggregated.size === 0) {
+    const resolved = resolveCatalogSku(
+      order.sku,
+      order.codigo_anuncio,
+      order.catalogo_sku,
+      knownSkus
+    );
+    if (resolved) {
+      addLine(resolved, extractOrderQuantity(order));
+    }
+  }
+
+  return Array.from(aggregated.values());
+}
+
+/**
+ * Calcula el balance neto (reservado activo, vendido descontado, merma) de un pedido según su historial en Kárdex
+ */
+export function computeOrderLedgerFromMovements(
+  movements: KardexMovement[],
+  skuFilter?: string
+): OrderLedgerState {
+  let reserved = 0;
+  let sold = 0;
+  let damaged = 0;
+
+  const targetSku = skuFilter ? normalizeSku(skuFilter) : null;
+  const sorted = [...movements].sort((a, b) => {
+    const ta = new Date(a.created_at).getTime() || 0;
+    const tb = new Date(b.created_at).getTime() || 0;
+    return ta !== tb ? ta - tb : (a.id || 0) - (b.id || 0);
+  });
+
+  for (const m of sorted) {
+    if (targetSku && normalizeSku(m.sku) !== targetSku) continue;
+    const qty = Math.abs(Number(m.cantidad) || 0);
+    if (qty === 0) continue;
+
+    if (m.tipo_movimiento === 'reserva_pedido') {
+      reserved += qty;
+    } else if (
+      m.tipo_movimiento === 'liberar_reserva' ||
+      (m.tipo_movimiento === 'ajuste_positivo' && (m.motivo || '').startsWith('[Liberación Reserva]'))
+    ) {
+      reserved = Math.max(0, reserved - qty);
+    } else if (m.tipo_movimiento === 'venta_salida') {
+      sold += qty;
+      reserved = Math.max(0, reserved - qty);
+    } else if (m.tipo_movimiento === 'devolucion_entrada') {
+      sold = Math.max(0, sold - qty);
+      reserved = Math.max(0, reserved - qty);
+    } else if (m.tipo_movimiento === 'merma_dano') {
+      damaged += qty;
+      reserved = Math.max(0, reserved - qty);
+    }
+  }
+
+  return { reservedNet: reserved, soldNet: sold, damagedNet: damaged };
+}
+
+/**
+ * Obtiene un mapa order_id -> movimientos del Kárdex para pintar badges visuales en Pedidos
+ */
+export async function fetchOrderKardexMap(): Promise<Record<string, KardexMovement[]>> {
+  const map: Record<string, KardexMovement[]> = {};
+  try {
+    const { data, error } = await supabase
+      .from('inventory_kardex')
+      .select('*')
+      .eq('source_table', 'whatsapp_orders')
+      .order('created_at', { ascending: true })
+      .limit(800);
+
+    if (!error && Array.isArray(data)) {
+      for (const row of data as KardexMovement[]) {
+        if (!row.source_id) continue;
+        if (!map[row.source_id]) map[row.source_id] = [];
+        map[row.source_id].push(row);
+      }
+    }
+  } catch {
+    // ignorar si aún no existe tabla
+  }
+  return map;
+}
+
+export interface SyncOrderInventoryResult {
+  success: boolean;
+  skipped: boolean;
+  reason?: string;
+  actions: Array<{ sku: string; tipo: KardexMovementType; cantidad: number }>;
+  summaryText: string;
+  error?: string;
+}
+
+/**
+ * Sincroniza atómicamente el inventario cuando un pedido cambia de estado:
+ * - nuevo / programado: sin reserva (si retrocede desde empaque, libera reserva)
+ * - por_empacar / en_camino: reserva unidades (stock_reservado += N) sin duplicar
+ * - entregado: descuenta físico (venta_salida) consumiendo la reserva del pedido
+ * - cancelado: libera reserva si venía de empaque/ruta; reingresa físico SOLO si venía de entregado
+ */
+export async function syncOrderInventoryOnStatusChange(params: {
+  order: OrderForInventory;
+  prevEstado: string | null | undefined;
+  nextEstado: string;
+  reingresarStock?: boolean;
+  esMerma?: boolean;
+  motivoCancelacion?: string;
+  usuario?: string;
+  stockItemsCache?: StockItem[];
+}): Promise<SyncOrderInventoryResult> {
+  const { order, nextEstado } = params;
+  const prevNorm = (params.prevEstado || 'nuevo').trim().toLowerCase();
+  const nextNorm = (nextEstado || 'nuevo').trim().toLowerCase();
+  const shortId = order.id.slice(0, 8).toUpperCase();
+  const usuario = params.usuario || 'Panel Pedidos';
+
+  let stockList = params.stockItemsCache;
+  if (!stockList || stockList.length === 0) {
+    const res = await fetchStockItems();
+    stockList = res.items;
+  }
+
+  const lines = resolveOrderInventoryLines(order, stockList);
+  if (lines.length === 0) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'unmapped_sku',
+      actions: [],
+      summaryText: 'Sin SKU vinculado en inventario'
+    };
+  }
+
+  // Consultar movimientos previos exactos de este pedido para garantizar idempotencia
+  let existingMovs: KardexMovement[] = [];
+  try {
+    const { data } = await supabase
+      .from('inventory_kardex')
+      .select('*')
+      .eq('source_table', 'whatsapp_orders')
+      .eq('source_id', order.id)
+      .order('created_at', { ascending: true });
+    if (Array.isArray(data)) {
+      existingMovs = data as KardexMovement[];
+    }
+  } catch {
+    // continuar con array vacío
+  }
+
+  const actions: Array<{ sku: string; tipo: KardexMovementType; cantidad: number }> = [];
+  const errors: string[] = [];
+
+  const runMov = async (
+    sku: string,
+    tipo: KardexMovementType,
+    cantidad: number,
+    motivo: string,
+    costoUnitario = 0
+  ) => {
+    const res = await executeMovementInDb({
+      sku,
+      tipo_movimiento: tipo,
+      cantidad,
+      costo_unitario: costoUnitario,
+      motivo,
+      source_table: 'whatsapp_orders',
+      source_id: order.id,
+      usuario
+    });
+    if (res.success) {
+      actions.push({ sku, tipo, cantidad });
+    } else if (res.error) {
+      errors.push(`${sku}: ${res.error}`);
+    }
+  };
+
+  for (const line of lines) {
+    const { sku, cantidad, itemStock } = line;
+    const ledger = computeOrderLedgerFromMovements(existingMovs, sku);
+
+    if (nextNorm === 'nuevo' || nextNorm === 'programado') {
+      if (ledger.soldNet > 0) {
+        await runMov(
+          sku,
+          'devolucion_entrada',
+          ledger.soldNet,
+          `Reversión de entrega pedido #${shortId} (${order.nombre_cliente || 'Cliente'})`,
+          itemStock.costo_unitario
+        );
+      } else if (ledger.reservedNet > 0) {
+        await runMov(
+          sku,
+          'liberar_reserva',
+          ledger.reservedNet,
+          `Liberación de reserva pedido #${shortId} devuelto a ${nextNorm === 'programado' ? 'Encargo' : 'Nuevo'}`
+        );
+      }
+    } else if (nextNorm === 'por_empacar' || nextNorm === 'en_camino') {
+      if (ledger.soldNet > 0) {
+        await runMov(
+          sku,
+          'devolucion_entrada',
+          ledger.soldNet,
+          `Reingreso por retorno a ${nextNorm === 'en_camino' ? 'Ruta' : 'Empaque'} #${shortId}`,
+          itemStock.costo_unitario
+        );
+      }
+      const neededReserve = Math.max(cantidad - ledger.reservedNet, 0);
+      if (neededReserve > 0) {
+        await runMov(
+          sku,
+          'reserva_pedido',
+          neededReserve,
+          `Reserva en ${nextNorm === 'por_empacar' ? 'Empaque' : 'Ruta'} pedido #${shortId} (${order.nombre_cliente || 'Cliente'})`
+        );
+      }
+    } else if (nextNorm === 'entregado') {
+      const neededSell = Math.max(cantidad - ledger.soldNet, 0);
+      if (neededSell > 0) {
+        // Si saltó directo a entregado sin pasar por empaque/ruta, reservamos primero
+        // para que venta_salida no consuma reservas de otros pedidos activos.
+        const missingReserve = Math.max(neededSell - ledger.reservedNet, 0);
+        if (missingReserve > 0) {
+          await runMov(
+            sku,
+            'reserva_pedido',
+            missingReserve,
+            `Auto-reserva previa a entrega directa #${shortId}`
+          );
+        }
+        await runMov(
+          sku,
+          'venta_salida',
+          neededSell,
+          `Venta entregada pedido #${shortId} (${order.nombre_cliente || 'Cliente'})`,
+          itemStock.costo_unitario
+        );
+      }
+    } else if (nextNorm === 'cancelado') {
+      const motivoTxt = params.motivoCancelacion || 'Cancelación / Novedad';
+      const debeReingresar = params.reingresarStock !== false;
+
+      if (ledger.soldNet > 0) {
+        if (!params.esMerma && debeReingresar) {
+          await runMov(
+            sku,
+            'devolucion_entrada',
+            ledger.soldNet,
+            `Devolución post-entrega #${shortId} (${motivoTxt})`,
+            itemStock.costo_unitario
+          );
+        }
+      } else if (ledger.reservedNet > 0) {
+        if (params.esMerma) {
+          await runMov(
+            sku,
+            'liberar_reserva',
+            ledger.reservedNet,
+            `Liberar reserva por merma #${shortId} (${motivoTxt})`
+          );
+          await runMov(
+            sku,
+            'merma_dano',
+            ledger.reservedNet,
+            `Producto dañado en devolución #${shortId} (${motivoTxt})`,
+            itemStock.costo_unitario
+          );
+        } else if (debeReingresar) {
+          await runMov(
+            sku,
+            'liberar_reserva',
+            ledger.reservedNet,
+            `Reserva liberada a bodega por devolución #${shortId} (${motivoTxt})`
+          );
+        }
+      } else if ((prevNorm === 'por_empacar' || prevNorm === 'en_camino') && debeReingresar) {
+        // Pedido legado (anterior a Sprint 12) que estaba empacado sin asiento previo en Kárdex
+        const reservableFallback = Math.min(cantidad, Math.max(itemStock.stock_reservado || 0, 0));
+        if (reservableFallback > 0) {
+          await runMov(
+            sku,
+            'liberar_reserva',
+            reservableFallback,
+            `Reserva liberada por devolución #${shortId} (${motivoTxt})`
+          );
+        }
+        if (params.esMerma) {
+          await runMov(
+            sku,
+            'merma_dano',
+            cantidad,
+            `Producto dañado en devolución #${shortId} (${motivoTxt})`,
+            itemStock.costo_unitario
+          );
+        }
+      }
+    }
+  }
+
+  // Construir mensaje amigable de resumen
+  let summaryText = 'Sin cambios de inventario';
+  if (actions.length > 0) {
+    const first = actions[0];
+    const totalUds = actions.reduce((s, a) => s + a.cantidad, 0);
+    if (actions.some(a => a.tipo === 'merma_dano')) {
+      summaryText = `⚠️ ${totalUds}x ${first.sku} registrado como Merma/Daño`;
+    } else if (actions.some(a => a.tipo === 'venta_salida')) {
+      summaryText = `✅ ${totalUds}x ${first.sku} descontado de Bodega (Kárdex)`;
+    } else if (actions.some(a => a.tipo === 'devolucion_entrada')) {
+      summaryText = `↩️ +${totalUds}x ${first.sku} reingresado a Bodega`;
+    } else if (actions.some(a => a.tipo === 'liberar_reserva')) {
+      summaryText = `🔓 ${totalUds}x ${first.sku} liberado a Stock Disponible`;
+    } else if (actions.some(a => a.tipo === 'reserva_pedido')) {
+      summaryText = `🔒 ${totalUds}x ${first.sku} reservado para empaque`;
+    }
+  }
+
+  return {
+    success: errors.length === 0,
+    skipped: actions.length === 0,
+    actions,
+    summaryText,
+    error: errors.length > 0 ? errors.join(' | ') : undefined
+  };
+}
+

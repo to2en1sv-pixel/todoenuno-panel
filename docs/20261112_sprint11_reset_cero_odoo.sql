@@ -80,6 +80,7 @@ begin
       'compra_entrada',
       'venta_salida',
       'reserva_pedido',
+      'liberar_reserva',
       'devolucion_entrada',
       'ajuste_positivo',
       'ajuste_negativo',
@@ -203,6 +204,8 @@ begin
     end if;
   elsif p_tipo_movimiento = 'reserva_pedido' then
     v_nuevo_reservado := v_reservado_actual + v_delta;
+  elsif p_tipo_movimiento = 'liberar_reserva' then
+    v_nuevo_reservado := greatest(v_reservado_actual - v_delta, 0);
   elsif p_tipo_movimiento = 'venta_salida' then
     v_nuevo_fisico    := greatest(v_stock_actual - v_delta, 0);
     v_nuevo_reservado := greatest(v_reservado_actual - v_delta, 0);

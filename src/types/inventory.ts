@@ -3,6 +3,7 @@ export type KardexMovementType =
   | 'compra_entrada'
   | 'venta_salida'
   | 'reserva_pedido'
+  | 'liberar_reserva'
   | 'devolucion_entrada'
   | 'ajuste_positivo'
   | 'ajuste_negativo'

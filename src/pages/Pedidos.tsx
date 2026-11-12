@@ -56,6 +56,15 @@ import ManifiestoDespacho from "@/components/ManifiestoDespacho";
 import { addManualTransaction } from "@/lib/finance";
 import { DirectorioListaNegra } from "@/components/analitica/DirectorioListaNegra";
 import { evaluateCustomerRisk, getBlacklistEntries } from "@/lib/blacklist";
+import {
+  fetchStockItems,
+  fetchOrderKardexMap,
+  syncOrderInventoryOnStatusChange,
+  resolveOrderInventoryLines,
+  computeOrderLedgerFromMovements,
+  extractOrderQuantity
+} from "@/lib/inventory";
+import type { StockItem, KardexMovement } from "@/types/inventory";
 
 /* ------------------------------------------------------------------ */
 /* Tipos y constantes                                                  */
@@ -69,6 +78,8 @@ export interface Pedido {
   created_at: string | null;
   sku: string | null;
   catalogo_sku?: string | null;
+  items?: any;
+  cantidad?: number | null;
   telefono: string | null;
   direccion: string | null;
   metodo_pago: string | null;
@@ -248,12 +259,32 @@ export function PedidosPage() {
 
   // Modal Cancelación y Logística Inversa
   const [pedidoACancelar, setPedidoACancelar] = useState<Pedido | null>(null);
-  const [motivoCancelacion, setMotivoCancelacion] = useState("Cliente no contestó llamadas");
+  const [motivoCancelacion, setMotivoCancelacion] = useState("Cliente no contestó llamadas/mensajes");
   const [reingresarKardex, setReingresarKardex] = useState(true);
+  const [esMermaDevolucion, setEsMermaDevolucion] = useState(false);
   const [cancelando, setCancelando] = useState(false);
 
   // Modal WhatsApp con Plantillas
   const [pedidoWhatsapp, setPedidoWhatsapp] = useState<Pedido | null>(null);
+
+  // Sincronización con Inventario & Kárdex
+  const [stockItems, setStockItems] = useState<StockItem[]>([]);
+  const [orderKardexMap, setOrderKardexMap] = useState<Record<string, KardexMovement[]>>({});
+  const [inventoryToast, setInventoryToast] = useState<{ type: 'ok' | 'warn' | 'err'; text: string } | null>(null);
+  const [pendingStockConfirm, setPendingStockConfirm] = useState<{
+    pedido: Pedido;
+    destino: Estado;
+    mensaje: string;
+  } | null>(null);
+  const [pedidoABorrar, setPedidoABorrar] = useState<Pedido | null>(null);
+  const [borrando, setBorrando] = useState(false);
+
+  const showInvToast = useCallback((type: 'ok' | 'warn' | 'err', text: string) => {
+    setInventoryToast({ type, text });
+    setTimeout(() => {
+      setInventoryToast(prev => (prev?.text === text ? null : prev));
+    }, 5000);
+  }, []);
 
   /* --------------------------- Carga de datos --------------------------- */
   const cargarPedidos = useCallback(async (silencioso = false) => {
@@ -261,16 +292,23 @@ export function PedidosPage() {
     else setCargando(true);
     setError(null);
 
-    const { data, error } = await supabase
-      .from("whatsapp_orders")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const [ordersRes, stockRes, kardexMapRes] = await Promise.all([
+      supabase
+        .from("whatsapp_orders")
+        .select("*")
+        .order("created_at", { ascending: false }),
+      fetchStockItems(),
+      fetchOrderKardexMap()
+    ]);
 
-    if (error) {
-      setError(error.message);
+    if (ordersRes.error) {
+      setError(ordersRes.error.message);
     } else {
-      setPedidos((data ?? []) as Pedido[]);
+      setPedidos((ordersRes.data ?? []) as Pedido[]);
     }
+
+    setStockItems(stockRes.items || []);
+    setOrderKardexMap(kardexMapRes || {});
 
     if (silencioso) setRefrescando(false);
     else setCargando(false);
@@ -440,16 +478,38 @@ export function PedidosPage() {
     ? COLUMNAS
     : COLUMNAS.filter((c) => c.key !== "entregado" && c.key !== "cancelado");
 
-  /* --------------------------- Mover entre columnas --------------------------- */
-  const moverPedido = async (pedido: Pedido, dir: -1 | 1) => {
-    const actual = ESTADOS.indexOf(normalizarEstado(pedido.estado));
-    const destino = ESTADOS[actual + dir];
-    if (!destino) return;
+  /* --------------------------- Transición Unificada + Inventario --------------------------- */
+  const abrirModalCancelar = (pedido: Pedido) => {
+    setReingresarKardex(true);
+    setEsMermaDevolucion(false);
+    setMotivoCancelacion("Cliente no contestó llamadas/mensajes");
+    setPedidoACancelar(pedido);
+  };
 
-    // Si el destino es cancelado, abrir modal de motivo y devolución
+  const ejecutarCambioEstado = async (pedido: Pedido, destino: Estado, omitirAlertaStock = false) => {
     if (destino === 'cancelado') {
-      setPedidoACancelar(pedido);
+      abrirModalCancelar(pedido);
       return;
+    }
+
+    const prevEstado = normalizarEstado(pedido.estado);
+
+    // Si pasa a Empaque o En Camino desde Nuevo/Encargo, verificar stock disponible real
+    if (
+      !omitirAlertaStock &&
+      (destino === 'por_empacar' || destino === 'en_camino') &&
+      (prevEstado === 'nuevo' || prevEstado === 'programado')
+    ) {
+      const lines = resolveOrderInventoryLines(pedido, stockItems);
+      const faltante = lines.find(l => l.itemStock.stock_disponible < l.cantidad);
+      if (faltante) {
+        setPendingStockConfirm({
+          pedido,
+          destino,
+          mensaje: `El producto #${faltante.sku} tiene ${faltante.itemStock.stock_disponible} unidad(es) disponible(s) y este pedido requiere ${faltante.cantidad}.`
+        });
+        return;
+      }
     }
 
     setMoviendoId(pedido.id);
@@ -466,66 +526,27 @@ export function PedidosPage() {
 
     if (error) {
       setPedidos(previos);
-      setError(`No se pudo mover el pedido: ${error.message}`);
+      setError(`No se pudo actualizar el pedido: ${error.message}`);
     } else {
-      // Emitir evento al OS Event Store
+      // 1. Sincronizar reserva / descuento / devolución en Inventario & Kárdex
       try {
-        const { emitOsEvent } = await import('@/lib/osEvents');
-        const eventMap: Record<string, string> = {
-          nuevo: 'order.created',
-          por_empacar: 'order.confirmed',
-          en_camino: 'order.shipped',
-          entregado: 'order.delivered',
-          cancelado: 'order.cancelled'
-        };
-        const eventType = eventMap[destino] || 'order.confirmed';
-
-        emitOsEvent({
-          type: eventType,
-          source_table: 'whatsapp_orders',
-          source_id: pedido.id,
-          payload: {
-            order_id: pedido.id,
-            nombre_cliente: pedido.nombre_cliente,
-            telefono: pedido.telefono,
-            sku: pedido.sku,
-            total: pedido.total,
-            estado_anterior: pedido.estado,
-            estado: destino,
-            codigo_anuncio: pedido.codigo_anuncio
-          }
+        const invRes = await syncOrderInventoryOnStatusChange({
+          order: pedido,
+          prevEstado,
+          nextEstado: destino,
+          usuario: 'Panel Pedidos',
+          stockItemsCache: stockItems
         });
-      } catch {
-        // Ignorar error en emisión secundaria
+        if (!invRes.skipped && invRes.actions.length > 0) {
+          showInvToast(invRes.success ? 'ok' : 'warn', invRes.summaryText);
+        } else if (invRes.reason === 'unmapped_sku' && (destino === 'por_empacar' || destino === 'entregado')) {
+          showInvToast('warn', `Pedido #${pedido.id.slice(0, 8).toUpperCase()} sin SKU vinculado: no movió inventario.`);
+        }
+      } catch (invErr) {
+        console.warn('Error sincronizando inventario:', invErr);
       }
 
-      await cargarPedidos(true);
-    }
-    setMoviendoId(null);
-  };
-
-  /* --------------------------- Cambiar Estado Directo (Jump) --------------------------- */
-  const cambiarEstadoDirecto = async (pedido: Pedido, nuevoEstado: Estado) => {
-    if (nuevoEstado === 'cancelado') {
-      setPedidoACancelar(pedido);
-      return;
-    }
-
-    setMoviendoId(pedido.id);
-    const previos = pedidos;
-    setPedidos((prev) =>
-      prev.map((p) => (p.id === pedido.id ? { ...p, estado: nuevoEstado } : p))
-    );
-
-    const { error } = await supabase
-      .from("whatsapp_orders")
-      .update({ estado: nuevoEstado })
-      .eq("id", pedido.id);
-
-    if (error) {
-      setPedidos(previos);
-      setError(`No se pudo actualizar el estado: ${error.message}`);
-    } else {
+      // 2. Emitir evento al OS Event Store
       try {
         const { emitOsEvent } = await import('@/lib/osEvents');
         const eventMap: Record<string, string> = {
@@ -537,7 +558,7 @@ export function PedidosPage() {
           cancelado: 'order.cancelled'
         };
         emitOsEvent({
-          type: eventMap[nuevoEstado] || 'order.confirmed',
+          type: eventMap[destino] || 'order.confirmed',
           source_table: 'whatsapp_orders',
           source_id: pedido.id,
           payload: {
@@ -545,9 +566,10 @@ export function PedidosPage() {
             nombre_cliente: pedido.nombre_cliente,
             telefono: pedido.telefono,
             sku: pedido.sku,
+            catalogo_sku: pedido.catalogo_sku,
             total: pedido.total,
             estado_anterior: pedido.estado,
-            estado: nuevoEstado,
+            estado: destino,
             codigo_anuncio: pedido.codigo_anuncio
           }
         });
@@ -560,10 +582,24 @@ export function PedidosPage() {
     setMoviendoId(null);
   };
 
+  /* --------------------------- Mover entre columnas --------------------------- */
+  const moverPedido = async (pedido: Pedido, dir: -1 | 1) => {
+    const actual = ESTADOS.indexOf(normalizarEstado(pedido.estado));
+    const destino = ESTADOS[actual + dir];
+    if (!destino) return;
+    await ejecutarCambioEstado(pedido, destino);
+  };
+
+  /* --------------------------- Cambiar Estado Directo (Jump) --------------------------- */
+  const cambiarEstadoDirecto = async (pedido: Pedido, nuevoEstado: Estado) => {
+    await ejecutarCambioEstado(pedido, nuevoEstado);
+  };
+
   /* --------------------------- Confirmar Cancelación y Devolución --------------------------- */
   const confirmarCancelacion = async () => {
     if (!pedidoACancelar) return;
     setCancelando(true);
+    const prevEstado = normalizarEstado(pedidoACancelar.estado);
 
     try {
       // 1. Actualizar estado y motivo en whatsapp_orders
@@ -575,22 +611,25 @@ export function PedidosPage() {
         })
         .eq("id", pedidoACancelar.id);
 
-      // 2. Si reingresarKardex está activo y tiene SKU, hacer devolución al stock
-      if (reingresarKardex && pedidoACancelar.sku) {
-        try {
-          await (supabase as any).rpc('record_movement', {
-            p_sku: pedidoACancelar.sku,
-            p_tipo_movimiento: 'devolucion_entrada',
-            p_cantidad: 1,
-            p_costo_unitario: 0,
-            p_motivo: `Devolución pedido #${pedidoACancelar.id.slice(0, 8)} (${motivoCancelacion})`,
-            p_source_table: 'whatsapp_orders',
-            p_source_id: pedidoACancelar.id,
-            p_usuario: 'Panel Logística'
-          });
-        } catch (err) {
-          console.warn('Error reingresando a kárdex:', err);
+      // 2. Sincronizar logística inversa inteligente (libera reserva o reingresa físico o merma)
+      let invSummary = '';
+      try {
+        const invRes = await syncOrderInventoryOnStatusChange({
+          order: pedidoACancelar,
+          prevEstado,
+          nextEstado: 'cancelado',
+          reingresarStock: reingresarKardex,
+          esMerma: esMermaDevolucion,
+          motivoCancelacion,
+          usuario: 'Panel Logística',
+          stockItemsCache: stockItems
+        });
+        if (!invRes.skipped && invRes.actions.length > 0) {
+          invSummary = invRes.summaryText;
+          showInvToast(esMermaDevolucion ? 'warn' : 'ok', invRes.summaryText);
         }
+      } catch (err) {
+        console.warn('Error en logística inversa de Kárdex:', err);
       }
 
       // 3. Emitir evento cancelado
@@ -602,7 +641,9 @@ export function PedidosPage() {
         payload: {
           order_id: pedidoACancelar.id,
           motivo: motivoCancelacion,
-          reingresado_stock: reingresarKardex
+          reingresado_stock: reingresarKardex,
+          es_merma: esMermaDevolucion,
+          inventario_resumen: invSummary || null
         }
       });
 
@@ -617,6 +658,7 @@ export function PedidosPage() {
   const confirmarLiquidacion = async () => {
     if (!pedidoALiquidar) return;
     setLiquidando(true);
+    const prevEstado = normalizarEstado(pedidoALiquidar.estado);
 
     try {
       const monto = Number(pedidoALiquidar.total || 0);
@@ -641,6 +683,24 @@ export function PedidosPage() {
           estado: 'entregado'
         })
         .eq("id", pedidoALiquidar.id);
+
+      // 3. Si aún no estaba marcado como entregado, descontar de Bodega idempotentemente
+      if (prevEstado !== 'entregado') {
+        try {
+          const invRes = await syncOrderInventoryOnStatusChange({
+            order: pedidoALiquidar,
+            prevEstado,
+            nextEstado: 'entregado',
+            usuario: 'Liquidación Finanzas',
+            stockItemsCache: stockItems
+          });
+          if (!invRes.skipped && invRes.actions.length > 0) {
+            showInvToast('ok', invRes.summaryText);
+          }
+        } catch (invErr) {
+          console.warn('Error descontando stock al liquidar:', invErr);
+        }
+      }
 
       await cargarPedidos(true);
     } catch (err) {
@@ -674,10 +734,32 @@ export function PedidosPage() {
     setCargando(true);
 
     const ids = Array.from(seleccionados);
+    const seleccionadosList = pedidos.filter(p => seleccionados.has(p.id));
+
     await supabase
       .from("whatsapp_orders")
       .update({ estado: nuevoEstado })
       .in("id", ids);
+
+    let movCount = 0;
+    for (const ped of seleccionadosList) {
+      try {
+        const invRes = await syncOrderInventoryOnStatusChange({
+          order: ped,
+          prevEstado: ped.estado,
+          nextEstado: nuevoEstado,
+          usuario: 'Acción en Lote',
+          stockItemsCache: stockItems
+        });
+        if (!invRes.skipped && invRes.actions.length > 0) movCount++;
+      } catch {
+        // continuar con el resto
+      }
+    }
+
+    if (movCount > 0) {
+      showInvToast('ok', `${ids.length} pedido(s) movidos · Inventario actualizado en ${movCount} orden(es).`);
+    }
 
     setSeleccionados(new Set());
     await cargarPedidos(true);
@@ -726,26 +808,64 @@ export function PedidosPage() {
   };
 
   /* --------------------------- Borrar Pedido --------------------------- */
-  const borrarPedido = async (pedido: Pedido) => {
-    const confirmar = window.confirm(
-      `¿Estás seguro de que deseas eliminar permanentemente el pedido de ${pedido.nombre_cliente}?`
-    );
-    if (!confirmar) return;
+  const borrarPedido = (pedido: Pedido) => {
+    setPedidoABorrar(pedido);
+  };
 
-    const { error } = await supabase
-      .from("whatsapp_orders")
-      .delete()
-      .eq("id", pedido.id);
+  const confirmarBorradoPedido = async () => {
+    if (!pedidoABorrar) return;
+    setBorrando(true);
+    try {
+      // Si tenía reserva activa en Kárdex, liberarla antes de eliminar el pedido
+      if (pedidoABorrar.estado === 'por_empacar' || pedidoABorrar.estado === 'en_camino') {
+        try {
+          await syncOrderInventoryOnStatusChange({
+            order: pedidoABorrar,
+            prevEstado: pedidoABorrar.estado,
+            nextEstado: 'nuevo',
+            usuario: 'Borrado de Pedido',
+            stockItemsCache: stockItems
+          });
+        } catch {}
+      }
 
-    if (error) {
-      setError(`No se pudo eliminar el pedido: ${error.message}`);
-    } else {
-      await cargarPedidos(true);
+      const { error } = await supabase
+        .from("whatsapp_orders")
+        .delete()
+        .eq("id", pedidoABorrar.id);
+
+      if (error) {
+        setError(`No se pudo eliminar el pedido: ${error.message}`);
+      } else {
+        showInvToast('ok', `Pedido de ${pedidoABorrar.nombre_cliente || 'cliente'} eliminado.`);
+        await cargarPedidos(true);
+      }
+    } finally {
+      setBorrando(false);
+      setPedidoABorrar(null);
     }
   };
 
   return (
     <div className="min-h-screen bg-[var(--cd)] text-[var(--tx)] p-4 md:p-6 flex flex-col relative pb-28">
+      {/* Toast flotante de Inventario & Pedidos */}
+      {inventoryToast && (
+        <div
+          className={`fixed top-5 right-5 z-[70] max-w-md px-4 py-3 rounded-2xl shadow-2xl border flex items-center gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-top-3 ${
+            inventoryToast.type === 'ok'
+              ? 'bg-emerald-950/95 border-emerald-500/50 text-emerald-200'
+              : inventoryToast.type === 'warn'
+              ? 'bg-amber-950/95 border-amber-500/50 text-amber-200'
+              : 'bg-rose-950/95 border-rose-500/50 text-rose-200'
+          }`}
+        >
+          <Package size={15} className="shrink-0" />
+          <span className="flex-1">{inventoryToast.text}</span>
+          <button onClick={() => setInventoryToast(null)} className="opacity-70 hover:opacity-100">
+            <X size={14} />
+          </button>
+        </div>
+      )}
       {/* Encabezado Principal */}
       <header className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-4 mb-5">
         <div className="shrink-0 min-w-0">
@@ -1182,6 +1302,8 @@ export function PedidosPage() {
                         key={pedido.id}
                         pedido={pedido}
                         allOrders={pedidos}
+                        stockItems={stockItems}
+                        kardexMovs={orderKardexMap[pedido.id] || []}
                         moviendo={moviendoId === pedido.id}
                         esDuplicado={telefonosDuplicados.has((pedido.telefono || '').replace(/\D/g, ''))}
                         seleccionado={seleccionados.has(pedido.id)}
@@ -1237,6 +1359,8 @@ export function PedidosPage() {
                     key={pedido.id}
                     pedido={pedido}
                     allOrders={pedidos}
+                    stockItems={stockItems}
+                    kardexMovs={orderKardexMap[pedido.id] || []}
                     moviendo={moviendoId === pedido.id}
                     esDuplicado={telefonosDuplicados.has((pedido.telefono || '').replace(/\D/g, ''))}
                     seleccionado={seleccionados.has(pedido.id)}
@@ -1357,11 +1481,19 @@ export function PedidosPage() {
                         </td>
                         <td className="p-3">
                           <span className="font-mono font-semibold text-xs text-[var(--tx)] block">{p.sku || "—"}</span>
-                          {p.catalogo_sku && (
-                            <span className="inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 mt-0.5">
-                              🏷️ Catálogo: #{p.catalogo_sku}
-                            </span>
-                          )}
+                          <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                            {p.catalogo_sku && (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                                🏷️ #{p.catalogo_sku}
+                              </span>
+                            )}
+                            <OrderStockBadge
+                              pedido={p}
+                              stockItems={stockItems}
+                              kardexMovs={orderKardexMap[p.id] || []}
+                              onVincular={() => setPedidoAEditar(p)}
+                            />
+                          </div>
                         </td>
                         <td className="p-3 text-right font-mono font-bold text-sm text-emerald-600">
                           {dinero(p.total)}
@@ -1491,6 +1623,13 @@ export function PedidosPage() {
             </button>
 
             <button
+              onClick={() => moverSeleccionados('entregado')}
+              className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-xs font-bold flex items-center gap-1 transition-colors"
+            >
+              <CheckCircle2 size={13} /> Entregado
+            </button>
+
+            <button
               onClick={imprimirGuiasSeleccionadas}
               className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold flex items-center gap-1 transition-colors"
             >
@@ -1616,74 +1755,216 @@ export function PedidosPage() {
       )}
 
       {/* MODAL 6: CANCELACIÓN Y DEVOLUCIÓN A KÁRDEX (LOGÍSTICA INVERSA) */}
-      {pedidoACancelar && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setPedidoACancelar(null)}>
-          <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
-              <div className="flex items-center gap-2 text-rose-500">
-                <AlertTriangle size={18} />
-                <h3 className="font-bold text-sm">Registrar Novedad / Cancelación</h3>
+      {pedidoACancelar && (() => {
+        const estadoPrev = normalizarEstado(pedidoACancelar.estado);
+        const linesCancel = resolveOrderInventoryLines(pedidoACancelar, stockItems);
+        const ledgerCancel = computeOrderLedgerFromMovements(orderKardexMap[pedidoACancelar.id] || []);
+        const qtyCancel = linesCancel[0]?.cantidad || extractOrderQuantity(pedidoACancelar);
+        const skuLabel = linesCancel[0]?.sku || pedidoACancelar.catalogo_sku || pedidoACancelar.sku || 'Sin SKU';
+        const estabaReservado = ledgerCancel.reservedNet > 0 || estadoPrev === 'por_empacar' || estadoPrev === 'en_camino';
+        const estabaVendido = ledgerCancel.soldNet > 0 || estadoPrev === 'entregado';
+        const tocaStock = linesCancel.length > 0 && (estabaReservado || estabaVendido);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setPedidoACancelar(null)}>
+            <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden">
+              <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+                <div className="flex items-center gap-2 text-rose-500">
+                  <AlertTriangle size={18} />
+                  <h3 className="font-bold text-sm">Registrar Novedad / Cancelación</h3>
+                </div>
+                <button onClick={() => setPedidoACancelar(null)} className="p-1 rounded-lg"><X size={16} /></button>
               </div>
-              <button onClick={() => setPedidoACancelar(null)} className="p-1 rounded-lg"><X size={16} /></button>
+
+              <div className="p-5 space-y-4">
+                <div>
+                  <span className="text-xs font-bold block">{pedidoACancelar.nombre_cliente} (#{pedidoACancelar.id.slice(0, 8)})</span>
+                  <span className="text-[10px] tx-mu">
+                    Producto: <strong>{skuLabel}</strong> · {qtyCancel} ud(s) · Fase actual: <strong>{ETIQUETA_ESTADO[estadoPrev]}</strong>
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1.5">
+                    Motivo de la Novedad / Rechazo
+                  </label>
+                  <select
+                    value={motivoCancelacion}
+                    onChange={e => setMotivoCancelacion(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                  >
+                    <option value="Cliente no contestó llamadas/mensajes">Cliente no contestó llamadas/mensajes</option>
+                    <option value="Cliente sin efectivo en el momento">Cliente sin efectivo en el momento</option>
+                    <option value="Dirección errónea o fuera de cobertura">Dirección errónea o fuera de cobertura</option>
+                    <option value="Rechazó el producto / Se arrepintió">Rechazó el producto / Se arrepintió</option>
+                    <option value="Producto dañado en transporte">Producto dañado en transporte</option>
+                    <option value="Pedido duplicado o de prueba">Pedido duplicado o de prueba</option>
+                  </select>
+                </div>
+
+                {!tocaStock ? (
+                  <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] text-[11px] tx-mu">
+                    {linesCancel.length === 0 ? (
+                      <span>⚠️ Este pedido no tiene SKU vinculado del catálogo, por lo que no moverá inventario.</span>
+                    ) : (
+                      <span>ℹ️ Este pedido estaba en <strong>{ETIQUETA_ESTADO[estadoPrev]}</strong> (aún no se había empacado ni reservado); cancelarlo no alterará el stock.</span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {/* Opción principal inteligente según de dónde viene */}
+                    <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-start gap-2.5">
+                      <input
+                        type="checkbox"
+                        id="reingresarKardex"
+                        checked={reingresarKardex}
+                        onChange={e => {
+                          setReingresarKardex(e.target.checked);
+                          if (!e.target.checked) setEsMermaDevolucion(false);
+                        }}
+                        className="mt-0.5 rounded text-emerald-600 focus:ring-0"
+                      />
+                      <label htmlFor="reingresarKardex" className="text-xs cursor-pointer">
+                        <span className="font-bold text-[var(--tx)] flex items-center gap-1">
+                          <RotateCcw size={12} className="text-emerald-500" />
+                          {estabaVendido
+                            ? `Reingresar +${qtyCancel} ud(s) físicas a Bodega`
+                            : `Liberar ${qtyCancel} ud(s) reservada(s) a Stock Disponible`}
+                        </span>
+                        <span className="text-[10px] tx-mu block mt-0.5">
+                          {estabaVendido
+                            ? 'El pedido ya había salido del stock físico; registrará una devolución de entrada en Kárdex.'
+                            : 'La unidad nunca salió del stock físico (solo estaba reservada en empaque/ruta). Se liberará la reserva sin inflar el stock físico.'}
+                        </span>
+                      </label>
+                    </div>
+
+                    {/* Opción secundaria si regresó dañado / merma */}
+                    {reingresarKardex && (
+                      <div className="p-3 bg-rose-500/5 rounded-xl border border-rose-500/25 flex items-start gap-2.5">
+                        <input
+                          type="checkbox"
+                          id="esMermaDevolucion"
+                          checked={esMermaDevolucion}
+                          onChange={e => setEsMermaDevolucion(e.target.checked)}
+                          className="mt-0.5 rounded text-rose-600 focus:ring-0"
+                        />
+                        <label htmlFor="esMermaDevolucion" className="text-xs cursor-pointer">
+                          <span className="font-bold text-rose-500 block">
+                            ⚠️ Regresó dañado (registrar como Merma)
+                          </span>
+                          <span className="text-[10px] tx-mu block mt-0.5">
+                            Libera la reserva y descuenta la unidad del stock físico como merma/daño para no volver a venderla.
+                          </span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="pt-2 flex justify-end gap-2">
+                  <button 
+                    type="button" 
+                    onClick={() => setPedidoACancelar(null)} 
+                    className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold"
+                  >
+                    Volver
+                  </button>
+                  <button
+                    type="button"
+                    disabled={cancelando}
+                    onClick={confirmarCancelacion}
+                    className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm"
+                  >
+                    {cancelando ? "Procesando..." : "Confirmar Cancelación"}
+                  </button>
+                </div>
+              </div>
             </div>
+          </div>
+        );
+      })()}
 
+      {/* MODAL 8: ADVERTENCIA DE STOCK INSUFICIENTE AL PASAR A EMPAQUE */}
+      {pendingStockConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setPendingStockConfirm(null)}>
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-amber-500/40 bg-cd text-[var(--tx)] shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-amber-500/10">
+              <div className="flex items-center gap-2 text-amber-500">
+                <AlertTriangle size={18} />
+                <h3 className="font-bold text-sm">Alerta de Stock en Bodega</h3>
+              </div>
+              <button onClick={() => setPendingStockConfirm(null)} className="p-1 rounded-lg"><X size={16} /></button>
+            </div>
             <div className="p-5 space-y-4">
-              <div>
-                <span className="text-xs font-bold block">{pedidoACancelar.nombre_cliente} (#{pedidoACancelar.id.slice(0, 8)})</span>
-                <span className="text-[10px] tx-mu">Producto: {pedidoACancelar.sku || 'Sin SKU'}</span>
-              </div>
-
-              <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1.5">
-                  Motivo de la Novedad / Rechazo
-                </label>
-                <select
-                  value={motivoCancelacion}
-                  onChange={e => setMotivoCancelacion(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
-                >
-                  <option value="Cliente no contestó llamadas/mensajes">Cliente no contestó llamadas/mensajes</option>
-                  <option value="Cliente sin efectivo en el momento">Cliente sin efectivo en el momento</option>
-                  <option value="Dirección errónea o fuera de cobertura">Dirección errónea o fuera de cobertura</option>
-                  <option value="Rechazó el producto / Se arrepintió">Rechazó el producto / Se arrepintió</option>
-                  <option value="Pedido duplicado o de prueba">Pedido duplicado o de prueba</option>
-                </select>
-              </div>
-
-              {/* Checkbox de Reingreso al Inventario Nativo */}
-              <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-start gap-2.5">
-                <input
-                  type="checkbox"
-                  id="reingresarKardex"
-                  checked={reingresarKardex}
-                  onChange={e => setReingresarKardex(e.target.checked)}
-                  className="mt-0.5 rounded text-emerald-600 focus:ring-0"
-                />
-                <label htmlFor="reingresarKardex" className="text-xs cursor-pointer">
-                  <span className="font-bold text-[var(--tx)] block flex items-center gap-1">
-                    <RotateCcw size={12} className="text-emerald-500" /> Reingresar unidad a Bodega Central
-                  </span>
-                  <span className="text-[10px] tx-mu block">
-                    Registrará automáticamente una entrada por devolución en el Kárdex de inventario para que la unidad esté disponible para la venta de nuevo.
-                  </span>
-                </label>
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
-                <button 
-                  type="button" 
-                  onClick={() => setPedidoACancelar(null)} 
+              <p className="text-xs leading-relaxed">
+                {pendingStockConfirm.mensaje}
+              </p>
+              <p className="text-[11px] tx-mu">
+                Puedes detener el empaque para reponer unidades en Inventario, o forzar el paso a <strong>{ETIQUETA_ESTADO[pendingStockConfirm.destino]}</strong> (el disponible quedará en 0).
+              </p>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setPendingStockConfirm(null)}
                   className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold"
                 >
-                  Volver
+                  Cancelar
                 </button>
                 <button
                   type="button"
-                  disabled={cancelando}
-                  onClick={confirmarCancelacion}
-                  className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm"
+                  onClick={async () => {
+                    const { pedido, destino } = pendingStockConfirm;
+                    setPendingStockConfirm(null);
+                    await ejecutarCambioEstado(pedido, destino, true);
+                  }}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black rounded-xl text-xs"
                 >
-                  {cancelando ? "Procesando..." : "Confirmar Cancelación"}
+                  Pasar igual a {ETIQUETA_ESTADO[pendingStockConfirm.destino]}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 9: CONFIRMAR ELIMINACIÓN DE PEDIDO */}
+      {pedidoABorrar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => !borrando && setPedidoABorrar(null)}>
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-rose-500/40 bg-cd text-[var(--tx)] shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-rose-500/10">
+              <div className="flex items-center gap-2 text-rose-500">
+                <Trash2 size={18} />
+                <h3 className="font-bold text-sm">Eliminar Pedido</h3>
+              </div>
+              <button onClick={() => !borrando && setPedidoABorrar(null)} className="p-1 rounded-lg"><X size={16} /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-xs leading-relaxed">
+                ¿Estás seguro de eliminar permanentemente el pedido de <strong>{pedidoABorrar.nombre_cliente || 'Cliente'}</strong> ({pedidoABorrar.sku || 'Sin SKU'})?
+                {(pedidoABorrar.estado === 'por_empacar' || pedidoABorrar.estado === 'en_camino') && (
+                  <span className="block mt-2 text-emerald-500 font-semibold">
+                    ✓ Si tenía unidades reservadas en Bodega, se liberarán automáticamente antes de borrarlo.
+                  </span>
+                )}
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={borrando}
+                  onClick={() => setPedidoABorrar(null)}
+                  className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={borrando}
+                  onClick={confirmarBorradoPedido}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5"
+                >
+                  {borrando ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                  {borrando ? 'Eliminando...' : 'Eliminar Definitivamente'}
                 </button>
               </div>
             </div>
@@ -1795,12 +2076,134 @@ export function PedidosPage() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Badge de Estado de Stock por Pedido                                 */
+/* ------------------------------------------------------------------ */
+
+function OrderStockBadge({
+  pedido,
+  stockItems,
+  kardexMovs,
+  onVincular
+}: {
+  pedido: Pedido;
+  stockItems: StockItem[];
+  kardexMovs: KardexMovement[];
+  onVincular: () => void;
+}) {
+  const estado = normalizarEstado(pedido.estado);
+  const lines = useMemo(() => resolveOrderInventoryLines(pedido, stockItems), [pedido, stockItems]);
+  const ledger = useMemo(() => computeOrderLedgerFromMovements(kardexMovs), [kardexMovs]);
+
+  if (stockItems.length === 0) return null;
+
+  if (lines.length === 0) {
+    if (estado === 'cancelado') return null;
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onVincular();
+        }}
+        className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/30 hover:bg-amber-500/25 transition-colors"
+        title="Haz clic para vincular este pedido a un SKU del inventario"
+      >
+        🏷️ Vincular SKU
+      </button>
+    );
+  }
+
+  const line = lines[0];
+  const disp = line.itemStock.stock_disponible;
+
+  if (estado === 'entregado') {
+    return ledger.soldNet > 0 ? (
+      <span
+        className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/25"
+        title="Descontado del inventario físico en Kárdex"
+      >
+        ✓ -{ledger.soldNet}u Kárdex
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1 text-[9px] font-medium px-1.5 py-0.2 rounded bg-sf tx-mu border border-[var(--bd)]">
+        Sin desc. Kárdex
+      </span>
+    );
+  }
+
+  if (estado === 'por_empacar' || estado === 'en_camino') {
+    return ledger.reservedNet > 0 ? (
+      <span
+        className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/30"
+        title="Unidades apartadas en Stock Reservado de Bodega"
+      >
+        🔒 {ledger.reservedNet}u reservada
+      </span>
+    ) : (
+      <span
+        className="inline-flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.2 rounded bg-sf tx-mu border border-[var(--bd)]"
+        title="Sin movimiento de reserva registrado aún"
+      >
+        ⏳ Reserva pendiente
+      </span>
+    );
+  }
+
+  if (estado === 'cancelado') {
+    if (ledger.damagedNet > 0) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-500/10 text-rose-600 border border-rose-500/25">
+          ⚠️ Merma ({ledger.damagedNet}u)
+        </span>
+      );
+    }
+    const tuvoDevolucion = kardexMovs.some(
+      m =>
+        m.tipo_movimiento === 'devolucion_entrada' ||
+        m.tipo_movimiento === 'liberar_reserva' ||
+        (m.motivo || '').startsWith('[Liberación Reserva]')
+    );
+    if (tuvoDevolucion) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.2 rounded bg-purple-500/10 text-purple-600 dark:text-purple-300 border border-purple-500/25">
+          🔓 Stock liberado
+        </span>
+      );
+    }
+    return null;
+  }
+
+  // Estado 'nuevo' o 'programado'
+  if (disp < line.cantidad) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-[9px] font-black px-1.5 py-0.2 rounded bg-rose-500/15 text-rose-600 border border-rose-500/30"
+        title={`Pide ${line.cantidad} y hay ${disp} disponible(s) en bodega`}
+      >
+        ⚠️ Sin stock ({disp} disp.)
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
+      title={`${disp} unidad(es) disponible(s) para vender`}
+    >
+      ✓ {disp} disp.{line.cantidad > 1 ? ` · ×${line.cantidad}u` : ''}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Tarjeta de pedido en Kanban                                         */
 /* ------------------------------------------------------------------ */
 
 function PedidoCard({
   pedido,
   allOrders,
+  stockItems,
+  kardexMovs,
   moviendo,
   esDuplicado,
   seleccionado,
@@ -1816,6 +2219,8 @@ function PedidoCard({
 }: {
   pedido: Pedido;
   allOrders?: Pedido[];
+  stockItems: StockItem[];
+  kardexMovs: KardexMovement[];
   moviendo: boolean;
   esDuplicado: boolean;
   seleccionado: boolean;
@@ -1886,18 +2291,26 @@ function PedidoCard({
         </div>
       )}
 
-      {/* Producto y Precio */}
+      {/* Producto, Stock Badge y Precio */}
       <div className="mt-2 flex items-center justify-between gap-2">
         <div className="min-w-0">
           <span className="inline-flex items-center gap-1 text-xs opacity-80 truncate block">
             <Package className="w-3.5 h-3.5 shrink-0 inline" />
             {pedido.sku || "—"}
           </span>
-          {pedido.catalogo_sku && (
-            <span className="inline-flex items-center gap-1 text-[8px] font-mono px-1 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
-              🏷️ #{pedido.catalogo_sku}
-            </span>
-          )}
+          <div className="flex flex-wrap items-center gap-1 mt-0.5">
+            {pedido.catalogo_sku && (
+              <span className="inline-flex items-center gap-1 text-[8px] font-mono px-1 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                🏷️ #{pedido.catalogo_sku}
+              </span>
+            )}
+            <OrderStockBadge
+              pedido={pedido}
+              stockItems={stockItems}
+              kardexMovs={kardexMovs}
+              onVincular={() => onEditar(pedido)}
+            />
+          </div>
         </div>
         <span className="text-base font-black text-emerald-600 font-mono shrink-0">
           {dinero(pedido.total)}

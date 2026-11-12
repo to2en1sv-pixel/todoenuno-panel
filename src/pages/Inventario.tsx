@@ -14,14 +14,17 @@ import {
   CreditCard,
   PackagePlus,
   ExternalLink,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Truck
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import {
   fetchStockItems,
   fetchKardexMovements,
   recordStockEntry,
   adjustStock,
-  quickAddStockDelta
+  quickAddStockDelta,
+  resolveOrderInventoryLines
 } from '@/lib/inventory';
 import { ProductImg } from '@/components/inventory/ProductImg';
 import { Sprint10SqlModal } from '@/components/inventory/Sprint10SqlModal';
@@ -57,6 +60,33 @@ export function InventarioPage() {
   const [entradaNotas, setEntradaNotas] = useState('');
   const [entradaAsentarFinanzas, setEntradaAsentarFinanzas] = useState(false);
   const [isSavingEntrada, setIsSavingEntrada] = useState(false);
+
+  // Modal Desglose de Reservas por Pedidos Activos
+  const [reservedModalSku, setReservedModalSku] = useState<string | null>(null);
+  const [reservedOrders, setReservedOrders] = useState<any[]>([]);
+  const [loadingReserved, setLoadingReserved] = useState(false);
+
+  const openReservedBreakdown = async (sku: string) => {
+    setReservedModalSku(sku);
+    setLoadingReserved(true);
+    try {
+      const { data } = await supabase
+        .from('whatsapp_orders')
+        .select('*')
+        .in('estado', ['por_empacar', 'en_camino'])
+        .order('created_at', { ascending: false });
+
+      const matched = (data || []).filter((ord: any) => {
+        const lines = resolveOrderInventoryLines(ord, stockItems);
+        return lines.some(l => l.sku === sku);
+      });
+      setReservedOrders(matched);
+    } catch {
+      setReservedOrders([]);
+    } finally {
+      setLoadingReserved(false);
+    }
+  };
 
   // Formulario Conteo Físico Real
   const [ajusteSku, setAjusteSku] = useState('');
@@ -187,7 +217,7 @@ export function InventarioPage() {
 
     if (kardexFilter === 'entradas') {
       list = list.filter(k =>
-        ['inventario_inicial', 'compra_entrada', 'devolucion_entrada'].includes(k.tipo_movimiento)
+        ['inventario_inicial', 'compra_entrada', 'devolucion_entrada', 'liberar_reserva'].includes(k.tipo_movimiento)
       );
     } else if (kardexFilter === 'salidas') {
       list = list.filter(k => ['venta_salida', 'reserva_pedido'].includes(k.tipo_movimiento));
@@ -300,6 +330,12 @@ export function InventarioPage() {
         return (
           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
             ⏳ Reserva Pedido
+          </span>
+        );
+      case 'liberar_reserva':
+        return (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20">
+            🔓 Reserva Liberada
           </span>
         );
       case 'devolucion_entrada':
@@ -649,7 +685,18 @@ export function InventarioPage() {
                           {item.stock_fisico}
                         </td>
                         <td className="px-4 py-3 text-center font-mono text-amber-500 font-bold">
-                          {item.stock_reservado > 0 ? `-${item.stock_reservado}` : '0'}
+                          {item.stock_reservado > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => openReservedBreakdown(item.sku)}
+                              className="px-2 py-0.5 rounded-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 transition-colors cursor-pointer"
+                              title="Ver pedidos que tienen reservadas estas unidades"
+                            >
+                              -{item.stock_reservado} 🔍
+                            </button>
+                          ) : (
+                            '0'
+                          )}
                         </td>
                         <td className="px-4 py-3 text-center font-mono font-bold">
                           <span
@@ -1092,6 +1139,107 @@ export function InventarioPage() {
 
       {/* MODAL 3: SCRIPT SQL SPRINT 10 */}
       <Sprint10SqlModal open={showSqlModal} onClose={() => setShowSqlModal(false)} />
+
+      {/* MODAL 4: DESGLOSE DE UNIDADES RESERVADAS POR PEDIDOS ACTIVOS */}
+      {reservedModalSku && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setReservedModalSku(null)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-lg rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+          >
+            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+              <div>
+                <h3 className="font-bold text-sm flex items-center gap-2">
+                  🔒 Pedidos Reservando <span className="font-mono text-amber-500">#{reservedModalSku}</span>
+                </h3>
+                <p className="text-[10px] tx-mu mt-0.5">
+                  Órdenes actualmente en fase Empaque o En Camino con unidades retenidas.
+                </p>
+              </div>
+              <button onClick={() => setReservedModalSku(null)} className="p-1 rounded-lg hover:bg-black/10">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-4 max-h-80 overflow-y-auto space-y-2.5">
+              {loadingReserved ? (
+                <div className="py-8 text-center text-xs tx-mu">Buscando pedidos activos...</div>
+              ) : reservedOrders.length === 0 ? (
+                <div className="py-8 text-center text-xs tx-mu">
+                  No se encontraron pedidos activos en Por Empacar / En Camino para #{reservedModalSku}.
+                  <span className="block mt-1 opacity-75">
+                    Si quedó reserva huérfana de un pedido antiguo borrado, usa Conteo Físico o ajusta en Kárdex.
+                  </span>
+                </div>
+              ) : (
+                reservedOrders.map((ord: any) => {
+                  const lines = resolveOrderInventoryLines(ord, stockItems);
+                  const qty = lines.find(l => l.sku === reservedModalSku)?.cantidad || 1;
+                  return (
+                    <div
+                      key={ord.id}
+                      className="p-3 rounded-xl border border-[var(--bd)] bg-sf flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-[10px] font-bold tx-mu">
+                            #{String(ord.id).slice(0, 8).toUpperCase()}
+                          </span>
+                          <span className="text-xs font-bold text-[var(--tx)] truncate">
+                            {ord.nombre_cliente || 'Cliente'}
+                          </span>
+                          <span
+                            className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full border ${
+                              ord.estado === 'en_camino'
+                                ? 'bg-violet-500/10 text-violet-500 border-violet-500/25'
+                                : 'bg-amber-500/10 text-amber-500 border-amber-500/25'
+                            }`}
+                          >
+                            {ord.estado === 'en_camino' ? '🛵 En Camino' : '📦 Por Empacar'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] tx-mu mt-1 flex items-center gap-2 flex-wrap">
+                          <span className="flex items-center gap-1">
+                            <Truck size={10} /> {ord.courier || 'Sin asignar'}
+                          </span>
+                          <span>· {ord.departamento || 'San Salvador'}</span>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-xs font-black font-mono text-amber-500 block">
+                          {qty} ud(s)
+                        </span>
+                        <span className="text-[10px] font-bold text-emerald-500">
+                          ${Number(ord.total || 0).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="p-4 border-t border-[var(--bd)] bg-sf flex items-center justify-between">
+              <Link
+                to="/pedidos"
+                className="text-xs font-bold text-indigo-500 hover:underline flex items-center gap-1"
+              >
+                Ver todos en Centro de Pedidos <ExternalLink size={12} />
+              </Link>
+              <button
+                type="button"
+                onClick={() => setReservedModalSku(null)}
+                className="px-4 py-1.5 rounded-xl border border-[var(--bd)] bg-cd text-xs font-semibold"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
