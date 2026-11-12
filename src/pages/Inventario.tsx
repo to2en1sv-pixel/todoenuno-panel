@@ -96,31 +96,63 @@ export function InventarioPage() {
     if (filterParam === 'criticos') setFilterCriticos(true);
   }, [searchParams]);
 
-  // KPIs de Bodega
+  // KPIs de Bodega (excluyen estrictamente productos pausados)
   const metrics = useMemo(() => {
+    let activeSkus = 0;
+    let pausedSkus = 0;
     let totalFisico = 0;
     let totalReservado = 0;
     let totalDisponible = 0;
-    let valorizacionTotal = 0;
+    let valorizacionCosto = 0;
+    let valorVentaTotal = 0;
+    let valorVentaDisponible = 0;
     let skusCriticos = 0;
 
     stockItems.forEach(item => {
       if (item.sku.toLowerCase().includes('fee')) return;
-      totalFisico += item.stock_fisico || 0;
-      totalReservado += item.stock_reservado || 0;
-      totalDisponible += item.stock_disponible || 0;
-      valorizacionTotal += (item.stock_fisico || 0) * (item.costo_unitario || 0);
-      if (item.stock_disponible <= (item.stock_minimo_alerta || 5)) {
+      if (item.activo === false) {
+        pausedSkus++;
+        return;
+      }
+
+      activeSkus++;
+      const fisico = item.stock_fisico || 0;
+      const reservado = item.stock_reservado || 0;
+      const disponible = item.stock_disponible || 0;
+      const costo = item.costo_unitario || 0;
+      const precio = item.precio_venta || 0;
+
+      totalFisico += fisico;
+      totalReservado += reservado;
+      totalDisponible += disponible;
+      valorizacionCosto += fisico * costo;
+      valorVentaTotal += fisico * precio;
+      valorVentaDisponible += disponible * precio;
+
+      if (disponible <= (item.stock_minimo_alerta || 5)) {
         skusCriticos++;
       }
     });
 
-    return { totalFisico, totalReservado, totalDisponible, valorizacionTotal, skusCriticos };
+    const utilidadPotencial = valorVentaTotal - valorizacionCosto;
+
+    return {
+      activeSkus,
+      pausedSkus,
+      totalFisico,
+      totalReservado,
+      totalDisponible,
+      valorizacionCosto,
+      valorVentaTotal,
+      valorVentaDisponible,
+      utilidadPotencial,
+      skusCriticos
+    };
   }, [stockItems]);
 
-  // Filtrado de Stock
+  // Filtrado de Stock (oculta productos pausados)
   const filteredInventory = useMemo(() => {
-    let list = stockItems.filter(i => !i.sku.toLowerCase().includes('fee'));
+    let list = stockItems.filter(i => !i.sku.toLowerCase().includes('fee') && i.activo !== false);
 
     if (search.trim()) {
       const q = search.toLowerCase().trim();
@@ -385,8 +417,9 @@ export function InventarioPage() {
 
           <button
             onClick={() => {
-              setAjusteSku(stockItems[0]?.sku || '');
-              setAjusteNuevoStock(stockItems[0] ? String(stockItems[0].stock_fisico) : '');
+              const firstActive = stockItems.find(s => s.activo !== false);
+              setAjusteSku(firstActive?.sku || '');
+              setAjusteNuevoStock(firstActive ? String(firstActive.stock_fisico) : '');
               setShowAjusteModal(true);
             }}
             className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
@@ -412,16 +445,16 @@ export function InventarioPage() {
         </div>
       </div>
 
-      {/* Tarjetas KPI de Inventario */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Tarjetas KPI de Inventario (Solo SKUs Activos) */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
           <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
             Stock Físico (Bodega)
           </span>
           <div className="text-2xl font-black mt-1 text-[var(--tx)]">
-            {metrics.totalFisico} <span className="text-xs font-normal tx-mu">unidades</span>
+            {metrics.totalFisico} <span className="text-xs font-normal tx-mu">uds</span>
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">En {stockItems.length} SKUs registrados</span>
+          <span className="text-[10px] tx-mu mt-1 block">En {metrics.activeSkus} SKUs activos</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
@@ -446,12 +479,24 @@ export function InventarioPage() {
 
         <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
           <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
-            Valorización Inventario
+            Valorización (Costo)
           </span>
           <div className="text-2xl font-black mt-1 text-[var(--ac)]">
-            ${metrics.valorizacionTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ${metrics.valorizacionCosto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Costo de mercadería en bodega</span>
+          <span className="text-[10px] tx-mu mt-1 block">Costo de mercadería activa</span>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-cd border border-emerald-500/25 col-span-2 md:col-span-1">
+          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
+            Valor en Venta (PVP)
+          </span>
+          <div className="text-2xl font-black mt-1 text-emerald-500">
+            ${metrics.valorVentaTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <span className="text-[10px] tx-mu mt-1 block">
+            Disp: ${metrics.valorVentaDisponible.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · Margen: +${metrics.utilidadPotencial.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
         </div>
       </div>
 
@@ -544,7 +589,7 @@ export function InventarioPage() {
                   <th className="px-4 py-3 text-center">Stock Físico</th>
                   <th className="px-4 py-3 text-center">Reservado</th>
                   <th className="px-4 py-3 text-center">Disponible</th>
-                  <th className="px-4 py-3 text-right">Costo / Val.</th>
+                  <th className="px-4 py-3 text-right">Val. Costo / Venta</th>
                   <th className="px-4 py-3 text-right">Movimientos Rápidos</th>
                 </tr>
               </thead>
@@ -558,18 +603,19 @@ export function InventarioPage() {
                 ) : filteredInventory.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-10 text-center tx-mu space-y-2">
-                      <div>No hay SKUs en inventario con estos filtros.</div>
+                      <div>No hay SKUs activos en inventario con estos filtros.</div>
                       <Link
                         to="/catalogo"
                         className="inline-flex items-center gap-1 text-xs font-bold text-[var(--ac)] hover:underline"
                       >
-                        Ir a Catálogo Visual para crear un producto →
+                        Ir a Catálogo Visual para crear o activar un producto →
                       </Link>
                     </td>
                   </tr>
                 ) : (
                   filteredInventory.map(item => {
-                    const valorizado = (item.stock_fisico || 0) * (item.costo_unitario || 0);
+                    const valorizadoCosto = (item.stock_fisico || 0) * (item.costo_unitario || 0);
+                    const valorizadoVenta = (item.stock_fisico || 0) * (item.precio_venta || 0);
                     const esBajo = item.stock_disponible <= (item.stock_minimo_alerta || 5);
 
                     return (
@@ -619,8 +665,10 @@ export function InventarioPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right font-mono whitespace-nowrap">
-                          <div className="font-bold text-[var(--tx)]">${valorizado.toFixed(2)}</div>
-                          <div className="text-[10px] tx-mu">c/u ${(item.costo_unitario || 0).toFixed(2)}</div>
+                          <div className="font-bold text-emerald-500">${valorizadoVenta.toFixed(2)}</div>
+                          <div className="text-[10px] tx-mu">
+                            Costo: ${valorizadoCosto.toFixed(2)} (PVP ${(item.precio_venta || 0).toFixed(2)})
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1">
@@ -814,11 +862,13 @@ export function InventarioPage() {
                   required
                 />
                 <datalist id="skus-existentes-inv">
-                  {stockItems.map(s => (
-                    <option key={s.sku} value={s.sku}>
-                      {s.nombre} ({s.stock_fisico} uds)
-                    </option>
-                  ))}
+                  {stockItems
+                    .filter(s => s.activo !== false)
+                    .map(s => (
+                      <option key={s.sku} value={s.sku}>
+                        {s.nombre} ({s.stock_fisico} uds)
+                      </option>
+                    ))}
                 </datalist>
               </div>
 
@@ -979,11 +1029,13 @@ export function InventarioPage() {
                   required
                 />
                 <datalist id="skus-existentes-ajuste">
-                  {stockItems.map(s => (
-                    <option key={s.sku} value={s.sku}>
-                      {s.nombre} ({s.stock_fisico} uds)
-                    </option>
-                  ))}
+                  {stockItems
+                    .filter(s => s.activo !== false)
+                    .map(s => (
+                      <option key={s.sku} value={s.sku}>
+                        {s.nombre} ({s.stock_fisico} uds)
+                      </option>
+                    ))}
                 </datalist>
                 <span className="text-[10px] tx-mu mt-1 block">
                   Define cuántas unidades físicas existen exactamente hoy en bodega.

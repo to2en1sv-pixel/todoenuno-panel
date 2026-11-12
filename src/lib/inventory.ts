@@ -716,6 +716,10 @@ export async function deleteProductItem(params: {
   sku?: string | null;
   template_id?: string | number | null;
   hardDelete: boolean;
+  nombre?: string;
+  precio_venta?: number;
+  costo_unitario?: number;
+  image_url?: string | null;
 }): Promise<{ success: boolean; error?: string; needsSqlRepair?: boolean }> {
   const skuClean = normalizeSku(params.sku);
   const templateIdStr =
@@ -724,21 +728,72 @@ export async function deleteProductItem(params: {
       : '';
 
   if (!params.hardDelete) {
-    // Soft-delete: Desactivar en inventory_stock y en productos
+    // Soft-delete: Desactivar en inventory_stock (upsert si era legacy) y en productos
     const errors: string[] = [];
+    const targetSku = skuClean || (templateIdStr ? `PROD-${templateIdStr}` : '');
 
-    if (skuClean) {
-      const { error } = await supabase
+    if (targetSku) {
+      const { data: existingRow } = await supabase
         .from('inventory_stock')
-        .update({ activo: false, activo_todd: false, updated_at: new Date().toISOString() })
-        .eq('sku', skuClean);
-      if (error) {
-        const retry = await supabase
+        .select('sku')
+        .eq('sku', targetSku)
+        .maybeSingle();
+
+      if (existingRow) {
+        const { error } = await supabase
           .from('inventory_stock')
-          .update({ activo: false, updated_at: new Date().toISOString() })
-          .eq('sku', skuClean);
-        if (retry.error) errors.push(retry.error.message);
+          .update({ activo: false, activo_todd: false, updated_at: new Date().toISOString() })
+          .eq('sku', targetSku);
+        if (error) {
+          const retry = await supabase
+            .from('inventory_stock')
+            .update({ activo: false, updated_at: new Date().toISOString() })
+            .eq('sku', targetSku);
+          if (retry.error) errors.push(retry.error.message);
+        }
+      } else {
+        // Producto legacy que aún no tenía fila en inventory_stock: crearla con activo = false
+        const { error } = await supabase.from('inventory_stock').upsert(
+          {
+            sku: targetSku,
+            nombre: params.nombre?.trim() || targetSku,
+            template_id: templateIdStr || null,
+            precio_venta: Math.max(Number(params.precio_venta) || 0, 0),
+            costo_unitario: Math.max(Number(params.costo_unitario) || 0, 0),
+            image_url: params.image_url || null,
+            stock_fisico: 0,
+            stock_reservado: 0,
+            activo: false,
+            activo_todd: false,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'sku' }
+        );
+        if (error && error.message?.includes('column')) {
+          const retry = await supabase.from('inventory_stock').upsert(
+            {
+              sku: targetSku,
+              nombre: params.nombre?.trim() || targetSku,
+              template_id: templateIdStr || null,
+              precio_venta: Math.max(Number(params.precio_venta) || 0, 0),
+              costo_unitario: Math.max(Number(params.costo_unitario) || 0, 0),
+              image_url: params.image_url || null,
+              stock_fisico: 0,
+              stock_reservado: 0,
+              activo: false,
+              updated_at: new Date().toISOString()
+            },
+            { onConflict: 'sku' }
+          );
+          if (retry.error) errors.push(retry.error.message);
+        } else if (error) {
+          errors.push(error.message);
+        }
       }
+
+      localStock = localStock.map(item =>
+        normalizeSku(item.sku) === targetSku ? { ...item, activo: false, activo_todd: false } : item
+      );
     }
 
     if (templateIdStr && /^\d+$/.test(templateIdStr)) {

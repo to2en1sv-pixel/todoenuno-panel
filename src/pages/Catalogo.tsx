@@ -58,7 +58,7 @@ interface UnifiedCatalogItem {
   source: 'native' | 'legacy';
 }
 
-type CatalogFilter = 'todos' | 'activos' | 'pausados' | 'todd' | 'stock_bajo';
+type CatalogFilter = 'activos' | 'todd' | 'stock_bajo' | 'pausados';
 
 export function CatalogoPage() {
   const [searchParams] = useSearchParams();
@@ -67,7 +67,7 @@ export function CatalogoPage() {
   const inv = useInventory();
 
   const [search, setSearch] = useState('');
-  const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>('todos');
+  const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>('activos');
   const [selectedItem, setSelectedItem] = useState<UnifiedCatalogItem | null>(null);
   const [drawerTab, setDrawerTab] = useState<'info' | 'todd' | 'variantes'>('info');
 
@@ -289,17 +289,22 @@ export function CatalogoPage() {
     }
   }, [stockItems, unifiedCatalog]);
 
-  // Métricas comerciales del Catálogo Visual
+  // Métricas comerciales del Catálogo Visual (excluye estrictamente productos pausados)
   const catalogStats = useMemo(() => {
-    const total = unifiedCatalog.length;
-    const activos = unifiedCatalog.filter(i => i.activo).length;
-    const toddReady = unifiedCatalog.filter(i => i.activo_todd && Boolean(i.todd_pitch)).length;
-    const sinFoto = unifiedCatalog.filter(i => !i.image_url).length;
-    const stockBajo = unifiedCatalog.filter(i => i.stock_disponible <= (i.stock_minimo_alerta || 5)).length;
-    return { total, activos, toddReady, sinFoto, stockBajo };
+    const activeItems = unifiedCatalog.filter(i => i.activo);
+    const pausados = unifiedCatalog.length - activeItems.length;
+    const activos = activeItems.length;
+    const toddReady = activeItems.filter(i => i.activo_todd && Boolean(i.todd_pitch)).length;
+    const sinFoto = activeItems.filter(i => !i.image_url).length;
+    const stockBajo = activeItems.filter(i => i.stock_disponible <= (i.stock_minimo_alerta || 5)).length;
+    const valorVentaActivo = activeItems.reduce(
+      (sum, i) => sum + (i.stock_fisico || 0) * (i.precio_venta || 0),
+      0
+    );
+    return { activos, pausados, toddReady, sinFoto, stockBajo, valorVentaActivo };
   }, [unifiedCatalog]);
 
-  // Filtrado visual
+  // Filtrado visual (por defecto solo muestra activos)
   const filteredCatalog = useMemo(() => {
     let list = unifiedCatalog;
 
@@ -315,10 +320,12 @@ export function CatalogoPage() {
     }
 
     if (catalogFilter === 'activos') list = list.filter(i => i.activo);
-    else if (catalogFilter === 'pausados') list = list.filter(i => !i.activo);
-    else if (catalogFilter === 'todd') list = list.filter(i => i.activo_todd && Boolean(i.todd_pitch));
-    else if (catalogFilter === 'stock_bajo') {
-      list = list.filter(i => i.stock_disponible <= (i.stock_minimo_alerta || 5));
+    else if (catalogFilter === 'todd') {
+      list = list.filter(i => i.activo && i.activo_todd && Boolean(i.todd_pitch));
+    } else if (catalogFilter === 'stock_bajo') {
+      list = list.filter(i => i.activo && i.stock_disponible <= (i.stock_minimo_alerta || 5));
+    } else if (catalogFilter === 'pausados') {
+      list = list.filter(i => !i.activo);
     }
 
     return list;
@@ -412,7 +419,11 @@ export function CatalogoPage() {
     const res = await deleteProductItem({
       sku: selectedItem.sku,
       template_id: selectedItem.template_id,
-      hardDelete
+      hardDelete,
+      nombre: selectedItem.nombre,
+      precio_venta: selectedItem.precio_venta,
+      costo_unitario: selectedItem.costo_unitario,
+      image_url: selectedItem.image_url
     });
 
     setIsSavingDetails(false);
@@ -626,16 +637,24 @@ export function CatalogoPage() {
         </div>
       </div>
 
-      {/* KPIs Comerciales del Catálogo */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* KPIs Comerciales del Catálogo (Solo productos activos) */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
           <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
-            Productos en Catálogo
+            Productos Activos
           </span>
-          <div className="text-2xl font-black mt-1 text-[var(--tx)]">{catalogStats.total}</div>
-          <span className="text-[10px] tx-mu mt-1 block">
-            {catalogStats.activos} activos · {catalogStats.total - catalogStats.activos} pausados
+          <div className="text-2xl font-black mt-1 text-[var(--tx)]">{catalogStats.activos}</div>
+          <span className="text-[10px] tx-mu mt-1 block">Visibles para venta y Todd</span>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
+          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
+            Valor en Venta (PVP)
           </span>
+          <div className="text-2xl font-black mt-1 text-emerald-500">
+            ${catalogStats.valorVentaActivo.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <span className="text-[10px] tx-mu mt-1 block">Stock activo a precio venta</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
@@ -643,7 +662,7 @@ export function CatalogoPage() {
             Entrenados Bot Todd
           </span>
           <div className="text-2xl font-black mt-1 text-purple-500">{catalogStats.toddReady}</div>
-          <span className="text-[10px] tx-mu mt-1 block">Con pitch de ventas WhatsApp</span>
+          <span className="text-[10px] tx-mu mt-1 block">Activos con pitch WhatsApp</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
@@ -651,47 +670,61 @@ export function CatalogoPage() {
             Fichas sin Foto
           </span>
           <div className="text-2xl font-black mt-1 text-amber-500">{catalogStats.sinFoto}</div>
-          <span className="text-[10px] tx-mu mt-1 block">Pendientes de imagen comercial</span>
+          <span className="text-[10px] tx-mu mt-1 block">Activos sin imagen</span>
         </div>
 
         <Link
           to="/inventario?filter=criticos"
-          className="p-4 rounded-2xl bg-cd border border-[var(--bd)] hover:border-[var(--ac)] transition-colors block"
+          className="p-4 rounded-2xl bg-cd border border-[var(--bd)] hover:border-[var(--ac)] transition-colors block col-span-2 md:col-span-1"
         >
           <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
-            Alertas Stock en Bodega
+            Alertas Stock Bajo
           </span>
           <div className="text-2xl font-black mt-1 text-rose-500">{catalogStats.stockBajo}</div>
           <span className="text-[10px] text-[var(--ac)] font-bold mt-1 inline-flex items-center gap-1">
-            Ver en Inventario & Kárdex →
+            Ver en Inventario →
           </span>
         </Link>
       </div>
 
       {/* Barra de Búsqueda y Filtros Visuales */}
       <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3 bg-cd p-3 rounded-2xl border border-[var(--bd)]">
-        <div className="flex flex-wrap bg-sf p-1 rounded-xl gap-1">
-          {(
-            [
-              ['todos', `Todos (${catalogStats.total})`],
-              ['activos', `Activos (${catalogStats.activos})`],
-              ['todd', `Bot Todd (${catalogStats.toddReady})`],
-              ['stock_bajo', `Stock Bajo (${catalogStats.stockBajo})`],
-              ['pausados', `Pausados (${catalogStats.total - catalogStats.activos})`]
-            ] as [CatalogFilter, string][]
-          ).map(([id, label]) => (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap bg-sf p-1 rounded-xl gap-1">
+            {(
+              [
+                ['activos', `Activos (${catalogStats.activos})`],
+                ['todd', `Bot Todd (${catalogStats.toddReady})`],
+                ['stock_bajo', `Stock Bajo (${catalogStats.stockBajo})`]
+              ] as [CatalogFilter, string][]
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setCatalogFilter(id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${
+                  catalogFilter === id
+                    ? 'bg-cd shadow-sm text-[var(--tx)]'
+                    : 'text-[var(--mu)] hover:text-[var(--tx)]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {catalogStats.pausados > 0 && (
             <button
-              key={id}
-              onClick={() => setCatalogFilter(id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${
-                catalogFilter === id
-                  ? 'bg-cd shadow-sm text-[var(--tx)]'
-                  : 'text-[var(--mu)] hover:text-[var(--tx)]'
+              onClick={() => setCatalogFilter(catalogFilter === 'pausados' ? 'activos' : 'pausados')}
+              className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-colors whitespace-nowrap ${
+                catalogFilter === 'pausados'
+                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-600 dark:text-amber-400'
+                  : 'bg-sf border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
               }`}
+              title="Ver productos pausados para reactivarlos"
             >
-              {label}
+              Pausados ({catalogStats.pausados})
             </button>
-          ))}
+          )}
         </div>
 
         <div className="relative flex-1 md:max-w-xs">
