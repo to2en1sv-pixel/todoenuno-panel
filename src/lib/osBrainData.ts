@@ -354,7 +354,7 @@ export const INITIAL_BRAIN_NODES: BrainNode[] = [
     description: 'Inventario centralizado y catálogo maestro. Controla Kárdex de entradas/salidas, existencias en bodega, precios al público, cohortes de productos ancla y sinónimos para el bot Todd.',
     completionPercentage: 96,
     health: 98,
-    route: '/catalogo',
+    route: '/inventario',
     subActions: [
       { id: 'ck-1', name: 'Kárdex Físico de Entradas y Salidas', description: 'Historial inmutable de movimientos de stock con causa y costo.', status: 'active', outputEvent: 'inventory.adjustment' },
       { id: 'ck-2', name: 'Aliases y Sinónimos de Todd Bot', description: 'Mapea frases coloquiales salvadoreñas al SKU correspondiente.', status: 'active', outputEvent: 'product.updated' },

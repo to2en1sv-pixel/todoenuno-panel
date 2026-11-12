@@ -4,10 +4,11 @@
 --
 -- Soluciona:
 -- 1. Expone public.record_movement(...) como RPC accesible desde el frontend.
--- 2. Permite eliminar productos en cascada (ON DELETE CASCADE en kardex + RPC).
+-- 2. Repara eliminación definitiva: agrega ON DELETE CASCADE a productos_variantes
+--    y inventory.kardex + RPC security definer public.delete_inventory_product.
 -- 3. Agrega tipo 'inventario_inicial' para meter stock real sin registrar compra.
 -- 4. Aloja campos de Bot Todd y categoría directamente en inventory.stock.
--- 5. Otorga permisos SELECT, INSERT, UPDATE, DELETE y RLS completos.
+-- 5. Otorga permisos SELECT, INSERT, UPDATE, DELETE y políticas RLS completas.
 -- ============================================================================
 
 create schema if not exists inventory;
@@ -35,7 +36,6 @@ create table if not exists inventory.stock (
   created_at          timestamptz not null default now()
 );
 
--- Asegurar columnas nuevas si la tabla ya existía del Sprint 3
 alter table inventory.stock
   add column if not exists todd_pitch text default '',
   add column if not exists todd_instrucciones text default '',
@@ -61,17 +61,13 @@ create table if not exists inventory.kardex (
   created_at       timestamptz not null default now()
 );
 
--- Actualizar constraint de tipo_movimiento para aceptar 'inventario_inicial'
 do $$
 declare
   v_con_name text;
 begin
-  -- Quitar check viejo de tipo_movimiento si existe
   for v_con_name in
-    select conname
-    from pg_constraint
-    where conrelid = 'inventory.kardex'::regclass
-      and contype = 'c'
+    select conname from pg_constraint
+    where conrelid = 'inventory.kardex'::regclass and contype = 'c'
       and pg_get_constraintdef(oid) like '%tipo_movimiento%'
   loop
     execute format('alter table inventory.kardex drop constraint if exists %I', v_con_name);
@@ -90,12 +86,9 @@ begin
       'merma_dano'
     ));
 
-  -- Reemplazar FK hacia inventory.stock para asegurar ON DELETE CASCADE
   for v_con_name in
-    select conname
-    from pg_constraint
-    where conrelid = 'inventory.kardex'::regclass
-      and contype = 'f'
+    select conname from pg_constraint
+    where conrelid = 'inventory.kardex'::regclass and contype = 'f'
   loop
     execute format('alter table inventory.kardex drop constraint if exists %I', v_con_name);
   end loop;
@@ -111,7 +104,7 @@ create index if not exists inventory_kardex_sku_idx        on inventory.kardex (
 create index if not exists inventory_kardex_tipo_idx       on inventory.kardex (tipo_movimiento);
 create index if not exists inventory_kardex_created_at_idx on inventory.kardex (created_at desc);
 
--- 3. Función central atómica en esquema inventory
+-- 3. Función atómica en esquema inventory + wrapper public.record_movement
 create or replace function inventory.record_movement(
   p_sku             text,
   p_tipo_movimiento text,
@@ -121,10 +114,7 @@ create or replace function inventory.record_movement(
   p_source_table    text default 'manual',
   p_source_id       text default null,
   p_usuario         text default 'Panel Admin'
-) returns jsonb
-language plpgsql
-security definer
-as $$
+) returns jsonb language plpgsql security definer as $$
 declare
   v_sku_clean text;
   v_stock_actual integer;
@@ -136,16 +126,12 @@ declare
 begin
   v_sku_clean := upper(trim(p_sku));
 
-  -- Asegurar que el SKU exista en inventory.stock
   insert into inventory.stock (sku, nombre, stock_fisico, created_at)
-  values (v_sku_clean, v_sku_clean, 0, now())
-  on conflict (sku) do nothing;
+  values (v_sku_clean, v_sku_clean, 0, now()) on conflict (sku) do nothing;
 
   select stock_fisico, stock_reservado
     into v_stock_actual, v_reservado_actual
-    from inventory.stock
-   where sku = v_sku_clean
-     for update;
+    from inventory.stock where sku = v_sku_clean for update;
 
   v_nuevo_fisico    := v_stock_actual;
   v_nuevo_reservado := v_reservado_actual;
@@ -156,28 +142,22 @@ begin
     if p_tipo_movimiento in ('compra_entrada', 'inventario_inicial') and coalesce(p_costo_unitario, 0) > 0 then
       update inventory.stock set costo_unitario = p_costo_unitario where sku = v_sku_clean;
     end if;
-
   elsif p_tipo_movimiento = 'reserva_pedido' then
     v_nuevo_reservado := v_reservado_actual + v_delta;
-
   elsif p_tipo_movimiento = 'venta_salida' then
     v_nuevo_fisico    := greatest(v_stock_actual - v_delta, 0);
     v_nuevo_reservado := greatest(v_reservado_actual - v_delta, 0);
     v_delta           := -v_delta;
-
   elsif p_tipo_movimiento in ('ajuste_negativo', 'merma_dano') then
     v_nuevo_fisico := greatest(v_stock_actual - v_delta, 0);
     v_delta        := -v_delta;
-
   elsif p_tipo_movimiento = 'devolucion_entrada' then
     v_nuevo_reservado := greatest(v_reservado_actual - v_delta, 0);
     v_nuevo_fisico    := v_stock_actual + v_delta;
   end if;
 
   update inventory.stock
-     set stock_fisico    = v_nuevo_fisico,
-         stock_reservado = v_nuevo_reservado,
-         updated_at      = now()
+     set stock_fisico = v_nuevo_fisico, stock_reservado = v_nuevo_reservado, updated_at = now()
    where sku = v_sku_clean;
 
   insert into inventory.kardex (
@@ -189,17 +169,13 @@ begin
   ) returning id into v_kardex_id;
 
   return jsonb_build_object(
-    'success', true,
-    'kardex_id', v_kardex_id,
-    'sku', v_sku_clean,
-    'saldo_fisico', v_nuevo_fisico,
-    'saldo_reservado', v_nuevo_reservado,
+    'success', true, 'kardex_id', v_kardex_id, 'sku', v_sku_clean,
+    'saldo_fisico', v_nuevo_fisico, 'saldo_reservado', v_nuevo_reservado,
     'saldo_disponible', greatest(v_nuevo_fisico - v_nuevo_reservado, 0)
   );
 end;
 $$;
 
--- 4. CRÍTICO: Wrapper en esquema PUBLIC para que supabase.rpc('record_movement') funcione siempre
 create or replace function public.record_movement(
   p_sku             text,
   p_tipo_movimiento text,
@@ -209,10 +185,7 @@ create or replace function public.record_movement(
   p_source_table    text default 'manual',
   p_source_id       text default null,
   p_usuario         text default 'Panel Admin'
-) returns jsonb
-language plpgsql
-security definer
-as $$
+) returns jsonb language plpgsql security definer as $$
 begin
   return inventory.record_movement(
     p_sku, p_tipo_movimiento, p_cantidad, p_costo_unitario,
@@ -221,20 +194,16 @@ begin
 end;
 $$;
 
--- 5. RPC para eliminación limpia y atómica de un producto (sin errores de FK o RLS)
+-- 4. RPC para eliminación limpia y atómica (desvincula post_queue y borra variantes + productos + stock)
 create or replace function public.delete_inventory_product(
   p_sku         text default null,
   p_template_id text default null
-) returns jsonb
-language plpgsql
-security definer
-as $$
+) returns jsonb language plpgsql security definer as $$
 declare
   v_sku_clean text;
 begin
   v_sku_clean := nullif(upper(trim(coalesce(p_sku, ''))), '');
 
-  -- 1. Si hay SKU, eliminar de inventory.kardex, inventory.stock e inventory_cache
   if v_sku_clean is not null then
     delete from inventory.kardex where upper(sku) = v_sku_clean;
     delete from inventory.stock where upper(sku) = v_sku_clean;
@@ -248,9 +217,12 @@ begin
     end if;
   end if;
 
-  -- 2. Si hay template_id, limpiar también en tablas legacy productos / productos_variantes
   if p_template_id is not null and trim(p_template_id) <> '' then
     delete from inventory.stock where template_id = p_template_id;
+
+    if exists (select from pg_tables where schemaname = 'public' and tablename = 'post_queue') then
+      execute 'update public.post_queue set template_id = null where template_id::text = $1' using p_template_id;
+    end if;
 
     if exists (select from pg_tables where schemaname = 'public' and tablename = 'productos_variantes') then
       execute 'delete from public.productos_variantes where template_id::text = $1' using p_template_id;
@@ -265,27 +237,23 @@ begin
 end;
 $$;
 
--- 6. Recrear vistas públicas actualizadas (con todas las columnas nuevas)
+-- 5. Recrear vistas públicas y otorgar permisos completos
 drop view if exists public.inventory_stock;
 drop view if exists public.inventory_kardex;
-
 create or replace view public.inventory_stock as select * from inventory.stock;
 create or replace view public.inventory_kardex as select * from inventory.kardex;
 
--- 7. Permisos completos (SELECT, INSERT, UPDATE, DELETE) y RLS permisivo
 alter table inventory.stock  enable row level security;
 alter table inventory.kardex enable row level security;
 
 grant usage on schema inventory to anon, authenticated, service_role;
 grant select, insert, update, delete on inventory.stock to anon, authenticated, service_role;
 grant select, insert, update, delete on inventory.kardex to anon, authenticated, service_role;
-
 grant select, insert, update, delete on public.inventory_stock to anon, authenticated, service_role;
 grant select, insert, update, delete on public.inventory_kardex to anon, authenticated, service_role;
 
 drop policy if exists "inventory_stock_all"  on inventory.stock;
 drop policy if exists "inventory_kardex_all" on inventory.kardex;
-
 create policy "inventory_stock_all"  on inventory.stock  for all using (true) with check (true);
 create policy "inventory_kardex_all" on inventory.kardex for all using (true) with check (true);
 
@@ -293,7 +261,7 @@ grant execute on function inventory.record_movement to anon, authenticated, serv
 grant execute on function public.record_movement to anon, authenticated, service_role;
 grant execute on function public.delete_inventory_product to anon, authenticated, service_role;
 
--- Asegurar permisos en tablas legacy si existen
+-- 6. Reparar tablas legacy (productos, productos_variantes, inventory_cache) con CASCADE y políticas RLS
 do $$
 begin
   if exists (select from pg_tables where schemaname = 'public' and tablename = 'productos') then
@@ -304,14 +272,28 @@ begin
       add column if not exists activo_todd boolean default true;
 
     grant select, insert, update, delete on public.productos to anon, authenticated, service_role;
+    drop policy if exists "productos_all_panel" on public.productos;
+    create policy "productos_all_panel" on public.productos for all using (true) with check (true);
   end if;
 
   if exists (select from pg_tables where schemaname = 'public' and tablename = 'productos_variantes') then
     grant select, insert, update, delete on public.productos_variantes to anon, authenticated, service_role;
+    drop policy if exists "productos_variantes_all_panel" on public.productos_variantes;
+    create policy "productos_variantes_all_panel" on public.productos_variantes for all using (true) with check (true);
+
+    -- Convertir FK a ON DELETE CASCADE para que borrar un producto no falle jamás
+    if exists (select 1 from pg_constraint where conname = 'productos_variantes_template_id_fkey') then
+      alter table public.productos_variantes drop constraint productos_variantes_template_id_fkey;
+      alter table public.productos_variantes
+        add constraint productos_variantes_template_id_fkey
+        foreign key (template_id) references public.productos(template_id) on delete cascade;
+    end if;
   end if;
 
   if exists (select from pg_tables where schemaname = 'public' and tablename = 'inventory_cache') then
     grant select, insert, update, delete on public.inventory_cache to anon, authenticated, service_role;
+    drop policy if exists "inventory_cache_all_panel" on public.inventory_cache;
+    create policy "inventory_cache_all_panel" on public.inventory_cache for all using (true) with check (true);
   end if;
 end;
 $$;

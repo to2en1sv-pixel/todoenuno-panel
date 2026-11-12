@@ -716,7 +716,7 @@ export async function deleteProductItem(params: {
   sku?: string | null;
   template_id?: string | number | null;
   hardDelete: boolean;
-}): Promise<{ success: boolean; error?: string }> {
+}): Promise<{ success: boolean; error?: string; needsSqlRepair?: boolean }> {
   const skuClean = normalizeSku(params.sku);
   const templateIdStr =
     params.template_id !== undefined && params.template_id !== null
@@ -756,17 +756,73 @@ export async function deleteProductItem(params: {
 
   // Hard-delete: Eliminar completamente
   let hardError: string | undefined;
+  let needsSqlRepair = false;
 
   try {
-    // 1. Intentar RPC atómico public.delete_inventory_product (elimina FK y todas las tablas)
+    // 1. Intentar RPC atómico public.delete_inventory_product (elimina FK y todas las tablas como SECURITY DEFINER)
     const rpcRes = await (supabase as any).rpc('delete_inventory_product', {
       p_sku: skuClean || null,
       p_template_id: templateIdStr || null
     });
 
     if (rpcRes.error) {
-      // 2. Fallback paso a paso en el orden correcto de FK
+      // 2. Fallback paso a paso en orden seguro de dependencias FK
+      if (templateIdStr && /^\d+$/.test(templateIdStr)) {
+        const numId = Number(templateIdStr);
+
+        // Desvincular post_queue si apunta al template_id
+        try {
+          await supabase.from('post_queue').update({ template_id: null }).eq('template_id', numId);
+        } catch {
+          // ignorar si no existe o no aplica
+        }
+
+        // Intentar eliminar variantes por template_id y por sku
+        await supabase.from('productos_variantes').delete().eq('template_id', numId);
+        if (skuClean) {
+          await supabase.from('productos_variantes').delete().eq('sku', skuClean);
+        }
+
+        // Verificar si aún quedan variantes bloqueadas por RLS (Supabase devuelve error: null con 0 filas borradas)
+        const { data: remainingVars } = await supabase
+          .from('productos_variantes')
+          .select('variante_id')
+          .eq('template_id', numId)
+          .limit(1);
+
+        if (remainingVars && remainingVars.length > 0) {
+          return {
+            success: false,
+            needsSqlRepair: true,
+            error:
+              'La tabla legacy "productos_variantes" tiene variantes protegidas por RLS/FK (productos_variantes_template_id_fkey). Ejecuta el Script SQL Sprint 10 (botón </> SQL) en Supabase o usa "Desactivar / Pausar".'
+          };
+        }
+
+        // Eliminar registro padre en public.productos
+        const delProd = await supabase.from('productos').delete().eq('template_id', numId);
+        if (delProd.error && !delProd.error.message.includes('does not exist')) {
+          const msg = delProd.error.message || '';
+          if (
+            msg.includes('productos_variantes_template_id_fkey') ||
+            msg.includes('foreign key constraint') ||
+            msg.includes('row-level security')
+          ) {
+            return {
+              success: false,
+              needsSqlRepair: true,
+              error:
+                'Bloqueo FK/RLS en "productos_variantes" / "productos". Ejecuta el Script SQL Sprint 10 (botón </> SQL) en Supabase para habilitar ON DELETE CASCADE y borrado atómico, o usa "Desactivar / Pausar".'
+            };
+          }
+          hardError = msg;
+        }
+      }
+
       if (skuClean) {
+        await supabase.from('productos_variantes').delete().eq('sku', skuClean);
+        await supabase.from('inventory_cache').delete().eq('sku', skuClean);
+
         const delKardex = await supabase.from('inventory_kardex').delete().eq('sku', skuClean);
         if (delKardex.error && !delKardex.error.message.includes('does not exist')) {
           console.warn('Error eliminando kardex:', delKardex.error.message);
@@ -774,23 +830,14 @@ export async function deleteProductItem(params: {
 
         const delStock = await supabase.from('inventory_stock').delete().eq('sku', skuClean);
         if (delStock.error && !delStock.error.message.includes('does not exist')) {
-          hardError = delStock.error.message;
+          hardError = hardError || delStock.error.message;
         }
-
-        await supabase.from('inventory_cache').delete().eq('sku', skuClean);
-        await supabase.from('productos_variantes').delete().eq('sku', skuClean);
       }
 
       if (templateIdStr) {
-        await supabase.from('inventory_stock').delete().eq('template_id', templateIdStr);
-
-        if (/^\d+$/.test(templateIdStr)) {
-          const numId = Number(templateIdStr);
-          await supabase.from('productos_variantes').delete().eq('template_id', numId);
-          const delProd = await supabase.from('productos').delete().eq('template_id', numId);
-          if (delProd.error && !delProd.error.message.includes('does not exist')) {
-            hardError = hardError || delProd.error.message;
-          }
+        const delStockByTpl = await supabase.from('inventory_stock').delete().eq('template_id', templateIdStr);
+        if (delStockByTpl.error && !delStockByTpl.error.message.includes('does not exist')) {
+          hardError = hardError || delStockByTpl.error.message;
         }
       }
     }
@@ -799,7 +846,14 @@ export async function deleteProductItem(params: {
   }
 
   if (hardError) {
-    return { success: false, error: hardError };
+    if (
+      hardError.includes('productos_variantes_template_id_fkey') ||
+      hardError.includes('foreign key') ||
+      hardError.includes('permission')
+    ) {
+      needsSqlRepair = true;
+    }
+    return { success: false, error: hardError, needsSqlRepair };
   }
 
   // Limpiar caches locales

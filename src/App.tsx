@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
 import { HoyPage } from '@/pages/Hoy';
 import { CatalogoPage } from '@/pages/Catalogo';
+import { InventarioPage } from '@/pages/Inventario';
 import { ColaPage } from '@/pages/Cola';
 import { SistemaPage } from '@/pages/Sistema';
 import { UniChatPage } from '@/pages/UniChat';
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/pagos" element={<FinanzasPage />} />
         <Route path="/unichat" element={<UniChatPage />} />
         <Route path="/catalogo" element={<CatalogoPage />} />
+        <Route path="/inventario" element={<InventarioPage />} />
         <Route path="/cola" element={<ColaPage />} />
         <Route path="/proveedores" element={<ProveedoresPage />} />
         <Route path="/pedidos" element={<PedidosPage />} />
