@@ -5,81 +5,121 @@ import type {
   StockItem, 
   KardexMovement, 
   EntradaMercaderiaFormData, 
-  ProductFormData 
+  ProductFormData,
+  KardexMovementType
 } from '@/types/inventory';
 
-// Almacén local de respaldo
+// Almacén local de respaldo en memoria (solo cuando Supabase no está disponible)
 let localStock: StockItem[] = [];
 let localKardex: KardexMovement[] = [];
+
+function normalizeSku(sku?: string | null): string {
+  return (sku || '').trim().toUpperCase();
+}
 
 /**
  * Obtener todos los SKUs con sus niveles de stock físico, reservado y disponible
  */
-export async function fetchStockItems(): Promise<{ items: StockItem[]; isRealDb: boolean }> {
+export async function fetchStockItems(): Promise<{
+  items: StockItem[];
+  isRealDb: boolean;
+  error?: string;
+}> {
   try {
-    // 1. Intentar consultar vista nativa public.inventory_stock
+    // 1. Consultar vista nativa public.inventory_stock (fuente maestra)
     const { data, error } = await supabase
       .from('inventory_stock')
       .select('*')
       .order('nombre');
 
-    if (!error && data && data.length > 0) {
-      localStock = data as StockItem[];
+    if (!error && Array.isArray(data)) {
+      localStock = (data as StockItem[]).map(item => ({
+        ...item,
+        sku: normalizeSku(item.sku),
+        stock_fisico: Number(item.stock_fisico) || 0,
+        stock_reservado: Number(item.stock_reservado) || 0,
+        stock_disponible:
+          item.stock_disponible !== undefined && item.stock_disponible !== null
+            ? Number(item.stock_disponible)
+            : Math.max((Number(item.stock_fisico) || 0) - (Number(item.stock_reservado) || 0), 0),
+        costo_unitario: Number(item.costo_unitario) || 0,
+        precio_venta: Number(item.precio_venta) || 0,
+        stock_minimo_alerta: Number(item.stock_minimo_alerta ?? 5),
+        activo: item.activo !== false
+      }));
       return { items: localStock, isRealDb: true };
     }
 
-    // 2. Si no hay tabla nativa aún, combinar inventory_cache con productos_variantes (compatibilidad previa)
+    // 2. Fallback si aún no se ha corrido el SQL de Sprint 3 / Sprint 10 en Supabase
     const [resInv, resVar, resProd] = await Promise.all([
       supabase.from('inventory_cache').select('*'),
       supabase.from('productos_variantes').select('*'),
       supabase.from('productos').select('*')
     ]);
 
-    if (!resInv.error && resInv.data && resInv.data.length > 0) {
-      const prodMap = new Map<string, string>();
-      (resProd.data || []).forEach((p: any) => prodMap.set(String(p.template_id), p.nombre_base));
+    if (!resInv.error && Array.isArray(resInv.data)) {
+      const prodMap = new Map<string, any>();
+      (resProd.data || []).forEach((p: any) => prodMap.set(String(p.template_id), p));
 
       const varMap = new Map<string, any>();
       (resVar.data || []).forEach((v: any) => {
-        if (v.sku) varMap.set(v.sku, v);
+        if (v.sku) varMap.set(normalizeSku(v.sku), v);
       });
 
-      const fallbackItems: StockItem[] = resInv.data.map((ic: any) => {
-        const v = varMap.get(ic.sku);
-        const templateId = v?.template_id ? String(v.template_id) : null;
-        const nombreBase = templateId ? prodMap.get(templateId) : null;
+      const fallbackItems: StockItem[] = resInv.data
+        .filter((ic: any) => ic.sku && String(ic.sku).trim() !== '')
+        .map((ic: any) => {
+          const skuClean = normalizeSku(ic.sku);
+          const v = varMap.get(skuClean);
+          const templateId = v?.template_id ? String(v.template_id) : null;
+          const prod = templateId ? prodMap.get(templateId) : null;
 
-        return {
-          sku: ic.sku,
-          nombre: nombreBase || ic.sku,
-          template_id: templateId,
-          stock_fisico: Number(ic.qty) || 0,
-          stock_reservado: 0,
-          stock_disponible: Number(ic.qty) || 0,
-          costo_unitario: 0.00,
-          precio_venta: Number(v?.precio) || 0.00,
-          stock_minimo_alerta: 5,
-          ubicacion: 'Bodega Central',
-          activo: true,
-          image_url: null,
-          updated_at: new Date().toISOString()
-        };
-      });
+          return {
+            sku: skuClean,
+            nombre: prod?.nombre_base || skuClean,
+            template_id: templateId,
+            stock_fisico: Math.max(Number(ic.qty) || 0, 0),
+            stock_reservado: 0,
+            stock_disponible: Math.max(Number(ic.qty) || 0, 0),
+            costo_unitario: 0.00,
+            precio_venta: Number(v?.precio) || 0.00,
+            stock_minimo_alerta: 5,
+            ubicacion: 'Bodega Central',
+            activo: prod?.active !== false,
+            image_url: prod?.image_url || ic.image_url || null,
+            updated_at: new Date().toISOString()
+          };
+        });
 
       localStock = fallbackItems;
-      return { items: fallbackItems, isRealDb: false };
+      return {
+        items: fallbackItems,
+        isRealDb: false,
+        error: error?.message || 'Tabla public.inventory_stock no encontrada. Ejecuta el SQL de Sprint 10.'
+      };
     }
-  } catch {
-    // fallback
-  }
 
-  return { items: localStock, isRealDb: false };
+    return {
+      items: localStock,
+      isRealDb: false,
+      error: error?.message || 'No se pudo conectar con la tabla de inventario en Supabase.'
+    };
+  } catch (err: any) {
+    return {
+      items: localStock,
+      isRealDb: false,
+      error: err?.message || 'Error consultando inventario en Supabase.'
+    };
+  }
 }
 
 /**
  * Obtener movimientos del Kárdex
  */
-export async function fetchKardexMovements(sku?: string, limit = 100): Promise<{ movements: KardexMovement[]; isRealDb: boolean }> {
+export async function fetchKardexMovements(
+  sku?: string,
+  limit = 150
+): Promise<{ movements: KardexMovement[]; isRealDb: boolean; error?: string }> {
   try {
     let query = supabase
       .from('inventory_kardex')
@@ -88,88 +128,214 @@ export async function fetchKardexMovements(sku?: string, limit = 100): Promise<{
       .limit(limit);
 
     if (sku) {
-      query = query.eq('sku', sku);
+      query = query.eq('sku', normalizeSku(sku));
     }
 
     const { data, error } = await query;
-    if (!error && data) {
-      return { movements: data as KardexMovement[], isRealDb: true };
+    if (!error && Array.isArray(data)) {
+      localKardex = data as KardexMovement[];
+      return { movements: localKardex, isRealDb: true };
     }
-  } catch {
-    // fallback
-  }
 
-  let filtered = [...localKardex];
-  if (sku) {
-    filtered = filtered.filter(k => k.sku === sku);
+    return {
+      movements: localKardex,
+      isRealDb: false,
+      error: error?.message
+    };
+  } catch (err: any) {
+    let filtered = [...localKardex];
+    if (sku) {
+      const target = normalizeSku(sku);
+      filtered = filtered.filter(k => normalizeSku(k.sku) === target);
+    }
+    return { movements: filtered.slice(0, limit), isRealDb: false, error: err?.message };
   }
-  return { movements: filtered.slice(0, limit), isRealDb: false };
 }
 
 /**
- * Registrar Entrada de Mercadería (Compra o Lote nuevo)
- * - Actualiza stock atómicamente
- * - Genera movimiento en el Kárdex
- * - Opcionalmente asienta egreso en Finanzas
- * - Emite evento inmutable a os.events
+ * Ejecuta un movimiento atómico en Supabase:
+ * 1. Intenta vía RPC public.record_movement
+ * 2. Si el RPC aún no existe, actualiza directamente inventory_stock + inventory_kardex
  */
-export async function recordStockEntry(entry: EntradaMercaderiaFormData): Promise<{ success: boolean; error?: string }> {
-  const cantidad = Math.abs(entry.cantidad);
-  const costo = Math.abs(entry.costo_unitario);
-  const totalCompra = cantidad * costo;
-  const motivo = `Compra a proveedor ${entry.proveedor || 'Mercadería'}. ${entry.notas || ''}`.trim();
+async function executeMovementInDb(params: {
+  sku: string;
+  tipo_movimiento: KardexMovementType;
+  cantidad: number;
+  costo_unitario?: number;
+  motivo: string;
+  source_table?: string;
+  source_id?: string;
+  usuario?: string;
+}): Promise<{ success: boolean; nuevoFisico?: number; error?: string; isRealDb: boolean }> {
+  const skuClean = normalizeSku(params.sku);
+  const absQty = Math.abs(Math.round(params.cantidad));
+  const costo = Math.max(Number(params.costo_unitario) || 0, 0);
 
-  try {
-    // 1. Intentar llamar función RPC nativa
-    const rpcRes = await (supabase as any).rpc('record_movement', {
-      p_sku: entry.sku,
-      p_tipo_movimiento: 'compra_entrada',
-      p_cantidad: cantidad,
-      p_costo_unitario: costo,
-      p_motivo: motivo,
-      p_source_table: 'manual_compras',
-      p_source_id: `compra-${Date.now()}`,
-      p_usuario: 'Panel Admin'
-    });
-
-    if (rpcRes.error) {
-      // Intentar actualización directa
-      const currentItem = localStock.find(i => i.sku === entry.sku);
-      const nuevoFisico = (currentItem?.stock_fisico || 0) + cantidad;
-
-      await supabase
-        .from('inventory_stock')
-        .upsert({
-          sku: entry.sku,
-          stock_fisico: nuevoFisico,
-          costo_unitario: costo > 0 ? costo : currentItem?.costo_unitario || 0,
-          updated_at: new Date().toISOString()
-        });
-
-      await supabase.from('inventory_kardex').insert({
-        sku: entry.sku,
-        tipo_movimiento: 'compra_entrada',
-        cantidad,
-        costo_unitario: costo,
-        saldo_fisico: nuevoFisico,
-        motivo,
-        source_table: 'manual_compras',
-        usuario: 'Panel Admin'
-      });
-    }
-  } catch {
-    // local fallback
+  if (!skuClean) {
+    return { success: false, error: 'El SKU es obligatorio.', isRealDb: false };
   }
 
-  // 2. Si se solicitó asentar en Finanzas, registrar egreso automático en Money Engine
-  if (entry.asentar_en_finanzas && totalCompra > 0) {
+  try {
+    // 1. Intentar RPC en public.record_movement
+    const rpcRes = await (supabase as any).rpc('record_movement', {
+      p_sku: skuClean,
+      p_tipo_movimiento: params.tipo_movimiento,
+      p_cantidad: absQty,
+      p_costo_unitario: costo,
+      p_motivo: params.motivo,
+      p_source_table: params.source_table || 'manual',
+      p_source_id: params.source_id || `mov-${Date.now()}`,
+      p_usuario: params.usuario || 'Panel Admin'
+    });
+
+    if (!rpcRes.error && rpcRes.data) {
+      const nuevoFisico = Number(rpcRes.data.saldo_fisico ?? 0);
+      return { success: true, nuevoFisico, isRealDb: true };
+    }
+
+    // 2. Fallback directo sobre inventory_stock + inventory_kardex (si RPC aún no existe)
+    const { data: existingRow, error: readErr } = await supabase
+      .from('inventory_stock')
+      .select('sku, nombre, stock_fisico, stock_reservado, costo_unitario')
+      .eq('sku', skuClean)
+      .maybeSingle();
+
+    if (readErr) {
+      return { success: false, error: readErr.message, isRealDb: false };
+    }
+
+    const stockActual = Number(existingRow?.stock_fisico ?? 0);
+    const reservadoActual = Number(existingRow?.stock_reservado ?? 0);
+    let nuevoFisico = stockActual;
+    let nuevoReservado = reservadoActual;
+    let deltaKardex = absQty;
+
+    if (
+      params.tipo_movimiento === 'inventario_inicial' ||
+      params.tipo_movimiento === 'compra_entrada' ||
+      params.tipo_movimiento === 'ajuste_positivo'
+    ) {
+      nuevoFisico = stockActual + absQty;
+    } else if (params.tipo_movimiento === 'reserva_pedido') {
+      nuevoReservado = reservadoActual + absQty;
+    } else if (params.tipo_movimiento === 'venta_salida') {
+      nuevoFisico = Math.max(stockActual - absQty, 0);
+      nuevoReservado = Math.max(reservadoActual - absQty, 0);
+      deltaKardex = -absQty;
+    } else if (
+      params.tipo_movimiento === 'ajuste_negativo' ||
+      params.tipo_movimiento === 'merma_dano'
+    ) {
+      nuevoFisico = Math.max(stockActual - absQty, 0);
+      deltaKardex = -absQty;
+    } else if (params.tipo_movimiento === 'devolucion_entrada') {
+      nuevoFisico = stockActual + absQty;
+      nuevoReservado = Math.max(reservadoActual - absQty, 0);
+    }
+
+    const upsertPayload: Record<string, any> = {
+      sku: skuClean,
+      nombre: existingRow?.nombre || skuClean,
+      stock_fisico: nuevoFisico,
+      stock_reservado: nuevoReservado,
+      updated_at: new Date().toISOString()
+    };
+
+    if (costo > 0) {
+      upsertPayload.costo_unitario = costo;
+    }
+
+    const { error: upsertErr } = await supabase
+      .from('inventory_stock')
+      .upsert(upsertPayload, { onConflict: 'sku' });
+
+    if (upsertErr) {
+      return { success: false, error: upsertErr.message, isRealDb: false };
+    }
+
+    // Si tipo_movimiento fue 'inventario_inicial' y la tabla kardex aún no tiene el constraint nuevo del Sprint 10,
+    // hacemos fallback seguro a 'ajuste_positivo' para que el registro de Kárdex nunca se pierda.
+    const { error: kardexErr } = await supabase.from('inventory_kardex').insert({
+      sku: skuClean,
+      tipo_movimiento: params.tipo_movimiento,
+      cantidad: deltaKardex,
+      costo_unitario: costo,
+      saldo_fisico: nuevoFisico,
+      motivo: params.motivo,
+      source_table: params.source_table || 'manual',
+      source_id: params.source_id || null,
+      usuario: params.usuario || 'Panel Admin'
+    });
+
+    if (kardexErr && params.tipo_movimiento === 'inventario_inicial') {
+      await supabase.from('inventory_kardex').insert({
+        sku: skuClean,
+        tipo_movimiento: 'ajuste_positivo',
+        cantidad: deltaKardex,
+        costo_unitario: costo,
+        saldo_fisico: nuevoFisico,
+        motivo: `[Inventario Inicial] ${params.motivo}`,
+        source_table: params.source_table || 'manual',
+        source_id: params.source_id || null,
+        usuario: params.usuario || 'Panel Admin'
+      });
+    }
+
+    return { success: true, nuevoFisico, isRealDb: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Error ejecutando movimiento', isRealDb: false };
+  }
+}
+
+/**
+ * Registrar Entrada de Unidades:
+ * - Inventario Inicial / Reposición sin compra (no toca Finanzas)
+ * - Compra a proveedor (opcionalmente asienta egreso en Finanzas)
+ */
+export async function recordStockEntry(
+  entry: EntradaMercaderiaFormData
+): Promise<{ success: boolean; error?: string; isRealDb?: boolean }> {
+  const skuClean = normalizeSku(entry.sku);
+  const cantidad = Math.abs(Math.round(entry.cantidad));
+  const costo = Math.max(Number(entry.costo_unitario) || 0, 0);
+  const tipoEntrada: KardexMovementType = entry.tipo_entrada || 'inventario_inicial';
+
+  if (!skuClean || cantidad <= 0) {
+    return { success: false, error: 'SKU y cantidad mayor a 0 son obligatorios.' };
+  }
+
+  const totalCompra = cantidad * costo;
+  const motivo =
+    tipoEntrada === 'compra_entrada'
+      ? `Compra a proveedor ${entry.proveedor || 'Mercadería'}. ${entry.notas || ''}`.trim()
+      : tipoEntrada === 'inventario_inicial'
+      ? `Carga de inventario inicial / stock en bodega. ${entry.notas || ''}`.trim()
+      : `Ingreso directo de unidades (+${cantidad}). ${entry.notas || ''}`.trim();
+
+  const dbRes = await executeMovementInDb({
+    sku: skuClean,
+    tipo_movimiento: tipoEntrada,
+    cantidad,
+    costo_unitario: costo,
+    motivo,
+    source_table: tipoEntrada === 'compra_entrada' ? 'manual_compras' : 'inventario_inicial',
+    source_id: `${tipoEntrada}-${Date.now()}`,
+    usuario: 'Panel Admin'
+  });
+
+  if (!dbRes.success) {
+    return { success: false, error: dbRes.error || 'Error guardando entrada en Supabase', isRealDb: false };
+  }
+
+  // Asentar en Finanzas SOLO si es compra y el usuario marcó asentar_en_finanzas
+  if (tipoEntrada === 'compra_entrada' && entry.asentar_en_finanzas && totalCompra > 0) {
     try {
       await addManualTransaction({
         account_id: entry.cuenta_finanzas_id || 'banco_principal',
         tipo: 'expense',
         categoria: 'pago_proveedor',
         monto: totalCompra,
-        descripcion: `Compra ${cantidad}x ${entry.sku} (${entry.proveedor || 'Mercadería'})`,
+        descripcion: `Compra ${cantidad}x ${skuClean} (${entry.proveedor || 'Mercadería'})`,
         fecha: new Date().toISOString().slice(0, 10)
       });
     } catch (err) {
@@ -177,86 +343,81 @@ export async function recordStockEntry(entry: EntradaMercaderiaFormData): Promis
     }
   }
 
-  // 3. Emitir evento al OS Event Store
+  // Emitir evento al OS Event Store
   try {
     await emitOsEvent({
-      type: 'supplier.bid.received',
+      type: tipoEntrada === 'compra_entrada' ? 'supplier.bid.received' : 'inventory.adjustment',
       source_table: 'inventory_stock',
-      source_id: entry.sku,
+      source_id: skuClean,
       payload: {
-        sku: entry.sku,
+        sku: skuClean,
         cantidad,
         costo_unitario: costo,
-        total_compra: totalCompra,
+        total_compra: tipoEntrada === 'compra_entrada' ? totalCompra : 0,
         proveedor: entry.proveedor || null,
-        tipo: 'compra_entrada'
+        tipo: tipoEntrada,
+        saldo_nuevo: dbRes.nuevoFisico
       }
     });
   } catch {
-    // ignorar
+    // no bloquear flujo principal
   }
 
-  // Actualizar local
-  const currentIdx = localStock.findIndex(i => i.sku === entry.sku);
-  if (currentIdx >= 0) {
-    const item = localStock[currentIdx];
-    const nuevoFisico = item.stock_fisico + cantidad;
-    localStock[currentIdx] = {
-      ...item,
-      stock_fisico: nuevoFisico,
-      stock_disponible: nuevoFisico - item.stock_reservado,
-      costo_unitario: costo > 0 ? costo : item.costo_unitario
-    };
-  }
-
-  localKardex.unshift({
-    id: Date.now(),
-    sku: entry.sku,
-    tipo_movimiento: 'compra_entrada',
-    cantidad,
-    costo_unitario: costo,
-    saldo_fisico: (localStock.find(i => i.sku === entry.sku)?.stock_fisico || cantidad),
-    motivo,
-    source_table: 'manual_compras',
-    created_at: new Date().toISOString()
-  });
-
-  return { success: true };
+  return { success: true, isRealDb: dbRes.isRealDb };
 }
 
 /**
- * Ajustar Stock Físico Manual (Conteo de inventario, merma o daño)
+ * Ajustar Stock Físico Manual (fijar conteo exacto o sumar/restar delta)
  */
 export async function adjustStock(params: {
   sku: string;
   nuevo_stock: number;
   motivo: string;
   tipo?: 'ajuste_positivo' | 'ajuste_negativo' | 'merma_dano';
-}): Promise<{ success: boolean }> {
-  const currentItem = localStock.find(i => i.sku === params.sku);
-  const stockAnterior = currentItem?.stock_fisico || 0;
-  const diferencia = params.nuevo_stock - stockAnterior;
-  const tipoMovimiento = params.tipo || (diferencia >= 0 ? 'ajuste_positivo' : 'ajuste_negativo');
+}): Promise<{ success: boolean; error?: string; isRealDb?: boolean }> {
+  const skuClean = normalizeSku(params.sku);
+  const nuevoStock = Math.max(Math.round(params.nuevo_stock), 0);
+
+  // Obtener el stock físico REAL actual desde Supabase (no solo desde memoria local)
+  let stockAnterior = localStock.find(i => normalizeSku(i.sku) === skuClean)?.stock_fisico ?? 0;
+  let costoActual = localStock.find(i => normalizeSku(i.sku) === skuClean)?.costo_unitario ?? 0;
 
   try {
-    await (supabase as any).rpc('record_movement', {
-      p_sku: params.sku,
-      p_tipo_movimiento: tipoMovimiento,
-      p_cantidad: Math.abs(diferencia),
-      p_costo_unitario: currentItem?.costo_unitario || 0,
-      p_motivo: `Ajuste manual: ${params.motivo} (Antes: ${stockAnterior}, Ahora: ${params.nuevo_stock})`,
-      p_source_table: 'manual_ajustes',
-      p_source_id: `ajuste-${Date.now()}`,
-      p_usuario: 'Panel Admin'
-    });
+    const { data: realRow } = await supabase
+      .from('inventory_stock')
+      .select('stock_fisico, costo_unitario')
+      .eq('sku', skuClean)
+      .maybeSingle();
+
+    if (realRow) {
+      stockAnterior = Number(realRow.stock_fisico) || 0;
+      costoActual = Number(realRow.costo_unitario) || 0;
+    }
   } catch {
-    // fallback
+    // usar memoria local
   }
 
-  // Actualizar local
-  if (currentItem) {
-    currentItem.stock_fisico = params.nuevo_stock;
-    currentItem.stock_disponible = Math.max(params.nuevo_stock - currentItem.stock_reservado, 0);
+  const diferencia = nuevoStock - stockAnterior;
+  if (diferencia === 0) {
+    return { success: true, isRealDb: true };
+  }
+
+  const tipoMovimiento: KardexMovementType =
+    params.tipo || (diferencia >= 0 ? 'ajuste_positivo' : 'ajuste_negativo');
+
+  const dbRes = await executeMovementInDb({
+    sku: skuClean,
+    tipo_movimiento: tipoMovimiento,
+    cantidad: Math.abs(diferencia),
+    costo_unitario: costoActual,
+    motivo: `${params.motivo} (Antes: ${stockAnterior}, Ahora: ${nuevoStock})`,
+    source_table: 'manual_ajustes',
+    source_id: `ajuste-${Date.now()}`,
+    usuario: 'Panel Admin'
+  });
+
+  if (!dbRes.success) {
+    return { success: false, error: dbRes.error || 'No se pudo actualizar el stock en Supabase', isRealDb: false };
   }
 
   // Emitir evento al OS Event Store
@@ -264,14 +425,62 @@ export async function adjustStock(params: {
     await emitOsEvent({
       type: 'inventory.adjustment',
       source_table: 'inventory_stock',
-      source_id: params.sku,
+      source_id: skuClean,
       payload: {
-        sku: params.sku,
+        sku: skuClean,
         stock_anterior: stockAnterior,
-        nuevo_stock: params.nuevo_stock,
+        nuevo_stock: nuevoStock,
         diferencia,
         tipo_movimiento: tipoMovimiento,
         motivo: params.motivo
+      }
+    });
+  } catch {
+    // ignorar
+  }
+
+  return { success: true, isRealDb: dbRes.isRealDb };
+}
+
+/**
+ * Sumar o restar rápidamente una cantidad al stock actual (+1, +5, +10, -1, etc.)
+ */
+export async function quickAddStockDelta(
+  sku: string,
+  delta: number,
+  motivo = 'Ajuste rápido en bodega'
+): Promise<{ success: boolean; error?: string }> {
+  const skuClean = normalizeSku(sku);
+  if (delta === 0) return { success: true };
+
+  const tipoMovimiento: KardexMovementType =
+    delta > 0 ? 'ajuste_positivo' : 'ajuste_negativo';
+
+  const res = await executeMovementInDb({
+    sku: skuClean,
+    tipo_movimiento: tipoMovimiento,
+    cantidad: Math.abs(delta),
+    motivo: `${motivo} (${delta > 0 ? `+${delta}` : delta} uds)`,
+    source_table: 'ajuste_rapido',
+    source_id: `quick-${Date.now()}`,
+    usuario: 'Panel Admin'
+  });
+
+  if (!res.success) {
+    return { success: false, error: res.error };
+  }
+
+  try {
+    await emitOsEvent({
+      type: 'inventory.adjustment',
+      source_table: 'inventory_stock',
+      source_id: skuClean,
+      payload: {
+        sku: skuClean,
+        diferencia: delta,
+        nuevo_stock: res.nuevoFisico,
+        tipo_movimiento: tipoMovimiento,
+        motivo
       }
     });
   } catch {}
@@ -327,15 +536,15 @@ export function compressImageFile(file: File, maxWidth = 800, maxHeight = 800, q
 /**
  * Obtener configuración comercial para el Bot Todd
  */
-export function getToddProductConfig(templateId: string | number): {
+export function getToddProductConfig(keyId: string | number): {
   todd_pitch: string;
   todd_instrucciones: string;
   todd_keywords: string;
   activo_todd: boolean;
 } {
-  const tId = String(templateId);
+  const k = String(keyId).trim();
   try {
-    const raw = localStorage.getItem(`todd_cfg_${tId}`);
+    const raw = localStorage.getItem(`todd_cfg_${k}`);
     if (raw) return JSON.parse(raw);
   } catch {
     // fallback
@@ -349,7 +558,8 @@ export function getToddProductConfig(templateId: string | number): {
 }
 
 export interface UpdateProductPayload {
-  template_id: string | number;
+  sku?: string;
+  template_id?: string | number | null;
   nombre_base?: string;
   image_url?: string | null;
   active?: boolean;
@@ -359,76 +569,135 @@ export interface UpdateProductPayload {
   activo_todd?: boolean;
   precio_venta?: number;
   costo_unitario?: number;
+  stock_minimo_alerta?: number;
+  ubicacion?: string;
+  categoria?: string;
 }
 
 /**
  * Actualizar detalles comerciales, fotos e inteligencia de Todd para un producto
+ * Garantiza guardado en inventory_stock (por SKU) y sincroniza public.productos si aplica.
  */
-export async function updateProductDetails(payload: UpdateProductPayload): Promise<{ success: boolean; error?: string }> {
-  const templateId = String(payload.template_id);
+export async function updateProductDetails(
+  payload: UpdateProductPayload
+): Promise<{ success: boolean; error?: string }> {
+  const skuClean = normalizeSku(payload.sku);
+  const templateIdStr = payload.template_id !== undefined && payload.template_id !== null
+    ? String(payload.template_id).trim()
+    : '';
+  const localKey = skuClean || templateIdStr;
 
-  // 1. Guardar configuración de Todd localmente (siempre seguro y reactivo de inmediato)
-  try {
-    const localToddKey = `todd_cfg_${templateId}`;
-    const currentTodd = getToddProductConfig(templateId);
-    const updatedTodd = {
-      ...currentTodd,
-      todd_pitch: payload.todd_pitch !== undefined ? payload.todd_pitch : currentTodd.todd_pitch,
-      todd_instrucciones: payload.todd_instrucciones !== undefined ? payload.todd_instrucciones : currentTodd.todd_instrucciones,
-      todd_keywords: payload.todd_keywords !== undefined ? payload.todd_keywords : currentTodd.todd_keywords,
-      activo_todd: payload.activo_todd !== undefined ? payload.activo_todd : currentTodd.activo_todd,
-    };
-    localStorage.setItem(localToddKey, JSON.stringify(updatedTodd));
-  } catch (err) {
-    console.warn('Error saving local Todd config:', err);
+  // 1. Guardar configuración de Todd en localStorage
+  if (localKey) {
+    try {
+      const currentTodd = getToddProductConfig(localKey);
+      const updatedTodd = {
+        ...currentTodd,
+        todd_pitch: payload.todd_pitch !== undefined ? payload.todd_pitch : currentTodd.todd_pitch,
+        todd_instrucciones: payload.todd_instrucciones !== undefined ? payload.todd_instrucciones : currentTodd.todd_instrucciones,
+        todd_keywords: payload.todd_keywords !== undefined ? payload.todd_keywords : currentTodd.todd_keywords,
+        activo_todd: payload.activo_todd !== undefined ? payload.activo_todd : currentTodd.activo_todd,
+      };
+      localStorage.setItem(`todd_cfg_${localKey}`, JSON.stringify(updatedTodd));
+    } catch {
+      // ignorar
+    }
   }
 
-  // 2. Intentar actualizar en public.productos
-  try {
+  let dbError: string | undefined;
+
+  // 2. Guardar/Actualizar en inventory_stock (fuente principal)
+  const targetSku = skuClean || (templateIdStr ? `SKU-${templateIdStr}` : '');
+  if (targetSku) {
+    const stockPayload: Record<string, any> = {
+      sku: targetSku,
+      updated_at: new Date().toISOString()
+    };
+
+    if (payload.nombre_base !== undefined) stockPayload.nombre = payload.nombre_base;
+    if (templateIdStr) stockPayload.template_id = templateIdStr;
+    if (payload.image_url !== undefined) stockPayload.image_url = payload.image_url;
+    if (payload.active !== undefined) stockPayload.activo = payload.active;
+    if (payload.precio_venta !== undefined && !Number.isNaN(payload.precio_venta)) {
+      stockPayload.precio_venta = Math.max(payload.precio_venta, 0);
+    }
+    if (payload.costo_unitario !== undefined && !Number.isNaN(payload.costo_unitario)) {
+      stockPayload.costo_unitario = Math.max(payload.costo_unitario, 0);
+    }
+    if (payload.stock_minimo_alerta !== undefined && !Number.isNaN(payload.stock_minimo_alerta)) {
+      stockPayload.stock_minimo_alerta = Math.max(Math.round(payload.stock_minimo_alerta), 0);
+    }
+    if (payload.ubicacion !== undefined) stockPayload.ubicacion = payload.ubicacion;
+    if (payload.categoria !== undefined) stockPayload.categoria = payload.categoria;
+    if (payload.todd_pitch !== undefined) stockPayload.todd_pitch = payload.todd_pitch;
+    if (payload.todd_instrucciones !== undefined) stockPayload.todd_instrucciones = payload.todd_instrucciones;
+    if (payload.todd_keywords !== undefined) stockPayload.todd_keywords = payload.todd_keywords;
+    if (payload.activo_todd !== undefined) stockPayload.activo_todd = payload.activo_todd;
+
+    const { error: stockErr } = await supabase
+      .from('inventory_stock')
+      .upsert(stockPayload, { onConflict: 'sku' });
+
+    if (stockErr) {
+      // Si el error es por columnas nuevas (ej. todd_pitch / categoria no creadas aún en DB), reintentar con columnas base
+      if (stockErr.message?.includes('column')) {
+        const basePayload: Record<string, any> = {
+          sku: targetSku,
+          updated_at: new Date().toISOString()
+        };
+        if (payload.nombre_base !== undefined) basePayload.nombre = payload.nombre_base;
+        if (templateIdStr) basePayload.template_id = templateIdStr;
+        if (payload.image_url !== undefined) basePayload.image_url = payload.image_url;
+        if (payload.active !== undefined) basePayload.activo = payload.active;
+        if (payload.precio_venta !== undefined) basePayload.precio_venta = Math.max(payload.precio_venta, 0);
+        if (payload.costo_unitario !== undefined) basePayload.costo_unitario = Math.max(payload.costo_unitario, 0);
+        if (payload.stock_minimo_alerta !== undefined) basePayload.stock_minimo_alerta = Math.max(Math.round(payload.stock_minimo_alerta), 0);
+        if (payload.ubicacion !== undefined) basePayload.ubicacion = payload.ubicacion;
+
+        const retry = await supabase.from('inventory_stock').upsert(basePayload, { onConflict: 'sku' });
+        if (retry.error) dbError = retry.error.message;
+      } else {
+        dbError = stockErr.message;
+      }
+    }
+  }
+
+  // 3. Si tiene template_id numérico, sincronizar también con public.productos
+  if (templateIdStr && /^\d+$/.test(templateIdStr)) {
+    const numericId = Number(templateIdStr);
     const updateObj: Record<string, any> = {};
     if (payload.nombre_base !== undefined) updateObj.nombre_base = payload.nombre_base;
     if (payload.image_url !== undefined) updateObj.image_url = payload.image_url;
     if (payload.active !== undefined) updateObj.active = payload.active;
 
-    // Intentar incluir campos de Todd si la columna existe
-    const fullObj = {
-      ...updateObj,
-      ...(payload.todd_pitch !== undefined ? { todd_pitch: payload.todd_pitch } : {}),
-      ...(payload.todd_instrucciones !== undefined ? { todd_instrucciones: payload.todd_instrucciones } : {}),
-      ...(payload.todd_keywords !== undefined ? { todd_keywords: payload.todd_keywords } : {}),
-      ...(payload.activo_todd !== undefined ? { activo_todd: payload.activo_todd } : {}),
-    };
+    if (Object.keys(updateObj).length > 0) {
+      const fullObj = {
+        ...updateObj,
+        ...(payload.todd_pitch !== undefined ? { todd_pitch: payload.todd_pitch } : {}),
+        ...(payload.todd_instrucciones !== undefined ? { todd_instrucciones: payload.todd_instrucciones } : {}),
+        ...(payload.todd_keywords !== undefined ? { todd_keywords: payload.todd_keywords } : {}),
+        ...(payload.activo_todd !== undefined ? { activo_todd: payload.activo_todd } : {}),
+      };
 
-    const res = await supabase.from('productos').update(fullObj).eq('template_id', payload.template_id);
-    if (res.error && res.error.message?.includes('column')) {
-      // Si la tabla productos aún no tiene las columnas opcionales de Todd, actualizar las columnas estándar
-      await supabase.from('productos').update(updateObj).eq('template_id', payload.template_id);
+      const res = await supabase.from('productos').update(fullObj).eq('template_id', numericId);
+      if (res.error && res.error.message?.includes('column')) {
+        await supabase.from('productos').update(updateObj).eq('template_id', numericId);
+      }
     }
-  } catch (err) {
-    console.warn('Error updating productos:', err);
   }
 
-  // 3. Sincronizar también con inventory_stock para los SKUs asociados
-  try {
-    const stockUpdate: Record<string, any> = { updated_at: new Date().toISOString() };
-    if (payload.nombre_base) stockUpdate.nombre = payload.nombre_base;
-    if (payload.image_url !== undefined) stockUpdate.image_url = payload.image_url;
-    if (payload.precio_venta !== undefined && payload.precio_venta > 0) stockUpdate.precio_venta = payload.precio_venta;
-    if (payload.costo_unitario !== undefined && payload.costo_unitario > 0) stockUpdate.costo_unitario = payload.costo_unitario;
-
-    await supabase.from('inventory_stock').update(stockUpdate).eq('template_id', templateId);
-  } catch (err) {
-    // fallback
+  if (dbError) {
+    return { success: false, error: dbError };
   }
 
-  // Emitir evento al OS Event Store
   try {
     await emitOsEvent({
       type: 'product.updated',
-      source_table: 'productos',
-      source_id: templateId,
+      source_table: 'inventory_stock',
+      source_id: targetSku || templateIdStr,
       payload: {
-        template_id: templateId,
+        sku: targetSku,
+        template_id: templateIdStr || null,
         nombre: payload.nombre_base,
         precio_venta: payload.precio_venta,
         costo_unitario: payload.costo_unitario,
@@ -441,122 +710,118 @@ export async function updateProductDetails(payload: UpdateProductPayload): Promi
 }
 
 /**
- * Eliminar un producto (soft-delete para desactivar o hard-delete para limpiar registros de prueba)
+ * Eliminar o Desactivar un producto de forma real en Supabase
  */
-export async function deleteProductItem(templateId: string | number, hardDelete = false): Promise<{ success: boolean; error?: string }> {
-  const tId = String(templateId);
+export async function deleteProductItem(params: {
+  sku?: string | null;
+  template_id?: string | number | null;
+  hardDelete: boolean;
+}): Promise<{ success: boolean; error?: string }> {
+  const skuClean = normalizeSku(params.sku);
+  const templateIdStr =
+    params.template_id !== undefined && params.template_id !== null
+      ? String(params.template_id).trim()
+      : '';
 
-  if (!hardDelete) {
-    // Soft-delete: Marcar como inactivo
-    try {
-      await supabase.from('productos').update({ active: false }).eq('template_id', templateId);
-      await supabase.from('inventory_stock').update({ activo: false }).eq('template_id', tId);
-      
-      const todd = getToddProductConfig(tId);
-      localStorage.setItem(`todd_cfg_${tId}`, JSON.stringify({ ...todd, activo_todd: false }));
-    } catch (err) {
-      console.warn('Error soft deleting product:', err);
+  if (!params.hardDelete) {
+    // Soft-delete: Desactivar en inventory_stock y en productos
+    const errors: string[] = [];
+
+    if (skuClean) {
+      const { error } = await supabase
+        .from('inventory_stock')
+        .update({ activo: false, activo_todd: false, updated_at: new Date().toISOString() })
+        .eq('sku', skuClean);
+      if (error) {
+        const retry = await supabase
+          .from('inventory_stock')
+          .update({ activo: false, updated_at: new Date().toISOString() })
+          .eq('sku', skuClean);
+        if (retry.error) errors.push(retry.error.message);
+      }
     }
-    return { success: true };
+
+    if (templateIdStr && /^\d+$/.test(templateIdStr)) {
+      await supabase.from('productos').update({ active: false }).eq('template_id', Number(templateIdStr));
+    }
+
+    if (skuClean || templateIdStr) {
+      const key = skuClean || templateIdStr;
+      const todd = getToddProductConfig(key);
+      localStorage.setItem(`todd_cfg_${key}`, JSON.stringify({ ...todd, activo_todd: false }));
+    }
+
+    return errors.length > 0 ? { success: false, error: errors.join(' | ') } : { success: true };
   }
 
-  // Hard-delete: Eliminar de raíz (productos de prueba)
-  try {
-    // 1. Eliminar variantes
-    await supabase.from('productos_variantes').delete().eq('template_id', templateId);
-    // 2. Eliminar de productos
-    await supabase.from('productos').delete().eq('template_id', templateId);
-    // 3. Eliminar de inventory_stock si existe
-    await supabase.from('inventory_stock').delete().eq('template_id', tId);
-    // 4. Limpiar config local de Todd
-    localStorage.removeItem(`todd_cfg_${tId}`);
-  } catch (err) {
-    console.warn('Error deleting product from Supabase:', err);
-  }
-
-  return { success: true };
-}
-
-/**
- * Crear o editar un producto y su SKU en inventario nativo
- */
-export async function saveProductItem(product: ProductFormData): Promise<{ success: boolean }> {
-  const sku = product.sku.trim().toUpperCase();
+  // Hard-delete: Eliminar completamente
+  let hardError: string | undefined;
 
   try {
-    // 1. Guardar en inventory_stock
-    await supabase.from('inventory_stock').upsert({
-      sku,
-      nombre: product.nombre.trim(),
-      precio_venta: product.precio_venta,
-      costo_unitario: product.costo_unitario,
-      stock_fisico: product.stock_inicial,
-      stock_minimo_alerta: product.stock_minimo || 5,
-      image_url: product.image_url || null,
-      updated_at: new Date().toISOString()
+    // 1. Intentar RPC atómico public.delete_inventory_product (elimina FK y todas las tablas)
+    const rpcRes = await (supabase as any).rpc('delete_inventory_product', {
+      p_sku: skuClean || null,
+      p_template_id: templateIdStr || null
     });
 
-    // 2. Si no existía en productos, insertarlo en la tabla productos para compatibilidad de vistas
-    try {
-      await supabase.from('productos').upsert({
-        template_id: sku,
-        nombre_base: product.nombre.trim(),
-        image_url: product.image_url || null,
-        active: true
-      });
-    } catch {
-      // continuar
-    }
+    if (rpcRes.error) {
+      // 2. Fallback paso a paso en el orden correcto de FK
+      if (skuClean) {
+        const delKardex = await supabase.from('inventory_kardex').delete().eq('sku', skuClean);
+        if (delKardex.error && !delKardex.error.message.includes('does not exist')) {
+          console.warn('Error eliminando kardex:', delKardex.error.message);
+        }
 
-    // 3. Guardar Todd config
-    if (product.todd_pitch || product.todd_instrucciones || product.todd_keywords) {
-      localStorage.setItem(`todd_cfg_${sku}`, JSON.stringify({
-        todd_pitch: product.todd_pitch || '',
-        todd_instrucciones: product.todd_instrucciones || '',
-        todd_keywords: product.todd_keywords || '',
-        activo_todd: true
-      }));
+        const delStock = await supabase.from('inventory_stock').delete().eq('sku', skuClean);
+        if (delStock.error && !delStock.error.message.includes('does not exist')) {
+          hardError = delStock.error.message;
+        }
+
+        await supabase.from('inventory_cache').delete().eq('sku', skuClean);
+        await supabase.from('productos_variantes').delete().eq('sku', skuClean);
+      }
+
+      if (templateIdStr) {
+        await supabase.from('inventory_stock').delete().eq('template_id', templateIdStr);
+
+        if (/^\d+$/.test(templateIdStr)) {
+          const numId = Number(templateIdStr);
+          await supabase.from('productos_variantes').delete().eq('template_id', numId);
+          const delProd = await supabase.from('productos').delete().eq('template_id', numId);
+          if (delProd.error && !delProd.error.message.includes('does not exist')) {
+            hardError = hardError || delProd.error.message;
+          }
+        }
+      }
     }
-  } catch {
-    // fallback
+  } catch (err: any) {
+    hardError = err?.message || 'Error al eliminar producto de Supabase.';
   }
 
-  // Actualizar memoria local
-  const existingIdx = localStock.findIndex(i => i.sku === sku);
-  const item: StockItem = {
-    sku,
-    nombre: product.nombre.trim(),
-    template_id: sku,
-    stock_fisico: product.stock_inicial,
-    stock_reservado: 0,
-    stock_disponible: product.stock_inicial,
-    costo_unitario: product.costo_unitario,
-    precio_venta: product.precio_venta,
-    stock_minimo_alerta: product.stock_minimo || 5,
-    ubicacion: 'Bodega Central',
-    activo: true,
-    image_url: product.image_url || null,
-    updated_at: new Date().toISOString()
-  };
-
-  if (existingIdx >= 0) {
-    localStock[existingIdx] = { ...localStock[existingIdx], ...item };
-  } else {
-    localStock.push(item);
+  if (hardError) {
+    return { success: false, error: hardError };
   }
 
-  // Emitir evento al OS Event Store
+  // Limpiar caches locales
+  if (skuClean) {
+    localStock = localStock.filter(i => normalizeSku(i.sku) !== skuClean);
+    localKardex = localKardex.filter(k => normalizeSku(k.sku) !== skuClean);
+    localStorage.removeItem(`todd_cfg_${skuClean}`);
+  }
+  if (templateIdStr) {
+    localStock = localStock.filter(i => String(i.template_id) !== templateIdStr);
+    localStorage.removeItem(`todd_cfg_${templateIdStr}`);
+  }
+
   try {
     await emitOsEvent({
-      type: existingIdx >= 0 ? 'product.updated' : 'product.created',
+      type: 'inventory.adjustment',
       source_table: 'inventory_stock',
-      source_id: sku,
+      source_id: skuClean || templateIdStr,
       payload: {
-        sku,
-        nombre: product.nombre.trim(),
-        precio_venta: product.precio_venta,
-        costo_unitario: product.costo_unitario,
-        stock_inicial: product.stock_inicial
+        sku: skuClean || null,
+        template_id: templateIdStr || null,
+        accion: 'producto_eliminado'
       }
     });
   } catch {}
@@ -564,3 +829,184 @@ export async function saveProductItem(product: ProductFormData): Promise<{ succe
   return { success: true };
 }
 
+/**
+ * Crear o registrar un producto nuevo en el Catálogo e Inventario Nativo
+ */
+export async function saveProductItem(
+  product: ProductFormData
+): Promise<{ success: boolean; error?: string; warning?: string; item?: StockItem }> {
+  const sku = normalizeSku(product.sku);
+  const nombre = product.nombre.trim();
+  const stockInicial = Math.max(Math.round(Number(product.stock_inicial) || 0), 0);
+  const precioVenta = Math.max(Number(product.precio_venta) || 0, 0);
+  const costoUnitario = Math.max(Number(product.costo_unitario) || 0, 0);
+  const stockMinimo = Math.max(Math.round(Number(product.stock_minimo) || 5), 0);
+
+  if (!sku || !nombre) {
+    return { success: false, error: 'El nombre y el SKU del producto son obligatorios.' };
+  }
+
+  // 1. Verificar que no exista ya ese SKU en inventory_stock
+  const { data: existingSku } = await supabase
+    .from('inventory_stock')
+    .select('sku')
+    .eq('sku', sku)
+    .maybeSingle();
+
+  if (existingSku) {
+    return {
+      success: false,
+      error: `El SKU "${sku}" ya existe en tu inventario. Edítalo o usa "+ Ingresar Stock" para sumarle unidades.`
+    };
+  }
+
+  // 2. Generar template_id numérico único seguro para compatibilidad con public.productos (integer/bigint)
+  const numericTemplateId = Math.floor(Date.now() / 1000);
+
+  // 3. Insertar en inventory_stock (con stock_fisico = 0 primero si luego registramos movimiento inicial,
+  //    o con stockInicial directo si falla el kardex)
+  const stockPayload: Record<string, any> = {
+    sku,
+    nombre,
+    template_id: String(numericTemplateId),
+    precio_venta: precioVenta,
+    costo_unitario: costoUnitario,
+    stock_fisico: stockInicial,
+    stock_reservado: 0,
+    stock_minimo_alerta: stockMinimo,
+    ubicacion: product.ubicacion?.trim() || 'Bodega Central',
+    activo: true,
+    image_url: product.image_url?.trim() || null,
+    todd_pitch: product.todd_pitch?.trim() || '',
+    todd_keywords: product.todd_keywords?.trim() || '',
+    activo_todd: true,
+    categoria: product.categoria?.trim() || 'General',
+    updated_at: new Date().toISOString()
+  };
+
+  let { error: insertErr } = await supabase
+    .from('inventory_stock')
+    .insert(stockPayload);
+
+  // Si aún no corren el SQL Sprint 10 (y faltan columnas nuevas), reintentar con columnas Sprint 3 base
+  if (insertErr && insertErr.message?.includes('column')) {
+    const basePayload = {
+      sku,
+      nombre,
+      template_id: String(numericTemplateId),
+      precio_venta: precioVenta,
+      costo_unitario: costoUnitario,
+      stock_fisico: stockInicial,
+      stock_reservado: 0,
+      stock_minimo_alerta: stockMinimo,
+      ubicacion: product.ubicacion?.trim() || 'Bodega Central',
+      activo: true,
+      image_url: product.image_url?.trim() || null,
+      updated_at: new Date().toISOString()
+    };
+    const retry = await supabase.from('inventory_stock').insert(basePayload);
+    insertErr = retry.error;
+  }
+
+  if (insertErr) {
+    return {
+      success: false,
+      error: `Error al guardar en Supabase (inventory_stock): ${insertErr.message}`
+    };
+  }
+
+  // 4. Si tiene stock inicial > 0, registrar asiento en el Kárdex SIN duplicar el stock físico
+  if (stockInicial > 0) {
+    const { error: kardexErr } = await supabase.from('inventory_kardex').insert({
+      sku,
+      tipo_movimiento: 'inventario_inicial',
+      cantidad: stockInicial,
+      costo_unitario: costoUnitario,
+      saldo_fisico: stockInicial,
+      motivo: 'Stock inicial al crear producto',
+      source_table: 'catalogo_creacion',
+      usuario: 'Panel Admin'
+    });
+
+    if (kardexErr) {
+      await supabase.from('inventory_kardex').insert({
+        sku,
+        tipo_movimiento: 'ajuste_positivo',
+        cantidad: stockInicial,
+        costo_unitario: costoUnitario,
+        saldo_fisico: stockInicial,
+        motivo: '[Inventario Inicial] Stock inicial al crear producto',
+        source_table: 'catalogo_creacion',
+        usuario: 'Panel Admin'
+      });
+    }
+  }
+
+  // 5. Sincronizar con tabla legacy public.productos usando template_id numérico seguro
+  let warning: string | undefined;
+  try {
+    const prodInsert = await supabase.from('productos').insert({
+      template_id: numericTemplateId,
+      nombre_base: nombre,
+      image_url: product.image_url?.trim() || null,
+      active: true,
+      is_published: true
+    });
+    if (prodInsert.error) {
+      // No fallar la creación si la tabla legacy tiene restricciones distintas
+      console.info('Sincronización opcional con public.productos omitida:', prodInsert.error.message);
+    }
+  } catch {
+    // opcional
+  }
+
+  // 6. Guardar Todd config en localStorage
+  localStorage.setItem(
+    `todd_cfg_${sku}`,
+    JSON.stringify({
+      todd_pitch: product.todd_pitch || '',
+      todd_instrucciones: product.todd_instrucciones || '',
+      todd_keywords: product.todd_keywords || '',
+      activo_todd: true
+    })
+  );
+
+  const createdItem: StockItem = {
+    sku,
+    nombre,
+    template_id: String(numericTemplateId),
+    stock_fisico: stockInicial,
+    stock_reservado: 0,
+    stock_disponible: stockInicial,
+    costo_unitario: costoUnitario,
+    precio_venta: precioVenta,
+    stock_minimo_alerta: stockMinimo,
+    ubicacion: product.ubicacion?.trim() || 'Bodega Central',
+    activo: true,
+    image_url: product.image_url?.trim() || null,
+    todd_pitch: product.todd_pitch || '',
+    todd_keywords: product.todd_keywords || '',
+    activo_todd: true,
+    categoria: product.categoria || 'General',
+    updated_at: new Date().toISOString()
+  };
+
+  localStock.push(createdItem);
+
+  try {
+    await emitOsEvent({
+      type: 'product.created',
+      source_table: 'inventory_stock',
+      source_id: sku,
+      payload: {
+        sku,
+        nombre,
+        precio_venta: precioVenta,
+        costo_unitario: costoUnitario,
+        stock_inicial: stockInicial
+      }
+    });
+  } catch {}
+
+  return { success: true, warning, item: createdItem };
+}

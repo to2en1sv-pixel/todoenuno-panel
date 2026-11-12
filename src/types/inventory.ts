@@ -1,4 +1,5 @@
 export type KardexMovementType = 
+  | 'inventario_inicial'
   | 'compra_entrada'
   | 'venta_salida'
   | 'reserva_pedido'
@@ -20,6 +21,11 @@ export interface StockItem {
   ubicacion: string;
   activo: boolean;
   image_url?: string | null;
+  todd_pitch?: string | null;
+  todd_instrucciones?: string | null;
+  todd_keywords?: string | null;
+  activo_todd?: boolean;
+  categoria?: string | null;
   updated_at?: string;
   created_at?: string;
 }
@@ -52,6 +58,8 @@ export interface ProductFormData {
   costo_unitario: number;
   stock_inicial: number;
   stock_minimo: number;
+  ubicacion?: string;
+  categoria?: string;
   image_url?: string;
   todd_pitch?: string;
   todd_instrucciones?: string;
@@ -62,9 +70,9 @@ export interface EntradaMercaderiaFormData {
   sku: string;
   cantidad: number;
   costo_unitario: number;
+  tipo_entrada?: 'inventario_inicial' | 'compra_entrada' | 'ajuste_positivo';
   proveedor?: string;
   notas?: string;
   asentar_en_finanzas: boolean;
   cuenta_finanzas_id?: string;
 }
-
