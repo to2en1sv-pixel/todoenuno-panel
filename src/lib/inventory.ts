@@ -18,6 +18,59 @@ function normalizeSku(sku?: string | null): string {
 }
 
 /**
+ * Helper seguro para escribir en public.inventory_stock (que es una VIEW en Postgres).
+ * Postgres NO soporta INSERT ... ON CONFLICT (sku) sobre vistas; por eso comprobamos
+ * si el SKU existe y ejecutamos UPDATE o INSERT explícitamente.
+ */
+async function upsertInventoryStockRow(
+  sku: string,
+  fields: Record<string, any>
+): Promise<{ error: any | null }> {
+  const skuClean = normalizeSku(sku);
+  const { data: existing, error: selectErr } = await supabase
+    .from('inventory_stock')
+    .select('sku')
+    .eq('sku', skuClean)
+    .maybeSingle();
+
+  if (selectErr) {
+    return { error: selectErr };
+  }
+
+  const optionalKeys = ['todd_pitch', 'todd_instrucciones', 'todd_keywords', 'activo_todd', 'categoria'];
+  const stripOptional = (obj: Record<string, any>) => {
+    const clean: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (!optionalKeys.includes(k)) clean[k] = v;
+    }
+    return clean;
+  };
+
+  if (existing) {
+    const updatePayload = { ...fields };
+    delete updatePayload.sku;
+    const res = await supabase.from('inventory_stock').update(updatePayload).eq('sku', skuClean);
+    if (res.error && res.error.message?.includes('column')) {
+      return await supabase.from('inventory_stock').update(stripOptional(updatePayload)).eq('sku', skuClean);
+    }
+    return { error: res.error };
+  } else {
+    const insertPayload = {
+      nombre: skuClean,
+      stock_fisico: 0,
+      stock_reservado: 0,
+      ...fields,
+      sku: skuClean
+    };
+    const res = await supabase.from('inventory_stock').insert(insertPayload);
+    if (res.error && res.error.message?.includes('column')) {
+      return await supabase.from('inventory_stock').insert(stripOptional(insertPayload));
+    }
+    return { error: res.error };
+  }
+}
+
+/**
  * Obtener todos los SKUs con sus niveles de stock físico, reservado y disponible
  */
 export async function fetchStockItems(): Promise<{
@@ -233,8 +286,7 @@ async function executeMovementInDb(params: {
       nuevoReservado = Math.max(reservadoActual - absQty, 0);
     }
 
-    const upsertPayload: Record<string, any> = {
-      sku: skuClean,
+    const stockUpdatePayload: Record<string, any> = {
       nombre: existingRow?.nombre || skuClean,
       stock_fisico: nuevoFisico,
       stock_reservado: nuevoReservado,
@@ -242,12 +294,10 @@ async function executeMovementInDb(params: {
     };
 
     if (costo > 0) {
-      upsertPayload.costo_unitario = costo;
+      stockUpdatePayload.costo_unitario = costo;
     }
 
-    const { error: upsertErr } = await supabase
-      .from('inventory_stock')
-      .upsert(upsertPayload, { onConflict: 'sku' });
+    const { error: upsertErr } = await upsertInventoryStockRow(skuClean, stockUpdatePayload);
 
     if (upsertErr) {
       return { success: false, error: upsertErr.message, isRealDb: false };
@@ -634,31 +684,9 @@ export async function updateProductDetails(
     if (payload.todd_keywords !== undefined) stockPayload.todd_keywords = payload.todd_keywords;
     if (payload.activo_todd !== undefined) stockPayload.activo_todd = payload.activo_todd;
 
-    const { error: stockErr } = await supabase
-      .from('inventory_stock')
-      .upsert(stockPayload, { onConflict: 'sku' });
-
+    const { error: stockErr } = await upsertInventoryStockRow(targetSku, stockPayload);
     if (stockErr) {
-      // Si el error es por columnas nuevas (ej. todd_pitch / categoria no creadas aún en DB), reintentar con columnas base
-      if (stockErr.message?.includes('column')) {
-        const basePayload: Record<string, any> = {
-          sku: targetSku,
-          updated_at: new Date().toISOString()
-        };
-        if (payload.nombre_base !== undefined) basePayload.nombre = payload.nombre_base;
-        if (templateIdStr) basePayload.template_id = templateIdStr;
-        if (payload.image_url !== undefined) basePayload.image_url = payload.image_url;
-        if (payload.active !== undefined) basePayload.activo = payload.active;
-        if (payload.precio_venta !== undefined) basePayload.precio_venta = Math.max(payload.precio_venta, 0);
-        if (payload.costo_unitario !== undefined) basePayload.costo_unitario = Math.max(payload.costo_unitario, 0);
-        if (payload.stock_minimo_alerta !== undefined) basePayload.stock_minimo_alerta = Math.max(Math.round(payload.stock_minimo_alerta), 0);
-        if (payload.ubicacion !== undefined) basePayload.ubicacion = payload.ubicacion;
-
-        const retry = await supabase.from('inventory_stock').upsert(basePayload, { onConflict: 'sku' });
-        if (retry.error) dbError = retry.error.message;
-      } else {
-        dbError = stockErr.message;
-      }
+      dbError = stockErr.message;
     }
   }
 
@@ -733,63 +761,17 @@ export async function deleteProductItem(params: {
     const targetSku = skuClean || (templateIdStr ? `PROD-${templateIdStr}` : '');
 
     if (targetSku) {
-      const { data: existingRow } = await supabase
-        .from('inventory_stock')
-        .select('sku')
-        .eq('sku', targetSku)
-        .maybeSingle();
-
-      if (existingRow) {
-        const { error } = await supabase
-          .from('inventory_stock')
-          .update({ activo: false, activo_todd: false, updated_at: new Date().toISOString() })
-          .eq('sku', targetSku);
-        if (error) {
-          const retry = await supabase
-            .from('inventory_stock')
-            .update({ activo: false, updated_at: new Date().toISOString() })
-            .eq('sku', targetSku);
-          if (retry.error) errors.push(retry.error.message);
-        }
-      } else {
-        // Producto legacy que aún no tenía fila en inventory_stock: crearla con activo = false
-        const { error } = await supabase.from('inventory_stock').upsert(
-          {
-            sku: targetSku,
-            nombre: params.nombre?.trim() || targetSku,
-            template_id: templateIdStr || null,
-            precio_venta: Math.max(Number(params.precio_venta) || 0, 0),
-            costo_unitario: Math.max(Number(params.costo_unitario) || 0, 0),
-            image_url: params.image_url || null,
-            stock_fisico: 0,
-            stock_reservado: 0,
-            activo: false,
-            activo_todd: false,
-            updated_at: new Date().toISOString()
-          },
-          { onConflict: 'sku' }
-        );
-        if (error && error.message?.includes('column')) {
-          const retry = await supabase.from('inventory_stock').upsert(
-            {
-              sku: targetSku,
-              nombre: params.nombre?.trim() || targetSku,
-              template_id: templateIdStr || null,
-              precio_venta: Math.max(Number(params.precio_venta) || 0, 0),
-              costo_unitario: Math.max(Number(params.costo_unitario) || 0, 0),
-              image_url: params.image_url || null,
-              stock_fisico: 0,
-              stock_reservado: 0,
-              activo: false,
-              updated_at: new Date().toISOString()
-            },
-            { onConflict: 'sku' }
-          );
-          if (retry.error) errors.push(retry.error.message);
-        } else if (error) {
-          errors.push(error.message);
-        }
-      }
+      const { error } = await upsertInventoryStockRow(targetSku, {
+        nombre: params.nombre?.trim() || targetSku,
+        template_id: templateIdStr || null,
+        precio_venta: Math.max(Number(params.precio_venta) || 0, 0),
+        costo_unitario: Math.max(Number(params.costo_unitario) || 0, 0),
+        image_url: params.image_url || null,
+        activo: false,
+        activo_todd: false,
+        updated_at: new Date().toISOString()
+      });
+      if (error) errors.push(error.message);
 
       localStock = localStock.map(item =>
         normalizeSku(item.sku) === targetSku ? { ...item, activo: false, activo_todd: false } : item
