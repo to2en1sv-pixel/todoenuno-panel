@@ -213,6 +213,9 @@ begin
     end if;
 
     if exists (select from pg_tables where schemaname = 'public' and tablename = 'productos_variantes') then
+      if exists (select from pg_tables where schemaname = 'public' and tablename = 'post_queue') then
+        execute 'update public.post_queue set variante_id = null where variante_id in (select variante_id from public.productos_variantes where upper(sku) = $1)' using v_sku_clean;
+      end if;
       execute 'delete from public.productos_variantes where upper(sku) = $1' using v_sku_clean;
     end if;
   end if;
@@ -222,6 +225,9 @@ begin
 
     if exists (select from pg_tables where schemaname = 'public' and tablename = 'post_queue') then
       execute 'update public.post_queue set template_id = null where template_id::text = $1' using p_template_id;
+      if exists (select from pg_tables where schemaname = 'public' and tablename = 'productos_variantes') then
+        execute 'update public.post_queue set variante_id = null where variante_id in (select variante_id from public.productos_variantes where template_id::text = $1)' using p_template_id;
+      end if;
     end if;
 
     if exists (select from pg_tables where schemaname = 'public' and tablename = 'productos_variantes') then
@@ -287,6 +293,21 @@ begin
       alter table public.productos_variantes
         add constraint productos_variantes_template_id_fkey
         foreign key (template_id) references public.productos(template_id) on delete cascade;
+    end if;
+  end if;
+
+  if exists (select from pg_tables where schemaname = 'public' and tablename = 'post_queue') then
+    if exists (select 1 from pg_constraint where conname = 'post_queue_template_id_fkey') then
+      alter table public.post_queue drop constraint post_queue_template_id_fkey;
+      alter table public.post_queue
+        add constraint post_queue_template_id_fkey
+        foreign key (template_id) references public.productos(template_id) on delete set null;
+    end if;
+    if exists (select 1 from pg_constraint where conname = 'post_queue_variante_id_fkey') then
+      alter table public.post_queue drop constraint post_queue_variante_id_fkey;
+      alter table public.post_queue
+        add constraint post_queue_variante_id_fkey
+        foreign key (variante_id) references public.productos_variantes(variante_id) on delete set null;
     end if;
   end if;
 

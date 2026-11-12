@@ -807,9 +807,17 @@ export async function deleteProductItem(params: {
       if (templateIdStr && /^\d+$/.test(templateIdStr)) {
         const numId = Number(templateIdStr);
 
-        // Desvincular post_queue si apunta al template_id
+        // Desvincular post_queue si apunta al template_id o a sus variantes
         try {
           await supabase.from('post_queue').update({ template_id: null }).eq('template_id', numId);
+          const { data: varsToUnlink } = await supabase
+            .from('productos_variantes')
+            .select('variante_id')
+            .eq('template_id', numId);
+          const varIds = (varsToUnlink || []).map((v: any) => v.variante_id).filter(Boolean);
+          if (varIds.length > 0) {
+            await supabase.from('post_queue').update({ variante_id: null }).in('variante_id', varIds);
+          }
         } catch {
           // ignorar si no existe o no aplica
         }
