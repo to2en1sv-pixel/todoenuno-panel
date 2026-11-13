@@ -93,6 +93,7 @@ export default async function handler(req: any, res: any) {
         ),
         hasEvolutionUrl: Boolean(process.env.EVOLUTION_API_URL),
         hasEvolutionKey: Boolean(process.env.EVOLUTION_API_KEY),
+        hasN8nToddWebhook: Boolean(process.env.N8N_TODD_WEBHOOK_URL),
         instance: process.env.EVOLUTION_INSTANCE || 'eee',
       },
     });
@@ -292,11 +293,61 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    const convStatus = existingConv?.status ? String(existingConv.status) : 'bot';
+    const n8nToddUrl = (process.env.N8N_TODD_WEBHOOK_URL || '').trim();
+    const shouldForwardToTodd = Boolean(n8nToddUrl && !fromMe && convStatus !== 'human');
+    let toddForwarded = false;
+    let toddForwardStatus: number | string | undefined;
+
+    if (shouldForwardToTodd) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4500);
+      try {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        if (process.env.TODD_INTERNAL_SECRET) {
+          headers['x-todd-secret'] = process.env.TODD_INTERNAL_SECRET;
+        }
+        const fwdRes = await fetch(n8nToddUrl, {
+          method: 'POST',
+          headers,
+          signal: controller.signal,
+          body: JSON.stringify({
+            source: 'evolution-panel-bridge',
+            instance: instanceId,
+            conversationId,
+            replyTarget: hasResolvedPhone ? cleanPhone : conversationId,
+            phone: last8 || cleanPhone,
+            rawPhone: cleanPhone,
+            remoteJid,
+            hasResolvedPhone,
+            pushName: pushName || existingConv?.contact_name || '',
+            messageId,
+            text: bodyText,
+            adTag: adTag || null,
+            convStatus,
+            timestamp: nowIso,
+          }),
+        });
+        toddForwarded = fwdRes.ok;
+        toddForwardStatus = fwdRes.status;
+      } catch (fwdErr: any) {
+        toddForwarded = false;
+        toddForwardStatus = fwdErr?.name === 'AbortError' ? 'timeout' : fwdErr?.message || 'error';
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
     return res.status(200).json({
       ok: true,
       conversationId,
       messageId,
       fromMe,
+      convStatus,
+      toddForwarded,
+      toddForwardStatus,
       adTag: adTag || undefined,
       event: eventNormalized,
     });

@@ -139,12 +139,13 @@ export default async function handler(req: any, res: any) {
     mediaBase64,
     mediaType = 'image',
     fileName = 'imagen.jpg',
+    productSku,
   } = req.body || {};
 
   const messageText = String(text || '').trim();
-  const hasMedia = Boolean(mediaUrl || mediaBase64);
+  const hasExplicitMedia = Boolean(mediaUrl || mediaBase64);
 
-  if (!conversationId || (!messageText && !hasMedia)) {
+  if (!conversationId || (!messageText && !hasExplicitMedia && !productSku)) {
     return res.status(400).json({ error: 'conversationId y text o media son obligatorios' });
   }
 
@@ -198,8 +199,27 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'No se encontró un número o JID de WhatsApp válido para este chat' });
     }
 
+    let resolvedMediaUrl = mediaUrl ? String(mediaUrl).trim() : '';
+    let resolvedFileName = String(fileName || 'producto.jpg');
+
+    if (!resolvedMediaUrl && !mediaBase64 && productSku) {
+      const skuClean = String(productSku).trim().toUpperCase();
+      if (skuClean) {
+        const { data: prodRow } = await supabase
+          .from('inventory_stock')
+          .select('image_url, sku')
+          .eq('sku', skuClean)
+          .maybeSingle();
+        if (prodRow?.image_url) {
+          resolvedMediaUrl = String(prodRow.image_url).trim();
+          resolvedFileName = `${skuClean}.jpg`;
+        }
+      }
+    }
+
+    const hasMedia = Boolean(resolvedMediaUrl || mediaBase64);
     const normalizedMedia = hasMedia
-      ? normalizeEvolutionMedia(mediaUrl, mediaBase64, fileName, mediaType)
+      ? normalizeEvolutionMedia(resolvedMediaUrl, mediaBase64, resolvedFileName, mediaType)
       : null;
 
     if (hasMedia && (!normalizedMedia || !normalizedMedia.media)) {
