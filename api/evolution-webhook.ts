@@ -266,11 +266,38 @@ export default async function handler(req: any, res: any) {
       return res.status(500).json({ error: 'Error guardando en bb_messages', details: msgErr.message });
     }
 
+    // Detectar si llegó desde un anuncio de Meta Ads (Click-to-WhatsApp)
+    const unwrapped = unwrapMessageContent(data.message);
+    const adReply =
+      unwrapped?.extendedTextMessage?.contextInfo?.externalAdReply ||
+      data?.contextInfo?.externalAdReply ||
+      null;
+    const adTag = adReply
+      ? String(adReply.title || adReply.sourceId || adReply.ctwaClid || '').trim()
+      : '';
+
+    if (adTag && !fromMe) {
+      const statePhone = last8 || cleanPhone;
+      if (statePhone) {
+        try {
+          await supabase.from('whatsapp_state').upsert(
+            {
+              telefono: statePhone,
+              last_detalle: `AD:${adTag}`,
+              updated_at: nowIso,
+            },
+            { onConflict: 'telefono' }
+          );
+        } catch {}
+      }
+    }
+
     return res.status(200).json({
       ok: true,
       conversationId,
       messageId,
       fromMe,
+      adTag: adTag || undefined,
       event: eventNormalized,
     });
   } catch (err: any) {

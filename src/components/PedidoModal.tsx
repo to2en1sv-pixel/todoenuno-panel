@@ -13,6 +13,15 @@ interface Props {
   onSaved: () => void;
   pedido?: Pedido | null; // Si existe, editamos
   pedidosExistentes?: any[];
+  initialValues?: {
+    nombre_cliente?: string;
+    telefono?: string;
+    direccion?: string;
+    codigo_anuncio?: string;
+    catalogo_sku?: string;
+    metodo_pago?: string;
+    notas?: string;
+  } | null;
 }
 
 function getProximoSabado(): string {
@@ -73,7 +82,7 @@ const inputCls =
 const labelCls =
   "mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60";
 
-export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistentes }: Props) {
+export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistentes, initialValues }: Props) {
   const [form, setForm] = useState({ ...FORM_INICIAL });
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -173,8 +182,24 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
       if (!catSkuResuelto && pedido.sku) {
         setModoManual(true);
       }
+    } else if (initialValues) {
+      const matchedProd = initialValues.catalogo_sku
+        ? catalogo.find(c => c.sku.toUpperCase() === initialValues.catalogo_sku!.toUpperCase())
+        : null;
+      setForm(f => ({
+        ...f,
+        nombre_cliente: f.nombre_cliente || initialValues.nombre_cliente || "",
+        telefono: f.telefono || initialValues.telefono || "",
+        direccion: f.direccion || initialValues.direccion || "",
+        codigo_anuncio: f.codigo_anuncio || initialValues.codigo_anuncio || "",
+        catalogo_sku: f.catalogo_sku || matchedProd?.sku || initialValues.catalogo_sku || "",
+        sku: f.sku || matchedProd?.nombre || "",
+        total: f.total || (matchedProd?.precio_venta ? Number(matchedProd.precio_venta).toFixed(2) : ""),
+        metodo_pago: initialValues.metodo_pago || f.metodo_pago,
+        notas: f.notas || initialValues.notas || "",
+      }));
     }
-  }, [pedido, catalogo, variantesCatalogo]);
+  }, [pedido, catalogo, variantesCatalogo, initialValues]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

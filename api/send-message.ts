@@ -7,8 +7,6 @@ function resolveEvolutionTarget(rawPhone?: string | null, rawConvId?: string | n
   const phoneStr = String(rawPhone || '').trim();
   const convStr = String(rawConvId || '').trim();
 
-  // Si el conversationId es un @lid y contact_phone es solo la parte numérica de ese mismo LID (sin teléfono real resuelto),
-  // debemos enviar OBLIGATORIAMENTE con @lid para que Evolution v2.3.7 lo entregue.
   if (convStr.endsWith('@lid')) {
     const lidDigits = convStr.split('@')[0];
     const phoneDigits = phoneStr.replace(/\D/g, '');
@@ -54,7 +52,6 @@ function resolveEvolutionTarget(rawPhone?: string | null, rawConvId?: string | n
       };
     }
 
-    // Si tiene 14+ dígitos y no coincide con un teléfono normal, probablemente sea un LID guardado sin dominio
     if (digits.length >= 14 && convStr.includes('@lid')) {
       return {
         sendTarget: convStr,
@@ -70,6 +67,11 @@ function resolveEvolutionTarget(rawPhone?: string | null, rawConvId?: string | n
   };
 }
 
+function stripDataUrlPrefix(raw: string): string {
+  const idx = raw.indexOf('base64,');
+  return idx !== -1 ? raw.slice(idx + 7) : raw;
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -81,11 +83,17 @@ export default async function handler(req: any, res: any) {
     instanceId,
     contactPhone,
     pauseBot = true,
+    mediaUrl,
+    mediaBase64,
+    mediaType = 'image',
+    fileName = 'imagen.jpg',
   } = req.body || {};
 
   const messageText = String(text || '').trim();
-  if (!conversationId || !messageText) {
-    return res.status(400).json({ error: 'conversationId y text son obligatorios' });
+  const hasMedia = Boolean(mediaUrl || mediaBase64);
+
+  if (!conversationId || (!messageText && !hasMedia)) {
+    return res.status(400).json({ error: 'conversationId y text o media son obligatorios' });
   }
 
   const evolutionUrl = (process.env.EVOLUTION_API_URL || '').replace(/\/+$/, '');
@@ -138,21 +146,33 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'No se encontró un número o JID de WhatsApp válido para este chat' });
     }
 
-    const evoRes = await fetch(
-      `${evolutionUrl}/message/sendText/${encodeURIComponent(targetInstance)}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: evolutionKey,
-        },
-        body: JSON.stringify({
+    const endpoint = hasMedia
+      ? `${evolutionUrl}/message/sendMedia/${encodeURIComponent(targetInstance)}`
+      : `${evolutionUrl}/message/sendText/${encodeURIComponent(targetInstance)}`;
+
+    const payload = hasMedia
+      ? {
+          number: sendTarget,
+          mediatype: mediaType || 'image',
+          media: mediaUrl ? String(mediaUrl) : stripDataUrlPrefix(String(mediaBase64)),
+          caption: messageText,
+          fileName: String(fileName || 'producto.jpg'),
+          delay: 250,
+        }
+      : {
           number: sendTarget,
           text: messageText,
           delay: 250,
-        }),
-      }
-    );
+        };
+
+    const evoRes = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: evolutionKey,
+      },
+      body: JSON.stringify(payload),
+    });
 
     const rawResponse = await evoRes.text();
     let evoJson: any = {};
@@ -177,11 +197,21 @@ export default async function handler(req: any, res: any) {
 
     const nowIso = new Date().toISOString();
 
+    const storedBody = mediaUrl
+      ? `[IMG:${mediaUrl}]${messageText ? `\n${messageText}` : ''}`
+      : hasMedia
+      ? `📷 [Imagen enviada]${messageText ? ` ${messageText}` : ''}`
+      : messageText;
+
+    const lastMessagePreview = hasMedia
+      ? `📷 ${messageText || 'Imagen enviada'}`
+      : messageText;
+
     await supabase.from('bb_messages').upsert(
       {
         id: String(messageId),
         conversation_id: conversationId,
-        body: messageText,
+        body: storedBody,
         from_me: true,
         created_at: nowIso,
         telefono_real: cleanPhone,
@@ -190,7 +220,7 @@ export default async function handler(req: any, res: any) {
     );
 
     const convUpdate: Record<string, any> = {
-      last_message: messageText,
+      last_message: lastMessagePreview,
       updated_at: nowIso,
     };
     if (pauseBot !== false) {
@@ -203,7 +233,7 @@ export default async function handler(req: any, res: any) {
         {
           message_id: String(messageId),
           telefono: cleanPhone,
-          texto: messageText,
+          texto: messageText || '[MEDIA]',
           created_at: nowIso,
         },
         { onConflict: 'message_id', ignoreDuplicates: true }
@@ -213,6 +243,7 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({
       success: true,
       messageId: String(messageId),
+      storedBody,
       status: pauseBot !== false ? 'human' : undefined,
       instance: targetInstance,
       target: sendTarget,
