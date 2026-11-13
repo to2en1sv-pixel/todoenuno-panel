@@ -20,6 +20,7 @@ import {
   Boxes,
   Zap
 } from 'lucide-react';
+import { PWAInstallButton } from '@/components/pwa/PWAComponents';
 
 const links = [
   { to: '/', label: 'Hoy' },
@@ -59,6 +60,7 @@ export function Layout() {
       <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-cd border-b border-[var(--bd)] flex items-center justify-between px-4 z-50">
         <div className="font-bold">TODOENUNO OS</div>
         <div className="flex items-center gap-2">
+          <PWAInstallButton compact />
           <button onClick={toggleTheme} className="p-2 bg-sf rounded-lg">
             {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
           </button>
@@ -104,6 +106,10 @@ export function Layout() {
             )}
           </Link>
         ))}
+
+        <div className="mt-auto pt-3 border-t border-[var(--bd)]">
+          <PWAInstallButton />
+        </div>
       </aside>
 
       {isMobileOpen && (

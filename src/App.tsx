@@ -18,10 +18,13 @@ import { ConfirmarEntregaPage } from "@/pages/ConfirmarEntrega";
 import { EventStreamPage } from '@/pages/EventStreamPage';
 import { FinanzasPage } from '@/pages/FinanzasPage';
 import { LtvPage } from '@/pages/LtvPage';
+import { OfflineIndicator } from '@/components/pwa/PWAComponents';
 
 export default function App() {
   return (
-    <Routes>
+    <>
+      <OfflineIndicator />
+      <Routes>
       {/* 👇 RUTAS PARA REPARTIDORES MÓVILES (SIN SIDEBAR) */}
       <Route path="/entregar/:id" element={<ConfirmarEntregaPage />} />
       <Route path="/entregar" element={<ConfirmarEntregaPage />} />
@@ -48,6 +51,7 @@ export default function App() {
         <Route path="/analitica" element={<AnaliticaPage />} />
         <Route path="/ltv" element={<LtvPage />} />
       </Route>
-    </Routes>
+      </Routes>
+    </>
   );
 }

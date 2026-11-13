@@ -1,7 +1,22 @@
 {
+  "headers": [
+    {
+      "source": "/sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [
+        { "key": "Content-Type", "value": "application/manifest+json; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    }
+  ],
   "rewrites": [
     {
-      "source": "/((?!api/).*)",
+      "source": "/((?!api/|sw\\.js$|registerSW\\.js$|manifest\\.webmanifest$|workbox-|assets/|.*\\.(?:png|jpg|jpeg|svg|ico|webp|js|css|json|woff2?)$).*)",
       "destination": "/index.html"
     }
   ]
