@@ -52,13 +52,16 @@ function cleanDigits8(raw?: string | null): string {
 function formatPhoneDisplay(conv: Conversation): string {
   const raw = conv.contact_phone || conv.id || '';
   if (!raw) return 'Sin número';
-  if (raw.includes('@lid')) return 'WhatsApp ID (@lid)';
+  if (raw.includes('@lid')) return `WhatsApp LID (${raw.split('@')[0]})`;
   const digits = raw.split('@')[0].replace(/\D/g, '');
   if (digits.length === 11 && digits.startsWith('503')) {
     return `+503 ${digits.slice(3, 7)}-${digits.slice(7)}`;
   }
   if (digits.length === 8) {
     return `+503 ${digits.slice(0, 4)}-${digits.slice(4)}`;
+  }
+  if (digits.length >= 14 && conv.id.includes('@lid')) {
+    return `WhatsApp LID (${digits})`;
   }
   return raw.split('@')[0];
 }
@@ -200,6 +203,17 @@ export function UniChatPage() {
     }
     loadMessagesFor(selectedConv.id);
   }, [selectedConv?.id, loadMessagesFor]);
+
+  // Respaldo de sincronización cada 5s por si Supabase Realtime no está habilitado en bb_conversations/bb_messages
+  useEffect(() => {
+    const timer = setInterval(() => {
+      loadConversations(false);
+      if (selectedConv?.id) {
+        loadMessagesFor(selectedConv.id);
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [loadConversations, loadMessagesFor, selectedConv?.id]);
 
   // Auto-scroll al último mensaje
   useEffect(() => {

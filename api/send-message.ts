@@ -4,21 +4,41 @@ function resolveEvolutionTarget(rawPhone?: string | null, rawConvId?: string | n
   sendTarget: string;
   cleanPhone: string;
 } {
-  const candidates = [rawPhone, rawConvId]
-    .map(v => String(v || '').trim())
-    .filter(Boolean);
+  const phoneStr = String(rawPhone || '').trim();
+  const convStr = String(rawConvId || '').trim();
+
+  // Si el conversationId es un @lid y contact_phone es solo la parte numérica de ese mismo LID (sin teléfono real resuelto),
+  // debemos enviar OBLIGATORIAMENTE con @lid para que Evolution v2.3.7 lo entregue.
+  if (convStr.endsWith('@lid')) {
+    const lidDigits = convStr.split('@')[0];
+    const phoneDigits = phoneStr.replace(/\D/g, '');
+    if (!phoneStr || phoneStr.includes('@lid') || phoneDigits === lidDigits) {
+      return {
+        sendTarget: convStr,
+        cleanPhone: convStr,
+      };
+    }
+  }
+
+  const candidates = [phoneStr, convStr].filter(Boolean);
 
   for (const cand of candidates) {
-    // Si es un JID explícito de WhatsApp (@s.whatsapp.net o @lid), lo respetamos
     if (cand.includes('@lid')) {
       return {
         sendTarget: cand,
-        cleanPhone: cand.split('@')[0],
+        cleanPhone: cand,
       };
     }
 
-    const rawPart = cand.includes('@') ? cand.split('@')[0] : cand;
-    const digits = rawPart.replace(/\D/g, '');
+    if (cand.includes('@s.whatsapp.net')) {
+      const digits = cand.split('@')[0].replace(/\D/g, '');
+      return {
+        sendTarget: cand,
+        cleanPhone: digits || cand,
+      };
+    }
+
+    const digits = cand.replace(/\D/g, '');
 
     if (digits.length === 8) {
       return {
@@ -27,10 +47,18 @@ function resolveEvolutionTarget(rawPhone?: string | null, rawConvId?: string | n
       };
     }
 
-    if (digits.length >= 9) {
+    if (digits.length >= 9 && digits.length <= 13) {
       return {
         sendTarget: digits,
         cleanPhone: digits,
+      };
+    }
+
+    // Si tiene 14+ dígitos y no coincide con un teléfono normal, probablemente sea un LID guardado sin dominio
+    if (digits.length >= 14 && convStr.includes('@lid')) {
+      return {
+        sendTarget: convStr,
+        cleanPhone: convStr,
       };
     }
   }
@@ -38,7 +66,7 @@ function resolveEvolutionTarget(rawPhone?: string | null, rawConvId?: string | n
   const fallback = candidates[0] || '';
   return {
     sendTarget: fallback,
-    cleanPhone: fallback.replace(/\D/g, '') || fallback,
+    cleanPhone: fallback,
   };
 }
 
@@ -85,7 +113,6 @@ export default async function handler(req: any, res: any) {
   });
 
   try {
-    // 1. Si no llegó contactPhone, lo consultamos en bb_conversations
     let dbPhone = contactPhone;
     let dbInstance = instanceId;
     if (!dbPhone || !dbInstance) {
@@ -100,7 +127,6 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    // Evitar enviar a nombres de instancia heredados de BuilderBot
     const legacyInstances = new Set(['builderbot-principal', 'ventas', 'builderbot']);
     const targetInstance =
       dbInstance && !legacyInstances.has(String(dbInstance).toLowerCase())
@@ -112,7 +138,6 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'No se encontró un número o JID de WhatsApp válido para este chat' });
     }
 
-    // 2. Enviar mensaje por Evolution API v2.3.7
     const evoRes = await fetch(
       `${evolutionUrl}/message/sendText/${encodeURIComponent(targetInstance)}`,
       {
@@ -140,7 +165,8 @@ export default async function handler(req: any, res: any) {
     if (!evoRes.ok) {
       return res.status(evoRes.status).json({
         error: 'Evolution API rechazó el mensaje',
-        details: evoJson?.message || evoJson?.error || rawResponse || `HTTP ${evoRes.status}`,
+        details: evoJson?.message || evoJson?.response?.message || evoJson?.error || rawResponse || `HTTP ${evoRes.status}`,
+        target: sendTarget,
       });
     }
 
@@ -151,7 +177,6 @@ export default async function handler(req: any, res: any) {
 
     const nowIso = new Date().toISOString();
 
-    // 3. Guardar mensaje en bb_messages para reflejo inmediato en UniChat
     await supabase.from('bb_messages').upsert(
       {
         id: String(messageId),
@@ -164,7 +189,6 @@ export default async function handler(req: any, res: any) {
       { onConflict: 'id', ignoreDuplicates: true }
     );
 
-    // 4. Actualizar conversación y pausar Bot Todd si un humano respondió
     const convUpdate: Record<string, any> = {
       last_message: messageText,
       updated_at: nowIso,
@@ -174,7 +198,6 @@ export default async function handler(req: any, res: any) {
     }
     await supabase.from('bb_conversations').update(convUpdate).eq('id', conversationId);
 
-    // 5. Registrar en whatsapp_outbound_memory para filtro anti-eco en n8n
     try {
       await supabase.from('whatsapp_outbound_memory').upsert(
         {
@@ -185,15 +208,14 @@ export default async function handler(req: any, res: any) {
         },
         { onConflict: 'message_id', ignoreDuplicates: true }
       );
-    } catch {
-      // No bloquear si la tabla no aplica
-    }
+    } catch {}
 
     return res.status(200).json({
       success: true,
       messageId: String(messageId),
       status: pauseBot !== false ? 'human' : undefined,
       instance: targetInstance,
+      target: sendTarget,
     });
   } catch (error: any) {
     console.error('Error en /api/send-message (Evolution):', error);

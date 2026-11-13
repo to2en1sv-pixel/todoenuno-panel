@@ -81,7 +81,6 @@ export default async function handler(req: any, res: any) {
     process.env.SUPABASE_SERVICE_KEY ||
     process.env.VITE_SUPABASE_ANON_KEY;
 
-  // Diagnóstico rápido al abrir la URL desde el navegador (GET)
   if (req.method === 'GET') {
     return res.status(200).json({
       ok: true,
@@ -124,11 +123,14 @@ export default async function handler(req: any, res: any) {
       ? parsedBody.body
       : parsedBody || {};
 
-  // Evolution v2.3.7 puede enviar "messages.upsert" o "MESSAGES_UPSERT"
   const eventNormalized = String(body.event || '')
     .toLowerCase()
     .replace(/_/g, '.');
-  if (eventNormalized && eventNormalized !== 'messages.upsert') {
+  if (
+    eventNormalized &&
+    eventNormalized !== 'messages.upsert' &&
+    eventNormalized !== 'send.message'
+  ) {
     return res.status(200).json({ ignored: true, reason: `event:${eventNormalized}` });
   }
 
@@ -157,15 +159,20 @@ export default async function handler(req: any, res: any) {
   });
 
   try {
-    // Resolver número real en Evolution 2.3.7 (soporta remoteJidAlt cuando llega @lid)
-    const altJid = String(data.key.remoteJidAlt || data.key.participant || '').trim();
+    // Resolver número real en Evolution 2.3.7 (remoteJidAlt / participantAlt / senderPn cuando llega @lid)
+    const altJid = String(
+      data.key.remoteJidAlt || data.key.participantAlt || data.key.senderPn || ''
+    ).trim();
+    const hasResolvedPhone =
+      !remoteJid.endsWith('@lid') || (altJid.length > 0 && !altJid.endsWith('@lid'));
+
     const rawNumberSource = remoteJid.endsWith('@lid') && altJid ? altJid : remoteJid;
     const rawDigits = rawNumberSource.split('@')[0].replace(/\D/g, '');
-    const cleanPhone = rawDigits || remoteJid.split('@')[0];
-    const last8 = rawDigits.length >= 8 ? rawDigits.slice(-8) : rawDigits;
+    const cleanPhone = hasResolvedPhone ? rawDigits || remoteJid.split('@')[0] : remoteJid;
+    const last8 = hasResolvedPhone && rawDigits.length >= 8 ? rawDigits.slice(-8) : '';
 
     const instanceId = String(body.instance || process.env.EVOLUTION_INSTANCE || 'eee').trim();
-    const fromMe = Boolean(data.key.fromMe);
+    const fromMe = Boolean(data.key.fromMe) || eventNormalized === 'send.message';
     const pushName = !fromMe && data.pushName ? String(data.pushName).trim() : '';
     const messageId = String(
       data.key.id || `evo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -174,10 +181,11 @@ export default async function handler(req: any, res: any) {
 
     // Buscar conversación existente para no duplicar hilos entre @lid y teléfono real
     let existingConv: any = null;
+    const idCandidates = Array.from(new Set([remoteJid, hasResolvedPhone ? cleanPhone : ''].filter(Boolean)));
     const { data: byId, error: byIdErr } = await supabase
       .from('bb_conversations')
       .select('*')
-      .in('id', Array.from(new Set([remoteJid, cleanPhone].filter(Boolean))))
+      .in('id', idCandidates)
       .limit(1);
 
     if (byIdErr) {
@@ -206,10 +214,19 @@ export default async function handler(req: any, res: any) {
         updated_at: nowIso,
         instance_id: instanceId,
       };
-      if (pushName && (!existingConv.contact_name || existingConv.contact_name === existingConv.contact_phone)) {
+      if (
+        pushName &&
+        (!existingConv.contact_name ||
+          existingConv.contact_name === existingConv.contact_phone ||
+          existingConv.contact_name.includes('@lid'))
+      ) {
         nextPatch.contact_name = pushName;
       }
-      if (cleanPhone && (!existingConv.contact_phone || String(existingConv.contact_phone).includes('@lid'))) {
+      if (
+        hasResolvedPhone &&
+        cleanPhone &&
+        (!existingConv.contact_phone || String(existingConv.contact_phone).includes('@lid'))
+      ) {
         nextPatch.contact_phone = cleanPhone;
       }
       const { error: updErr } = await supabase
@@ -249,7 +266,13 @@ export default async function handler(req: any, res: any) {
       return res.status(500).json({ error: 'Error guardando en bb_messages', details: msgErr.message });
     }
 
-    return res.status(200).json({ ok: true, conversationId, messageId, event: eventNormalized });
+    return res.status(200).json({
+      ok: true,
+      conversationId,
+      messageId,
+      fromMe,
+      event: eventNormalized,
+    });
   } catch (err: any) {
     console.error('Error en /api/evolution-webhook:', err);
     return res.status(500).json({ error: err?.message || 'Error procesando webhook Evolution' });
