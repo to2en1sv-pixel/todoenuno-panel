@@ -203,8 +203,9 @@ export function UniChatPage() {
   const [inputText, setInputText] = useState('');
   const [banner, setBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
-  // Panel derecho (contexto cliente & Todd)
+  // Panel derecho (contexto cliente & Todd en desktop; vista dedicada en móvil)
   const [showContextPanel, setShowContextPanel] = useState(true);
+  const [mobileShowContext, setMobileShowContext] = useState(false);
   const [whatsappState, setWhatsappState] = useState<WhatsappStateRow | null>(null);
   const [blacklistTick, setBlacklistTick] = useState(0);
 
@@ -404,6 +405,8 @@ export function UniChatPage() {
     setEditName(selectedConv.contact_name || '');
     setEditPhone(selectedConv.contact_phone || '');
     setEditingContact(false);
+    setMobileShowContext(false);
+    setShowCatalogPicker(false);
   }, [selectedConv?.id, loadMessagesFor, loadWhatsappStateFor]);
 
   // Polling de respaldo cada 5s
@@ -412,10 +415,11 @@ export function UniChatPage() {
       loadConversations(false);
       if (selectedConv) {
         loadMessagesFor(selectedConv);
+        loadWhatsappStateFor(selectedConv);
       }
     }, 5000);
     return () => clearInterval(timer);
-  }, [loadConversations, loadMessagesFor, selectedConv]);
+  }, [loadConversations, loadMessagesFor, loadWhatsappStateFor, selectedConv]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -867,11 +871,11 @@ export function UniChatPage() {
   }, [selectedConv, whatsappState, selectedPhone8, detectedAdTag]);
 
   return (
-    <div className="flex flex-col gap-3 h-[calc(100dvh-96px)] lg:h-[calc(100dvh-48px)] min-h-[520px] w-full min-w-0">
+    <div className="flex flex-col gap-2 lg:gap-3 -mx-4 -mt-6 -mb-4 lg:mx-0 lg:mt-0 lg:mb-0 h-[calc(100dvh-56px)] lg:h-[calc(100dvh-48px)] min-h-[480px] lg:min-h-[520px] w-auto lg:w-full min-w-0">
       {/* Notificación inline */}
       {banner && (
         <div
-          className={`px-4 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 shrink-0 ${
+          className={`mx-3 mt-2 lg:mx-0 lg:mt-0 px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 shrink-0 ${
             banner.type === 'ok'
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
               : 'bg-rose-500/10 border-rose-500/30 text-rose-500'
@@ -887,14 +891,14 @@ export function UniChatPage() {
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row flex-1 min-h-0 min-w-0 w-full bg-cd bd rounded-2xl overflow-hidden shadow-sm">
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0 min-w-0 w-full bg-cd border-0 lg:border lg:border-[var(--bd)] rounded-none lg:rounded-2xl overflow-hidden shadow-sm">
         {/* 1. COLUMNA IZQUIERDA: BANDEJA INTELIGENTE */}
         <div
-          className={`w-full lg:w-[265px] xl:w-[300px] shrink-0 border-r border-[var(--bd)] flex-col min-h-0 ${
-            selectedConv ? 'hidden lg:flex' : 'flex'
+          className={`w-full lg:w-[265px] xl:w-[300px] shrink-0 lg:border-r border-[var(--bd)] flex-col min-h-0 ${
+            selectedConv ? 'hidden lg:flex' : 'flex flex-1 lg:flex-none'
           }`}
         >
-          <div className="p-3.5 border-b border-[var(--bd)] bg-sf space-y-2.5">
+          <div className="p-3 sm:p-3.5 border-b border-[var(--bd)] bg-sf space-y-2.5">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <MessageSquare size={17} className="text-emerald-500" />
@@ -936,7 +940,7 @@ export function UniChatPage() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Buscar cliente, teléfono o texto..."
-                className="w-full pl-8 pr-7 py-1.5 rounded-xl bg-cd border border-[var(--bd)] text-xs outline-none focus:border-[var(--ac)]"
+                className="w-full pl-8 pr-7 py-2 sm:py-1.5 rounded-xl bg-cd border border-[var(--bd)] text-sm sm:text-xs outline-none focus:border-[var(--ac)]"
               />
               {search && (
                 <button
@@ -949,11 +953,11 @@ export function UniChatPage() {
             </div>
 
             {/* Filtros */}
-            <div className="grid grid-cols-4 gap-1 p-0.5 bg-cd rounded-xl border border-[var(--bd)] text-[10px] font-bold">
+            <div className="flex items-center gap-1 p-0.5 bg-cd rounded-xl border border-[var(--bd)] text-[10px] font-bold overflow-x-auto">
               <button
                 type="button"
                 onClick={() => setModeFilter('all')}
-                className={`py-1 rounded-lg transition-colors ${
+                className={`flex-1 py-1.5 sm:py-1 px-2 rounded-lg whitespace-nowrap transition-colors ${
                   modeFilter === 'all' ? 'bg-[var(--tx)] text-[var(--cd)]' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
@@ -962,7 +966,7 @@ export function UniChatPage() {
               <button
                 type="button"
                 onClick={() => setModeFilter('unread')}
-                className={`py-1 rounded-lg transition-colors ${
+                className={`flex-1 py-1.5 sm:py-1 px-2 rounded-lg whitespace-nowrap transition-colors ${
                   modeFilter === 'unread' ? 'bg-emerald-600 text-white' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
@@ -971,7 +975,7 @@ export function UniChatPage() {
               <button
                 type="button"
                 onClick={() => setModeFilter('bot')}
-                className={`py-1 rounded-lg transition-colors ${
+                className={`flex-1 py-1.5 sm:py-1 px-2 rounded-lg whitespace-nowrap transition-colors ${
                   modeFilter === 'bot' ? 'bg-purple-600 text-white' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
@@ -980,7 +984,7 @@ export function UniChatPage() {
               <button
                 type="button"
                 onClick={() => setModeFilter('human')}
-                className={`py-1 rounded-lg transition-colors ${
+                className={`flex-1 py-1.5 sm:py-1 px-2 rounded-lg whitespace-nowrap transition-colors ${
                   modeFilter === 'human' ? 'bg-amber-500 text-zinc-950' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
@@ -1078,34 +1082,43 @@ export function UniChatPage() {
         </div>
 
         {/* 2. COLUMNA CENTRAL: VENTANA DE CHAT */}
-        <div className={`flex-1 flex-col bg-sf min-h-0 min-w-0 overflow-hidden ${selectedConv ? 'flex' : 'hidden lg:flex'}`}>
+        <div
+          className={`flex-1 flex-col bg-sf min-h-0 min-w-0 overflow-hidden ${
+            selectedConv && !mobileShowContext ? 'flex' : !selectedConv ? 'hidden lg:flex' : 'hidden lg:flex'
+          }`}
+        >
           {selectedConv ? (
             <>
-              {/* Header del Chat */}
-              <div className="p-3 border-b border-[var(--bd)] bg-cd flex flex-wrap justify-between items-center gap-2.5">
-                <div className="flex items-center gap-2.5 min-w-0">
+              {/* Header del Chat (compacto en móvil, completo en desktop) */}
+              <div className="px-2.5 py-2 sm:p-3 border-b border-[var(--bd)] bg-cd flex items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
                   <button
-                    onClick={() => setSelectedConv(null)}
-                    className="lg:hidden p-1.5 bg-sf border border-[var(--bd)] rounded-lg tx-mu hover:text-[var(--tx)]"
+                    type="button"
+                    onClick={() => {
+                      setSelectedConv(null);
+                      setMobileShowContext(false);
+                    }}
+                    className="lg:hidden p-1.5 bg-sf border border-[var(--bd)] rounded-lg tx-mu hover:text-[var(--tx)] shrink-0"
+                    title="Volver a conversaciones"
                   >
                     <ChevronLeft size={18} />
                   </button>
 
                   {editingContact ? (
-                    <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                       <input
                         type="text"
                         value={editName}
                         onChange={e => setEditName(e.target.value)}
                         placeholder="Nombre cliente"
-                        className="px-2 py-1 rounded-lg bg-sf border border-[var(--bd)] text-xs w-36 outline-none focus:border-[var(--ac)]"
+                        className="px-2 py-1 rounded-lg bg-sf border border-[var(--bd)] text-xs w-28 sm:w-36 outline-none focus:border-[var(--ac)]"
                       />
                       <input
                         type="text"
                         value={editPhone}
                         onChange={e => setEditPhone(e.target.value)}
                         placeholder="Ej. 50371234567"
-                        className="px-2 py-1 rounded-lg bg-sf border border-[var(--bd)] text-xs font-mono w-32 outline-none focus:border-[var(--ac)]"
+                        className="px-2 py-1 rounded-lg bg-sf border border-[var(--bd)] text-xs font-mono w-28 sm:w-32 outline-none focus:border-[var(--ac)]"
                       />
                       <button
                         type="button"
@@ -1125,74 +1138,100 @@ export function UniChatPage() {
                       </button>
                     </div>
                   ) : (
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <h3 className="font-bold text-sm truncate">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="font-bold text-xs sm:text-sm truncate">
                           {selectedConv.contact_name || formatPhoneDisplay(selectedConv)}
                         </h3>
                         <button
                           type="button"
                           onClick={() => setEditingContact(true)}
-                          className="p-1 rounded hover:bg-sf tx-mu hover:text-[var(--tx)]"
+                          className="p-1 rounded hover:bg-sf tx-mu hover:text-[var(--tx)] shrink-0"
                           title="Editar nombre o vincular teléfono real"
                         >
                           <Pencil size={11} />
                         </button>
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sf border border-[var(--bd)] tx-mu">
+                        <span className="hidden sm:inline-block text-[10px] font-mono px-1.5 py-0.5 rounded bg-sf border border-[var(--bd)] tx-mu shrink-0">
                           {selectedConv.instance_id || 'eee'}
                         </span>
                         {detectedAdTag && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 flex items-center gap-1">
-                            <Megaphone size={10} /> {detectedAdTag}
+                          <span className="hidden md:inline-flex text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 items-center gap-1 truncate max-w-[140px]">
+                            <Megaphone size={10} className="shrink-0" /> {detectedAdTag}
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] font-mono tx-mu flex items-center gap-1 mt-0.5">
-                        <Phone size={10} /> {formatPhoneDisplay(selectedConv)}
+                      <p className="text-[10px] sm:text-[11px] font-mono tx-mu flex items-center gap-1 truncate">
+                        <Phone size={10} className="shrink-0" />
+                        <span className="truncate">{formatPhoneDisplay(selectedConv)}</span>
                       </p>
                     </div>
                   )}
                 </div>
 
-                <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
                   <button
                     type="button"
                     onClick={() => setShowOrderModal(true)}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition-colors shadow-sm"
+                    className="px-2 sm:px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 transition-colors shadow-sm"
+                    title="Crear Pedido"
                   >
                     <ShoppingBag size={13} />
-                    <span>Crear Pedido</span>
+                    <span className="hidden sm:inline">Crear Pedido</span>
+                    <span className="sm:hidden">Pedido</span>
                   </button>
 
                   <button
                     onClick={toggleStatus}
                     disabled={isUpdating}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
+                    title={selectedConv.status === 'human' ? 'Activar Bot Todd' : 'Pausar Bot Todd'}
+                    className={`px-2 sm:px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold flex items-center gap-1 transition-all ${
                       selectedConv.status === 'human'
                         ? 'bg-amber-500 text-zinc-950 hover:bg-amber-400 shadow-sm'
                         : 'bg-purple-600 text-white hover:bg-purple-500 shadow-sm'
                     } ${isUpdating ? 'opacity-50 cursor-wait' : ''}`}
                   >
                     {isUpdating ? (
-                      <Loader2 size={14} className="animate-spin" />
+                      <Loader2 size={13} className="animate-spin" />
                     ) : selectedConv.status === 'human' ? (
                       <>
                         <User size={13} />
                         <span className="hidden sm:inline">Humano (Activar Todd)</span>
+                        <span className="sm:hidden">Hum.</span>
                       </>
                     ) : (
                       <>
                         <Bot size={13} />
                         <span className="hidden sm:inline">Todd Activo (Pausar)</span>
+                        <span className="sm:hidden">Todd</span>
                       </>
                     )}
                   </button>
 
+                  {/* Botón Ficha Cliente en Móvil */}
+                  <button
+                    type="button"
+                    onClick={() => setMobileShowContext(true)}
+                    title="Ver ficha antifraude, estado Todd y pedidos"
+                    className="lg:hidden px-2 py-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd text-[11px] font-bold flex items-center gap-1"
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        selectedRisk?.nivelRiesgo === 'rojo'
+                          ? 'bg-rose-500'
+                          : selectedRisk?.nivelRiesgo === 'verde'
+                          ? 'bg-emerald-500'
+                          : 'bg-amber-500'
+                      }`}
+                    />
+                    <span>Ficha</span>
+                  </button>
+
+                  {/* Botón Ficha Cliente en Desktop */}
                   <button
                     type="button"
                     onClick={() => setShowContextPanel(!showContextPanel)}
                     title={showContextPanel ? 'Ocultar ficha cliente' : 'Ver ficha cliente'}
-                    className="p-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd tx-mu hover:text-[var(--tx)] transition-colors"
+                    className="hidden lg:flex p-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd tx-mu hover:text-[var(--tx)] transition-colors"
                   >
                     {showContextPanel ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
                   </button>
@@ -1200,15 +1239,15 @@ export function UniChatPage() {
               </div>
 
               {selectedConv.status !== 'human' && (
-                <div className="px-4 py-1.5 bg-purple-500/10 border-b border-purple-500/20 text-[11px] text-purple-600 dark:text-purple-300 flex items-center justify-between gap-2">
-                  <span>
-                    🤖 <strong>Bot Todd</strong> activo en este chat. Al responder abajo, Todd se pausará automáticamente.
+                <div className="px-3 sm:px-4 py-1.5 bg-purple-500/10 border-b border-purple-500/20 text-[10px] sm:text-[11px] text-purple-600 dark:text-purple-300 flex items-center justify-between gap-2 shrink-0">
+                  <span className="truncate">
+                    🤖 <strong>Bot Todd</strong> activo. Al responder abajo, Todd se pausará automáticamente.
                   </span>
                 </div>
               )}
 
               {/* Mensajes */}
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2.5 bg-cd relative">
+              <div className="flex-1 overflow-y-auto p-3 sm:p-4 flex flex-col gap-2.5 bg-cd relative min-h-0">
                 {messages.length === 0 ? (
                   <div className="m-auto text-xs tx-mu">No hay mensajes registrados en esta conversación.</div>
                 ) : (
@@ -1220,7 +1259,7 @@ export function UniChatPage() {
                     return (
                       <div
                         key={msg.id}
-                        className={`max-w-[85%] sm:max-w-[72%] px-3 py-2 rounded-2xl text-xs leading-relaxed ${
+                        className={`max-w-[88%] sm:max-w-[74%] px-3 py-2 rounded-2xl text-xs leading-relaxed ${
                           msg.from_me
                             ? 'self-end bg-[var(--tx)] text-[var(--cd)] rounded-br-sm'
                             : 'self-start bg-sf border border-[var(--bd)] text-[var(--tx)] rounded-bl-sm'
@@ -1231,7 +1270,7 @@ export function UniChatPage() {
                             src={imgUrl}
                             alt="Producto enviado"
                             onClick={() => setLightboxUrl(imgUrl)}
-                            className="w-48 max-h-56 object-cover rounded-xl mb-1.5 cursor-pointer border border-black/15 hover:opacity-90"
+                            className="w-48 max-w-full max-h-56 object-cover rounded-xl mb-1.5 cursor-pointer border border-black/15 hover:opacity-90"
                           />
                         )}
 
@@ -1306,23 +1345,32 @@ export function UniChatPage() {
 
               {/* Selector Flotante de Catálogo para enviar producto + foto */}
               {showCatalogPicker && (
-                <div className="border-t border-[var(--bd)] bg-sf p-3 space-y-2.5 max-h-64 flex flex-col">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold flex items-center gap-1.5">
-                      <Package size={13} className="text-indigo-500" /> Enviar ficha de Catálogo Visual + Variantes
-                    </span>
+                <div className="border-t border-[var(--bd)] bg-sf p-2.5 sm:p-3 space-y-2 max-h-[42dvh] sm:max-h-64 flex flex-col shrink-0">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold flex items-center gap-1.5">
+                        <Package size={13} className="text-indigo-500" /> Catálogo Visual + Variantes
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowCatalogPicker(false)}
+                        className="sm:hidden p-1 rounded-lg tx-mu hover:text-[var(--tx)]"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
                     <div className="flex items-center gap-1.5">
                       <input
                         type="text"
                         value={catalogSearch}
                         onChange={e => setCatalogSearch(e.target.value)}
                         placeholder="Buscar producto..."
-                        className="px-2.5 py-1 rounded-lg bg-cd border border-[var(--bd)] text-[11px] w-40 outline-none"
+                        className="px-2.5 py-1.5 sm:py-1 rounded-lg bg-cd border border-[var(--bd)] text-xs sm:text-[11px] flex-1 sm:w-40 outline-none"
                       />
                       <button
                         type="button"
                         onClick={() => setShowCatalogPicker(false)}
-                        className="p-1 rounded-lg tx-mu hover:text-[var(--tx)]"
+                        className="hidden sm:inline-flex p-1 rounded-lg tx-mu hover:text-[var(--tx)]"
                       >
                         <X size={14} />
                       </button>
@@ -1449,7 +1497,10 @@ export function UniChatPage() {
               )}
 
               {/* Input Principal */}
-              <form onSubmit={handleSendMessage} className="p-3 bg-cd border-t border-[var(--bd)] flex items-center gap-2">
+              <form
+                onSubmit={handleSendMessage}
+                className="p-2 sm:p-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] bg-cd border-t border-[var(--bd)] flex items-center gap-1.5 sm:gap-2 shrink-0"
+              >
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1481,14 +1532,14 @@ export function UniChatPage() {
                   type="text"
                   value={inputText}
                   onChange={e => setInputText(e.target.value)}
-                  placeholder="Escribe respuesta o usa / para atajos COD..."
+                  placeholder="Escribe respuesta o /..."
                   disabled={isSending}
-                  className="flex-1 bg-sf bd rounded-xl px-3.5 py-2 text-xs outline-none focus:border-[var(--ac)] disabled:opacity-50"
+                  className="flex-1 min-w-0 bg-sf bd rounded-xl px-3 py-2 text-base sm:text-xs outline-none focus:border-[var(--ac)] disabled:opacity-50"
                 />
                 <button
                   type="submit"
                   disabled={isSending || (!inputText.trim() && !pendingAttachment)}
-                  className="bg-[var(--tx)] text-[var(--cd)] px-3.5 py-2 rounded-xl hover:opacity-85 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5 text-xs font-bold shrink-0"
+                  className="bg-[var(--tx)] text-[var(--cd)] px-3 sm:px-3.5 py-2 rounded-xl hover:opacity-85 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5 text-xs font-bold shrink-0"
                 >
                   {isSending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
                   <span className="hidden sm:inline">Enviar</span>
@@ -1507,8 +1558,29 @@ export function UniChatPage() {
         </div>
 
         {/* 3. COLUMNA DERECHA: CONTEXTO DEL CLIENTE, TODD & PEDIDOS */}
-        {selectedConv && showContextPanel && (
-          <div className="w-full lg:w-[255px] xl:w-[290px] border-t lg:border-t-0 lg:border-l border-[var(--bd)] bg-cd flex flex-col overflow-y-auto overflow-x-hidden p-3.5 gap-3.5 shrink-0 max-h-[45vh] lg:max-h-none">
+        {selectedConv && (mobileShowContext || showContextPanel) && (
+          <div
+            className={`${mobileShowContext ? 'flex flex-1 min-h-0' : 'hidden'} ${
+              showContextPanel ? 'lg:flex' : 'lg:hidden'
+            } w-full lg:w-[260px] xl:w-[290px] lg:border-l border-[var(--bd)] bg-cd flex-col overflow-y-auto overflow-x-hidden p-3.5 gap-3.5 shrink-0`}
+          >
+            {/* Header móvil para volver al chat */}
+            <div className="lg:hidden flex items-center justify-between gap-2 pb-2 border-b border-[var(--bd)] shrink-0">
+              <button
+                type="button"
+                onClick={() => setMobileShowContext(false)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sf border border-[var(--bd)] text-xs font-bold"
+              >
+                <ChevronLeft size={15} /> Volver al chat
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowOrderModal(true)}
+                className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold flex items-center gap-1"
+              >
+                <ShoppingBag size={13} /> Crear Pedido
+              </button>
+            </div>
             {/* Semáforo Antifraude */}
             <div className="p-3 rounded-xl bg-sf border border-[var(--bd)] space-y-2">
               <div className="flex items-center justify-between">
