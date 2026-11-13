@@ -21,6 +21,7 @@ import { supabase } from '@/lib/supabase';
 import {
   fetchStockItems,
   fetchKardexMovements,
+  fetchProductVariants,
   recordStockEntry,
   adjustStock,
   quickAddStockDelta,
@@ -28,7 +29,26 @@ import {
 } from '@/lib/inventory';
 import { ProductImg } from '@/components/inventory/ProductImg';
 import { Sprint10SqlModal } from '@/components/inventory/Sprint10SqlModal';
-import type { StockItem, KardexMovement } from '@/types/inventory';
+import type { StockItem, KardexMovement, ProductVariant } from '@/types/inventory';
+
+function getVariantDotColor(colorName: string): string {
+  const c = (colorName || '').toLowerCase().trim();
+  if (c.includes('negro') || c.includes('black')) return '#18181b';
+  if (c.includes('blanco') || c.includes('white')) return '#f8fafc';
+  if (c.includes('gris') || c.includes('plomo') || c.includes('gray')) return '#71717a';
+  if (c.includes('azul') && (c.includes('marino') || c.includes('oscuro') || c.includes('navy'))) return '#1e3a8a';
+  if (c.includes('azul') || c.includes('celeste') || c.includes('blue')) return '#3b82f6';
+  if (c.includes('rojo') || c.includes('vino') || c.includes('red')) return '#dc2626';
+  if (c.includes('rosa') || c.includes('rosado') || c.includes('pink')) return '#ec4899';
+  if (c.includes('verde') && (c.includes('menta') || c.includes('claro'))) return '#34d399';
+  if (c.includes('verde') || c.includes('oliva') || c.includes('green')) return '#16a34a';
+  if (c.includes('amarillo') || c.includes('mostaza')) return '#eab308';
+  if (c.includes('naranja') || c.includes('orange')) return '#f97316';
+  if (c.includes('morado') || c.includes('lila') || c.includes('violeta') || c.includes('purple')) return '#9333ea';
+  if (c.includes('beige') || c.includes('crema') || c.includes('arena') || c.includes('khaki')) return '#d6c3a5';
+  if (c.includes('cafe') || c.includes('café') || c.includes('marron') || c.includes('marrón')) return '#78350f';
+  return '#6366f1';
+}
 
 export function InventarioPage() {
   const [searchParams] = useSearchParams();
@@ -39,6 +59,7 @@ export function InventarioPage() {
   const [kardexFilter, setKardexFilter] = useState<'all' | 'entradas' | 'salidas' | 'ajustes'>('all');
 
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
+  const [variantsList, setVariantsList] = useState<ProductVariant[]>([]);
   const [kardexList, setKardexList] = useState<KardexMovement[]>([]);
   const [loadingNative, setLoadingNative] = useState(true);
   const [isRealDb, setIsRealDb] = useState(true);
@@ -103,11 +124,13 @@ export function InventarioPage() {
 
   const loadNativeInventory = async () => {
     setLoadingNative(true);
-    const [stockRes, kardexRes] = await Promise.all([
+    const [stockRes, kardexRes, varsRes] = await Promise.all([
       fetchStockItems(),
-      fetchKardexMovements()
+      fetchKardexMovements(),
+      fetchProductVariants()
     ]);
     setStockItems(stockRes.items);
+    setVariantsList(varsRes);
     setIsRealDb(stockRes.isRealDb);
     setDbError(stockRes.error || null);
     setKardexList(kardexRes.movements);
@@ -117,6 +140,18 @@ export function InventarioPage() {
   useEffect(() => {
     loadNativeInventory();
   }, []);
+
+  const variantsByTemplate = useMemo(() => {
+    const map = new Map<string, ProductVariant[]>();
+    variantsList.forEach(v => {
+      if (v.estado === 'PAUSADO') return;
+      const key = String(v.template_id);
+      const curr = map.get(key) || [];
+      curr.push(v);
+      map.set(key, curr);
+    });
+    return map;
+  }, [variantsList]);
 
   // Sincronizar si el usuario llega desde Catálogo Visual con ?sku=...
   useEffect(() => {
@@ -653,11 +688,14 @@ export function InventarioPage() {
                     const valorizadoCosto = (item.stock_fisico || 0) * (item.costo_unitario || 0);
                     const valorizadoVenta = (item.stock_fisico || 0) * (item.precio_venta || 0);
                     const esBajo = item.stock_disponible <= (item.stock_minimo_alerta || 5);
+                    const itemVariants = item.template_id
+                      ? variantsByTemplate.get(String(item.template_id)) || []
+                      : [];
 
                     return (
                       <tr key={item.sku} className="hover:bg-sf/50 transition-colors">
                         <td className="px-4 py-3">
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-start gap-3">
                             <div className="w-10 h-10 rounded-xl overflow-hidden bg-sf border border-[var(--bd)] shrink-0">
                               <ProductImg src={item.image_url} className="w-full h-full object-cover" />
                             </div>
@@ -675,6 +713,32 @@ export function InventarioPage() {
                               <div className="font-medium text-[var(--tx)] truncate max-w-[230px]">
                                 {item.nombre}
                               </div>
+                              {itemVariants.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1 mt-1.5 max-w-[300px]">
+                                  {itemVariants.map(v => (
+                                    <Link
+                                      key={v.variante_id}
+                                      to={`/catalogo?sku=${encodeURIComponent(item.sku)}`}
+                                      title={`${v.sku}: ${v.stock} unidades disponibles — clic para ajustar variantes en Catálogo`}
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-semibold transition-colors ${
+                                        v.stock > 0
+                                          ? 'bg-sf border-[var(--bd)] text-[var(--tx)] hover:border-indigo-500/50'
+                                          : 'bg-rose-500/5 border-rose-500/20 text-rose-500'
+                                      }`}
+                                    >
+                                      <span
+                                        className="w-2 h-2 rounded-full border border-black/20 shrink-0"
+                                        style={{ backgroundColor: getVariantDotColor(v.color) }}
+                                      />
+                                      <span className="truncate max-w-[90px]">
+                                        {v.color}
+                                        {v.talla && v.talla !== 'Única' ? `·${v.talla}` : ''}
+                                      </span>
+                                      <strong className="font-mono">{v.stock}</strong>
+                                    </Link>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </td>

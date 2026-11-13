@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import { X, Loader2, Save, AlertCircle, Plus, Edit, Package, Search, Check, RefreshCw, Sparkles, Tag, ChevronDown, CheckCircle2, Calendar, Clock, ShieldAlert, AlertTriangle, UserX } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Pedido } from "@/pages/Pedidos";
-import { fetchStockItems, extractOrderQuantity } from "@/lib/inventory";
-import type { StockItem } from "@/types/inventory";
+import { fetchStockItems, extractOrderQuantity, fetchProductVariants } from "@/lib/inventory";
+import type { StockItem, ProductVariant } from "@/types/inventory";
 import { resolveCatalogSku, linkRawSkuToProduct, linkAdCodeToProduct } from "@/lib/catalogAliases";
 import { evaluateCustomerRisk, addOrUpdateBlacklist, removeBlacklistEntry, cleanPhone } from "@/lib/blacklist";
 
@@ -78,8 +78,10 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  // Catálogo maestro de productos
+  // Catálogo maestro de productos y variantes
   const [catalogo, setCatalogo] = useState<StockItem[]>([]);
+  const [variantesCatalogo, setVariantesCatalogo] = useState<ProductVariant[]>([]);
+  const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
   const [cargandoCatalogo, setCargandoCatalogo] = useState(true);
   const [busquedaProducto, setBusquedaProducto] = useState("");
   const [modoManual, setModoManual] = useState(false);
@@ -105,15 +107,19 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
     return evaluateCustomerRisk(form.telefono, historialOrdenes);
   }, [form.telefono, historialOrdenes, versionBlacklist]);
 
-  // Cargar catálogo de productos
+  // Cargar catálogo de productos y variantes
   useEffect(() => {
     let cancelado = false;
     async function loadCatalog() {
       setCargandoCatalogo(true);
       try {
-        const { items } = await fetchStockItems();
+        const [{ items }, variants] = await Promise.all([
+          fetchStockItems(),
+          fetchProductVariants(),
+        ]);
         if (!cancelado) {
           setCatalogo(items || []);
+          setVariantesCatalogo(variants || []);
         }
       } catch (err) {
         console.warn("No se pudo cargar catálogo para el selector de pedidos:", err);
@@ -134,6 +140,18 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
 
       const esEncargo = pedido.estado === "programado" || Boolean((pedido as any).es_encargo) || Boolean((pedido as any).fecha_programada);
       const qtyInicial = extractOrderQuantity(pedido as any);
+
+      const firstItem = Array.isArray((pedido as any).items) && (pedido as any).items.length > 0
+        ? (pedido as any).items[0]
+        : null;
+      if (firstItem?.variante_id) {
+        setSelectedVariantId(Number(firstItem.variante_id));
+      } else if (firstItem?.variante_sku && variantesCatalogo.length > 0) {
+        const foundVar = variantesCatalogo.find(
+          v => v.sku.toUpperCase() === String(firstItem.variante_sku).toUpperCase()
+        );
+        if (foundVar) setSelectedVariantId(foundVar.variante_id);
+      }
 
       setForm({
         nombre_cliente: pedido.nombre_cliente || "",
@@ -156,7 +174,7 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
         setModoManual(true);
       }
     }
-  }, [pedido, catalogo]);
+  }, [pedido, catalogo, variantesCatalogo]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -181,6 +199,19 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
     return catalogo.find(p => p.sku.toUpperCase() === form.catalogo_sku.toUpperCase()) || null;
   }, [catalogo, form.catalogo_sku]);
 
+  // Variantes activas del producto seleccionado
+  const variantesProductoSeleccionado = useMemo(() => {
+    if (!productoSeleccionado?.template_id) return [];
+    const tplNum = Number(productoSeleccionado.template_id);
+    if (!Number.isFinite(tplNum)) return [];
+    return variantesCatalogo.filter(v => v.template_id === tplNum && v.estado !== "PAUSADO");
+  }, [productoSeleccionado, variantesCatalogo]);
+
+  const varianteSeleccionada = useMemo(() => {
+    if (!selectedVariantId) return null;
+    return variantesProductoSeleccionado.find(v => v.variante_id === selectedVariantId) || null;
+  }, [variantesProductoSeleccionado, selectedVariantId]);
+
   // Lista filtrada para el selector (priorizando activos)
   const productosFiltrados = useMemo(() => {
     const activos = catalogo.filter(p => p.activo !== false);
@@ -195,14 +226,39 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
   // Seleccionar producto del catálogo
   const handleSeleccionarProducto = (prod: StockItem) => {
     const qty = Math.max(1, Math.round(Number(form.cantidad) || 1));
+    setSelectedVariantId(null);
     setForm(f => ({
       ...f,
       catalogo_sku: prod.sku,
-      sku: f.sku && f.sku !== FORM_INICIAL.sku ? f.sku : prod.nombre,
+      sku: prod.nombre,
       total: (!f.total || f.total === "0") && prod.precio_venta ? (prod.precio_venta * qty).toFixed(2) : f.total
     }));
     setSelectorAbierto(false);
     setModoManual(false);
+  };
+
+  // Seleccionar o deseleccionar variante (Color / Talla)
+  const handleSeleccionarVariante = (v: ProductVariant) => {
+    if (!productoSeleccionado) return;
+    const qty = Math.max(1, Math.round(Number(form.cantidad) || 1));
+    if (selectedVariantId === v.variante_id) {
+      setSelectedVariantId(null);
+      setForm(f => ({
+        ...f,
+        sku: productoSeleccionado.nombre,
+        total: !pedido && productoSeleccionado.precio_venta ? (productoSeleccionado.precio_venta * qty).toFixed(2) : f.total
+      }));
+      return;
+    }
+
+    setSelectedVariantId(v.variante_id);
+    const labelParts = [v.color, v.talla && v.talla !== "Única" ? `Talla ${v.talla}` : ""].filter(Boolean);
+    const unitPrice = Number(v.precio) > 0 ? Number(v.precio) : Number(productoSeleccionado.precio_venta || 0);
+    setForm(f => ({
+      ...f,
+      sku: `${productoSeleccionado.nombre} (${labelParts.join(" · ")})`,
+      total: !pedido && unitPrice > 0 ? (unitPrice * qty).toFixed(2) : f.total
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -234,7 +290,15 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
         catalogo_sku: catalogoSkuFinal,
         nombre: skuFinal,
         cantidad: cantidadNum,
-        precio: totalNum
+        precio: totalNum,
+        ...(varianteSeleccionada
+          ? {
+              variante_id: varianteSeleccionada.variante_id,
+              variante_sku: varianteSeleccionada.sku,
+              color: varianteSeleccionada.color,
+              talla: varianteSeleccionada.talla,
+            }
+          : {}),
       }
     ];
 
@@ -411,10 +475,10 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                 id="total"
                 type="number"
                 min="0"
-                step="1"
+                step="0.01"
                 value={form.total}
                 onChange={set("total")}
-                placeholder="Ej. 85000"
+                placeholder="Ej. 25.00"
                 className={inputCls}
               />
             </div>
@@ -570,6 +634,7 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                     <button
                       type="button"
                       onClick={() => {
+                        setSelectedVariantId(null);
                         setForm(f => ({ ...f, catalogo_sku: "" }));
                         setSelectorAbierto(true);
                       }}
@@ -578,6 +643,59 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                       Cambiar
                     </button>
                   </div>
+
+                  {/* Selector de Variantes (Color / Talla) */}
+                  {variantesProductoSeleccionado.length > 0 && (
+                    <div className="border-t border-indigo-500/20 pt-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-[9px] font-bold uppercase tracking-wider text-indigo-500">
+                          Variante (Color / Talla) — Descuento automático al entregar:
+                        </label>
+                        {varianteSeleccionada && (
+                          <span className="text-[10px] font-mono font-bold text-indigo-500">
+                            {varianteSeleccionada.sku}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {variantesProductoSeleccionado.map(v => {
+                          const isSelected = selectedVariantId === v.variante_id;
+                          const sinStock = v.stock <= 0;
+                          const label = [
+                            v.color,
+                            v.talla && v.talla !== "Única" ? v.talla : ""
+                          ].filter(Boolean).join(" · ");
+                          return (
+                            <button
+                              key={v.variante_id}
+                              type="button"
+                              onClick={() => handleSeleccionarVariante(v)}
+                              className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 transition-all ${
+                                isSelected
+                                  ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
+                                  : sinStock
+                                  ? "bg-[var(--cd)] border-rose-500/30 text-rose-500/80 hover:border-rose-500"
+                                  : "bg-[var(--cd)] border-[var(--bd)] text-[var(--tx)] hover:border-indigo-500/50"
+                              }`}
+                            >
+                              <span>{label || v.sku}</span>
+                              <span
+                                className={`font-mono text-[10px] px-1 rounded ${
+                                  isSelected
+                                    ? "bg-white/20 text-white"
+                                    : sinStock
+                                    ? "bg-rose-500/10 text-rose-500"
+                                    : "bg-emerald-500/10 text-emerald-600"
+                                }`}
+                              >
+                                {v.stock} disp.
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Cantidad y Descripción para la Guía */}
                   <div className="border-t border-indigo-500/20 pt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -593,11 +711,14 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                         onChange={(e) => {
                           const val = e.target.value;
                           const num = Math.max(1, Math.round(Number(val) || 1));
+                          const unitPrice = varianteSeleccionada && Number(varianteSeleccionada.precio) > 0
+                            ? Number(varianteSeleccionada.precio)
+                            : Number(productoSeleccionado.precio_venta || 0);
                           setForm(f => ({
                             ...f,
                             cantidad: val,
-                            total: !pedido && productoSeleccionado.precio_venta
-                              ? (productoSeleccionado.precio_venta * num).toFixed(2)
+                            total: !pedido && unitPrice > 0
+                              ? (unitPrice * num).toFixed(2)
                               : f.total
                           }));
                         }}
@@ -618,11 +739,11 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                     </div>
                     <div className="sm:col-span-3 flex items-center justify-between gap-2 flex-wrap">
                       <span className="text-[9px] opacity-60">
-                        💡 Al pasar a empaque reservará <strong>{Math.max(1, Number(form.cantidad) || 1)} ud(s)</strong> de <strong>#{productoSeleccionado.sku}</strong> y las descontará al entregar.
+                        💡 Al pasar a empaque reservará <strong>{Math.max(1, Number(form.cantidad) || 1)} ud(s)</strong> de <strong>#{productoSeleccionado.sku}</strong>{varianteSeleccionada ? ` (${varianteSeleccionada.color}${varianteSeleccionada.talla !== "Única" ? ` · ${varianteSeleccionada.talla}` : ""})` : ""} y las descontará al entregar.
                       </span>
-                      {productoSeleccionado.stock_disponible < Math.max(1, Number(form.cantidad) || 1) && (
+                      {((varianteSeleccionada ? varianteSeleccionada.stock : productoSeleccionado.stock_disponible) < Math.max(1, Number(form.cantidad) || 1)) && (
                         <span className="text-[10px] font-bold text-rose-500">
-                          ⚠️ Pide {Math.max(1, Number(form.cantidad) || 1)} y solo hay {productoSeleccionado.stock_disponible} disp.
+                          ⚠️ Pide {Math.max(1, Number(form.cantidad) || 1)} y solo hay {varianteSeleccionada ? varianteSeleccionada.stock : productoSeleccionado.stock_disponible} disp.
                         </span>
                       )}
                     </div>

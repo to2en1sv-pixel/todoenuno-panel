@@ -30,11 +30,62 @@ import {
   compressImageFile,
   updateProductDetails,
   deleteProductItem,
-  getToddProductConfig
+  getToddProductConfig,
+  buildVariantSku,
+  createProductVariants,
+  updateProductVariant,
+  deleteProductVariant,
+  syncVariantsToMasterAndTodd,
+  formatVariantsForTodd
 } from '@/lib/inventory';
 import { ProductImg } from '@/components/inventory/ProductImg';
 import { Sprint10SqlModal } from '@/components/inventory/Sprint10SqlModal';
-import type { StockItem } from '@/types/inventory';
+import type { StockItem, ProductVariant } from '@/types/inventory';
+
+const COLOR_HEX_MAP: Record<string, string> = {
+  negro: '#18181b',
+  negra: '#18181b',
+  blanco: '#f8fafc',
+  blanca: '#f8fafc',
+  gris: '#71717a',
+  plomo: '#52525b',
+  azul: '#2563eb',
+  'azul marino': '#1e3a8a',
+  celeste: '#38bdf8',
+  rojo: '#dc2626',
+  roja: '#dc2626',
+  vino: '#881337',
+  rosado: '#ec4899',
+  rosa: '#f472b6',
+  verde: '#16a34a',
+  oliva: '#65a30d',
+  amarillo: '#eab308',
+  amarilla: '#eab308',
+  naranja: '#f97316',
+  morado: '#9333ea',
+  lila: '#c084fc',
+  beige: '#d6c3a5',
+  cafe: '#78350f',
+  café: '#78350f',
+  marron: '#78350f',
+  marrón: '#78350f',
+  dorado: '#ca8a04',
+  plateado: '#cbd5e1',
+  turquesa: '#14b8a6'
+};
+
+function getColorHex(colorName?: string | null): string {
+  const k = (colorName || '').trim().toLowerCase();
+  if (!k) return '#94a3b8';
+  if (COLOR_HEX_MAP[k]) return COLOR_HEX_MAP[k];
+  for (const [key, hex] of Object.entries(COLOR_HEX_MAP)) {
+    if (k.includes(key)) return hex;
+  }
+  return '#6366f1';
+}
+
+const QUICK_COLORS = ['Negro', 'Blanco', 'Gris', 'Azul', 'Rojo', 'Rosado', 'Verde', 'Beige', 'Café'];
+const QUICK_SIZES = ['Única', 'Estándar', 'XS', 'S', 'M', 'L', 'XL'];
 
 interface UnifiedCatalogItem {
   key: string;
@@ -120,7 +171,25 @@ export function CatalogoPage() {
   const [prodImagen, setProdImagen] = useState('');
   const [prodToddPitch, setProdToddPitch] = useState('');
   const [prodToddKeywords, setProdToddKeywords] = useState('');
+  const [prodColoresInit, setProdColoresInit] = useState('');
+  const [prodTallasInit, setProdTallasInit] = useState('Única');
   const [isSavingProd, setIsSavingProd] = useState(false);
+
+  // Gestor de Variantes (Colores / Tallas / Stock)
+  const [varMode, setVarMode] = useState<'single' | 'matrix'>('single');
+  const [varColor, setVarColor] = useState('');
+  const [varTalla, setVarTalla] = useState('Única');
+  const [varStock, setVarStock] = useState('1');
+  const [varPrecio, setVarPrecio] = useState('');
+  const [varCustomSku, setVarCustomSku] = useState('');
+  const [matrixColores, setMatrixColores] = useState('');
+  const [matrixTallas, setMatrixTallas] = useState('Única');
+  const [matrixStockPorVar, setMatrixStockPorVar] = useState('1');
+  const [matrixPrecio, setMatrixPrecio] = useState('');
+  const [syncMasterWithVariants, setSyncMasterWithVariants] = useState(true);
+  const [syncToddWithVariants, setSyncToddWithVariants] = useState(true);
+  const [isSavingVariant, setIsSavingVariant] = useState(false);
+  const [editingVarStock, setEditingVarStock] = useState<Record<number, string>>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const newProdFileInputRef = useRef<HTMLInputElement>(null);
@@ -264,6 +333,16 @@ export function CatalogoPage() {
     setSimRespuesta('');
     setShowUrlInput(false);
     setDeleteErrorBanner(null);
+    setVarColor('');
+    setVarTalla('Única');
+    setVarStock('1');
+    setVarPrecio(item.precio_venta ? String(item.precio_venta) : '');
+    setVarCustomSku('');
+    setMatrixColores('');
+    setMatrixTallas('Única');
+    setMatrixStockPorVar('1');
+    setMatrixPrecio(item.precio_venta ? String(item.precio_venta) : '');
+    setEditingVarStock({});
   };
 
   // Si llega con ?sku=XYZ desde Inventario, abrir ficha automáticamente
@@ -331,10 +410,218 @@ export function CatalogoPage() {
     return list;
   }, [unifiedCatalog, search, catalogFilter]);
 
-  const productVariants = useMemo(() => {
+  // Mapa rápido template_id -> variantes para pintar badges en tarjetas del catálogo
+  const variantsByTemplateId = useMemo(() => {
+    const map = new Map<string, ProductVariant[]>();
+    (variantes.data ?? []).forEach((v: any) => {
+      const k = String(v.template_id || '').trim();
+      if (!k) return;
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push({
+        variante_id: Number(v.variante_id),
+        template_id: Number(v.template_id),
+        sku: String(v.sku || '').toUpperCase(),
+        nombre_completo: v.nombre_completo || v.sku || '',
+        color: v.color || '',
+        talla: v.talla || 'Única',
+        stock: Number(v.stock) || 0,
+        precio: Number(v.precio) || 0,
+        estado: v.estado || 'DISPONIBLE',
+        image_url: v.image_url || null
+      });
+    });
+    return map;
+  }, [variantes.data]);
+
+  const productVariants = useMemo<ProductVariant[]>(() => {
     if (!selectedItem || !selectedItem.template_id) return [];
-    return (variantes.data ?? []).filter((v: any) => String(v.template_id) === String(selectedItem.template_id));
-  }, [variantes.data, selectedItem]);
+    return variantsByTemplateId.get(String(selectedItem.template_id)) || [];
+  }, [variantsByTemplateId, selectedItem]);
+
+  const totalVariantsStock = useMemo(
+    () => productVariants.filter(v => v.estado !== 'PAUSADO').reduce((s, v) => s + Math.max(v.stock || 0, 0), 0),
+    [productVariants]
+  );
+
+  const toddVariantsPreview = useMemo(
+    () => formatVariantsForTodd(productVariants, parseFloat(editPrecio || '0') || selectedItem?.precio_venta || 0),
+    [productVariants, editPrecio, selectedItem?.precio_venta]
+  );
+
+  const refreshAfterVariantChange = async (masterSku: string) => {
+    const [, freshStock] = await Promise.all([variantes.refetch(), fetchStockItems(), productos.refetch()]);
+    setStockItems(freshStock.items);
+    const updatedItem = freshStock.items.find(s => s.sku.toUpperCase() === masterSku.toUpperCase());
+    if (updatedItem) {
+      if (updatedItem.todd_instrucciones !== undefined) {
+        setEditToddInstrucciones(updatedItem.todd_instrucciones || '');
+      }
+      if (updatedItem.todd_keywords !== undefined) {
+        setEditToddKeywords(updatedItem.todd_keywords || '');
+      }
+    }
+  };
+
+  const handleAddSingleVariant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedItem) return;
+    if (!varColor.trim() && !varTalla.trim()) {
+      showToast('err', 'Ingresa al menos un color o una talla para crear la variante.');
+      return;
+    }
+
+    setIsSavingVariant(true);
+    const res = await createProductVariants({
+      masterSku: selectedItem.sku,
+      templateId: selectedItem.template_id,
+      productName: editNombre.trim() || selectedItem.nombre,
+      basePrice: parseFloat(editPrecio || '0') || selectedItem.precio_venta,
+      productImage: editImageUrl.trim() || selectedItem.image_url,
+      variantsToCreate: [
+        {
+          color: varColor.trim() || 'Estándar',
+          talla: varTalla.trim() || 'Única',
+          stock: Math.max(parseInt(varStock || '0', 10) || 0, 0),
+          precio: varPrecio !== '' ? parseFloat(varPrecio) : undefined,
+          sku: varCustomSku.trim() || undefined
+        }
+      ],
+      syncMasterStock: syncMasterWithVariants,
+      syncToddDetails: syncToddWithVariants
+    });
+    setIsSavingVariant(false);
+
+    if (res.success) {
+      showToast(
+        'ok',
+        `Variante agregada (${res.createdCount}) y sincronizada con Bodega y Bot Todd.`
+      );
+      setVarColor('');
+      setVarCustomSku('');
+      await refreshAfterVariantChange(selectedItem.sku);
+    } else {
+      showToast('err', res.error || 'No se pudo agregar la variante en Supabase.');
+    }
+  };
+
+  const handleGenerateMatrixVariants = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedItem) return;
+    const colores = matrixColores
+      .split(',')
+      .map(c => c.trim())
+      .filter(Boolean);
+    const tallas = matrixTallas
+      .split(',')
+      .map(t => t.trim())
+      .filter(Boolean);
+
+    if (colores.length === 0) {
+      showToast('err', 'Ingresa al menos un color separado por coma (ej. Negro, Gris, Azul).');
+      return;
+    }
+
+    const tallasFinal = tallas.length > 0 ? tallas : ['Única'];
+    const qtyEach = Math.max(parseInt(matrixStockPorVar || '0', 10) || 0, 0);
+    const priceVal = matrixPrecio !== '' ? parseFloat(matrixPrecio) : undefined;
+
+    const toCreate = colores.flatMap(color =>
+      tallasFinal.map(talla => ({
+        color,
+        talla,
+        stock: qtyEach,
+        precio: priceVal
+      }))
+    );
+
+    setIsSavingVariant(true);
+    const res = await createProductVariants({
+      masterSku: selectedItem.sku,
+      templateId: selectedItem.template_id,
+      productName: editNombre.trim() || selectedItem.nombre,
+      basePrice: parseFloat(editPrecio || '0') || selectedItem.precio_venta,
+      productImage: editImageUrl.trim() || selectedItem.image_url,
+      variantsToCreate: toCreate,
+      syncMasterStock: syncMasterWithVariants,
+      syncToddDetails: syncToddWithVariants
+    });
+    setIsSavingVariant(false);
+
+    if (res.success) {
+      showToast('ok', `${res.createdCount} variante(s) generadas y sincronizadas con Bodega y Bot Todd.`);
+      setMatrixColores('');
+      await refreshAfterVariantChange(selectedItem.sku);
+    } else {
+      showToast('err', res.error || 'No se pudieron generar las variantes.');
+    }
+  };
+
+  const handleVariantStockUpdate = async (v: ProductVariant, newStock: number) => {
+    if (!selectedItem || !v.template_id) return;
+    const cleanQty = Math.max(Math.round(newStock), 0);
+    setIsSavingVariant(true);
+    const res = await updateProductVariant({
+      varianteId: v.variante_id,
+      masterSku: selectedItem.sku,
+      templateId: v.template_id,
+      productName: editNombre.trim() || selectedItem.nombre,
+      basePrice: parseFloat(editPrecio || '0') || selectedItem.precio_venta,
+      patch: { stock: cleanQty },
+      syncMasterStock: syncMasterWithVariants,
+      syncToddDetails: syncToddWithVariants
+    });
+    setIsSavingVariant(false);
+
+    if (res.success) {
+      setEditingVarStock(prev => {
+        const next = { ...prev };
+        delete next[v.variante_id];
+        return next;
+      });
+      await refreshAfterVariantChange(selectedItem.sku);
+    } else {
+      showToast('err', res.error || 'Error actualizando stock de variante.');
+    }
+  };
+
+  const handleDeleteVariant = async (v: ProductVariant) => {
+    if (!selectedItem || !v.template_id) return;
+    setIsSavingVariant(true);
+    const res = await deleteProductVariant({
+      varianteId: v.variante_id,
+      variantSku: v.sku,
+      masterSku: selectedItem.sku,
+      templateId: v.template_id,
+      productName: editNombre.trim() || selectedItem.nombre,
+      basePrice: parseFloat(editPrecio || '0') || selectedItem.precio_venta,
+      syncMasterStock: syncMasterWithVariants,
+      syncToddDetails: syncToddWithVariants
+    });
+    setIsSavingVariant(false);
+
+    if (res.success) {
+      showToast('ok', `Variante ${v.color} (${v.talla}) eliminada.`);
+      await refreshAfterVariantChange(selectedItem.sku);
+    } else {
+      showToast('err', res.error || 'No se pudo eliminar la variante.');
+    }
+  };
+
+  const handleForceSyncToddVariants = async () => {
+    if (!selectedItem || !selectedItem.template_id) return;
+    setIsSavingVariant(true);
+    await syncVariantsToMasterAndTodd({
+      masterSku: selectedItem.sku,
+      templateId: Number(selectedItem.template_id),
+      productName: editNombre.trim() || selectedItem.nombre,
+      basePrice: parseFloat(editPrecio || '0') || selectedItem.precio_venta,
+      syncMasterStock: syncMasterWithVariants,
+      syncToddDetails: true
+    });
+    setIsSavingVariant(false);
+    showToast('ok', 'Colores, tallas y stock sincronizados con Bot Todd y Bodega.');
+    await refreshAfterVariantChange(selectedItem.sku);
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -453,13 +740,27 @@ export function CatalogoPage() {
     const reglas = editToddInstrucciones ? `\n(Regla del bot: ${editToddInstrucciones})` : '';
     const precio = editPrecio ? `$${parseFloat(editPrecio).toFixed(2)}` : '$25.00';
 
+    const disponiblesVars = productVariants.filter(v => v.estado !== 'PAUSADO' && v.stock > 0);
+    const variantesTxt = disponiblesVars.length > 0
+      ? `\n\n🎨 *Colores / Tallas disponibles:*\n` +
+        disponiblesVars
+          .map(v => {
+            const label = [v.color, v.talla && v.talla !== 'Única' ? `Talla ${v.talla}` : ''].filter(Boolean).join(' · ');
+            return `• ${label}: ${v.stock} disp.`;
+          })
+          .join('\n')
+      : '';
+
+    const totalUds = disponiblesVars.length > 0 ? totalVariantsStock : selectedItem.stock_disponible;
+
     setTimeout(() => {
       setSimRespuesta(
         `¡Hola! 👋 Gracias por consultar por el *${editNombre || selectedItem.nombre}*.\n\n` +
           `${pitch}\n\n` +
-          `💰 *Precio especial:* ${precio} USD con pago contra entrega en todo El Salvador 🇸🇻.\n` +
-          `📦 *Disponibilidad:* Tenemos ${selectedItem.stock_disponible} uds en bodega listas para envío en 24-48 horas.${reglas}\n\n` +
-          `¿Te gustaría que te tomemos los datos de envío ahora mismo? 📲`
+          `💰 *Precio especial:* ${precio} USD con pago contra entrega en todo El Salvador 🇸🇻.` +
+          `${variantesTxt}\n` +
+          `📦 *Disponibilidad total:* Tenemos ${totalUds} uds listas para envío en 24-48 horas.${reglas}\n\n` +
+          `¿Qué color o talla te gustaría pedir y a qué dirección te lo enviamos? 📲`
       );
       setIsSimulating(false);
     }, 250);
@@ -470,23 +771,63 @@ export function CatalogoPage() {
     if (!prodNombre.trim() || !prodSku.trim()) return;
     setIsSavingProd(true);
 
+    const coloresInit = prodColoresInit
+      .split(',')
+      .map(c => c.trim())
+      .filter(Boolean);
+    const tallasInit = prodTallasInit
+      .split(',')
+      .map(t => t.trim())
+      .filter(Boolean);
+    const tieneVariantesIniciales = coloresInit.length > 0;
+    const stockInputVal = Math.max(parseInt(prodStockInicial || '0', 10) || 0, 0);
+    const skuClean = prodSku.toUpperCase().trim();
+    const precioVal = parseFloat(prodPrecio || '0');
+
     const res = await saveProductItem({
       nombre: prodNombre.trim(),
-      sku: prodSku.toUpperCase().trim(),
+      sku: skuClean,
       categoria: prodCategoria.trim() || 'General',
-      precio_venta: parseFloat(prodPrecio || '0'),
+      precio_venta: precioVal,
       costo_unitario: parseFloat(prodCosto || '0'),
-      stock_inicial: parseInt(prodStockInicial || '0', 10),
+      stock_inicial: tieneVariantesIniciales ? 0 : stockInputVal,
       stock_minimo: parseInt(prodStockMinimo || '5', 10),
       image_url: prodImagen.trim() || undefined,
       todd_pitch: prodToddPitch.trim() || undefined,
       todd_keywords: prodToddKeywords.trim() || undefined
     });
 
+    if (res.success && tieneVariantesIniciales) {
+      const tallasList = tallasInit.length > 0 ? tallasInit : ['Única'];
+      const varsToCreate = coloresInit.flatMap(color =>
+        tallasList.map(talla => ({
+          color,
+          talla,
+          stock: stockInputVal,
+          precio: precioVal
+        }))
+      );
+      await createProductVariants({
+        masterSku: skuClean,
+        templateId: res.item?.template_id,
+        productName: prodNombre.trim(),
+        basePrice: precioVal,
+        productImage: prodImagen.trim() || null,
+        variantsToCreate: varsToCreate,
+        syncMasterStock: true,
+        syncToddDetails: true
+      });
+    }
+
     setIsSavingProd(false);
 
     if (res.success) {
-      showToast('ok', `Producto "${prodNombre.trim()}" (${prodSku.toUpperCase()}) creado en Supabase.`);
+      showToast(
+        'ok',
+        tieneVariantesIniciales
+          ? `Producto "${prodNombre.trim()}" y sus variantes creados y sincronizados con Bot Todd.`
+          : `Producto "${prodNombre.trim()}" (${skuClean}) creado en Supabase.`
+      );
       setShowProductoModal(false);
       setProdNombre('');
       setProdSku('');
@@ -498,7 +839,9 @@ export function CatalogoPage() {
       setProdImagen('');
       setProdToddPitch('');
       setProdToddKeywords('');
-      await Promise.all([productos.refetch(), loadCatalogData()]);
+      setProdColoresInit('');
+      setProdTallasInit('Única');
+      await Promise.all([productos.refetch(), variantes.refetch(), loadCatalogData()]);
     } else {
       showToast('err', res.error || 'No se pudo crear el producto en Supabase.');
     }
@@ -821,6 +1164,31 @@ export function CatalogoPage() {
                   <div className="font-bold text-xs line-clamp-2 leading-snug mt-0.5 text-[var(--tx)]">
                     {item.nombre}
                   </div>
+                  {(() => {
+                    const cardVars = item.template_id ? (variantsByTemplateId.get(String(item.template_id)) || []) : [];
+                    if (cardVars.length === 0) return null;
+                    return (
+                      <div className="mt-1.5 flex items-center gap-1 flex-wrap">
+                        {cardVars.slice(0, 4).map(cv => (
+                          <span
+                            key={cv.variante_id}
+                            title={`${cv.color}${cv.talla && cv.talla !== 'Única' ? ` (${cv.talla})` : ''}: ${cv.stock} uds`}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sf border border-[var(--bd)] text-[9px] text-[var(--tx)]"
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full border border-black/20 shrink-0"
+                              style={{ backgroundColor: getColorHex(cv.color) }}
+                            />
+                            <span className="truncate max-w-[48px]">{cv.color}</span>
+                            <span className="font-mono opacity-60">{cv.stock}</span>
+                          </span>
+                        ))}
+                        {cardVars.length > 4 && (
+                          <span className="text-[9px] tx-mu font-semibold">+{cardVars.length - 4}</span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -1108,8 +1476,50 @@ export function CatalogoPage() {
                       </h4>
                     </div>
                     <p className="text-[11px] text-purple-900/80 dark:text-purple-200/80 mt-1 leading-relaxed">
-                      Todd usará esta ficha en WhatsApp y UniChat leyendo la disponibilidad real desde Inventario.
+                      Todd usará esta ficha en WhatsApp y UniChat leyendo la disponibilidad real desde Inventario y Variantes (colores/tallas).
                     </p>
+                  </div>
+
+                  {/* Resumen en vivo de Variantes alimentadas a Bot Todd */}
+                  <div className="p-3 rounded-xl bg-sf border border-[var(--bd)] space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] uppercase font-bold tx-mu flex items-center gap-1">
+                        <Layers size={12} className="text-indigo-500" /> Variantes alimentando a Todd ({productVariants.length})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setDrawerTab('variantes')}
+                        className="text-[10px] font-bold text-[var(--ac)] hover:underline"
+                      >
+                        Editar colores/tallas →
+                      </button>
+                    </div>
+                    {productVariants.length === 0 ? (
+                      <p className="text-[11px] tx-mu">
+                        Sin variantes aún. Agrega colores o tallas en la pestaña <strong>Variantes</strong> para que Todd indique opciones y stock exacto.
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {productVariants.map(v => (
+                          <span
+                            key={v.variante_id}
+                            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-semibold ${
+                              v.stock > 0
+                                ? 'bg-cd border-[var(--bd)] text-[var(--tx)]'
+                                : 'bg-rose-500/5 border-rose-500/20 text-rose-500'
+                            }`}
+                          >
+                            <span
+                              className="w-2.5 h-2.5 rounded-full border border-black/20 shrink-0"
+                              style={{ backgroundColor: getColorHex(v.color) }}
+                            />
+                            {v.color}
+                            {v.talla && v.talla !== 'Única' ? ` · ${v.talla}` : ''}:{' '}
+                            <strong className="font-mono">{v.stock}</strong>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-center justify-between">
@@ -1143,14 +1553,14 @@ export function CatalogoPage() {
 
                   <div>
                     <label className="block text-[10px] uppercase font-bold tx-mu mb-1 flex items-center gap-1.5">
-                      <MessageSquare size={12} className="text-purple-500" /> Ofertas & Reglas del Bot
+                      <MessageSquare size={12} className="text-purple-500" /> Ofertas & Reglas del Bot (incluye variantes sincronizadas)
                     </label>
-                    <input
-                      type="text"
+                    <textarea
+                      rows={3}
                       value={editToddInstrucciones}
                       onChange={e => setEditToddInstrucciones(e.target.value)}
                       placeholder="Ej. Ofrecer promoción 2 por $25."
-                      className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-purple-500"
+                      className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-purple-500 leading-relaxed resize-none"
                     />
                   </div>
 
@@ -1162,7 +1572,7 @@ export function CatalogoPage() {
                       type="text"
                       value={editToddKeywords}
                       onChange={e => setEditToddKeywords(e.target.value)}
-                      placeholder="masajeador, cuello, dolores, ems"
+                      placeholder="masajeador, cuello, dolores, negro, gris"
                       className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-purple-500"
                     />
                   </div>
@@ -1185,7 +1595,7 @@ export function CatalogoPage() {
                     <div className="p-3 bg-emerald-950/10 dark:bg-emerald-900/20 rounded-xl border border-emerald-500/20 text-xs font-mono leading-relaxed whitespace-pre-wrap text-[var(--tx)]">
                       {simRespuesta || (
                         <span className="tx-mu italic font-sans text-[11px]">
-                          Presiona "Probar" para ver cómo responderá Todd por WhatsApp.
+                          Presiona "Probar" para ver cómo responderá Todd con colores, tallas y disponibilidad.
                         </span>
                       )}
                     </div>
@@ -1193,39 +1603,382 @@ export function CatalogoPage() {
                 </div>
               )}
 
-              {/* SUB-PESTAÑA 3: VARIANTES */}
+              {/* SUB-PESTAÑA 3: VARIANTES (COLORES, TALLAS Y STOCK POR VARIANTE) */}
               {drawerTab === 'variantes' && (
-                <div className="space-y-3">
-                  <h4 className="font-bold text-xs uppercase tx-mu flex items-center gap-2">
-                    <Package size={15} /> Variantes Vinculadas ({productVariants.length})
-                  </h4>
-                  <div className="flex flex-col gap-2">
-                    {productVariants.length === 0 && (
-                      <div className="text-xs tx-mu p-4 bg-sf rounded-xl border border-[var(--bd)] text-center">
-                        Este producto usa un SKU único: <strong className="font-mono text-[var(--tx)]">{selectedItem.sku}</strong>
+                <div className="space-y-4">
+                  {/* Barra de Sincronización con Bodega y Bot Todd */}
+                  <div className="p-3.5 rounded-2xl bg-indigo-500/5 border border-indigo-500/20 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 block">
+                          Stock Total por Variantes
+                        </span>
+                        <div className="text-xs font-bold text-[var(--tx)] mt-0.5">
+                          <span className="font-mono text-sm text-emerald-600 dark:text-emerald-400">
+                            {totalVariantsStock} uds
+                          </span>{' '}
+                          <span className="tx-mu font-normal">en {productVariants.length} variante(s)</span>
+                        </div>
                       </div>
-                    )}
-                    {productVariants.map((v: any) => {
-                      const stockNativo = stockItems.find(s => s.sku === v.sku);
-                      const disponible = stockNativo ? stockNativo.stock_disponible : 0;
-                      return (
-                        <div
-                          key={v.variante_id || v.sku}
-                          className="p-3 bg-sf border border-[var(--bd)] rounded-xl flex items-center justify-between"
+
+                      {productVariants.length > 0 && (
+                        <button
+                          type="button"
+                          disabled={isSavingVariant}
+                          onClick={handleForceSyncToddVariants}
+                          className="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl text-[10px] font-bold flex items-center gap-1"
+                          title="Sincronizar variantes hacia instrucciones de Bot Todd y Bodega"
                         >
-                          <div>
-                            <div className="mono text-xs font-bold text-[var(--tx)]">{v.sku}</div>
-                            <div className="text-[10px] tx-mu mt-0.5">
-                              {[v.color, v.talla].filter(Boolean).join(' • ') || 'Estándar'}
-                            </div>
+                          <Bot size={12} /> Sincronizar Todd
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-3 pt-1 text-[11px]">
+                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={syncMasterWithVariants}
+                          onChange={e => setSyncMasterWithVariants(e.target.checked)}
+                          className="accent-emerald-600"
+                        />
+                        <span>Sumar al stock de Bodega</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={syncToddWithVariants}
+                          onChange={e => setSyncToddWithVariants(e.target.checked)}
+                          className="accent-purple-600"
+                        />
+                        <span>Alimentar Bot Todd</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Selector de Modo de Creación */}
+                  <div className="p-3.5 rounded-2xl bg-sf border border-[var(--bd)] space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-[var(--tx)]">Agregar Colores / Tallas</span>
+                      <div className="flex bg-cd p-0.5 rounded-lg border border-[var(--bd)] text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setVarMode('single')}
+                          className={`px-2 py-1 rounded-md transition-colors ${
+                            varMode === 'single' ? 'bg-[var(--ac)] text-white' : 'tx-mu'
+                          }`}
+                        >
+                          + Individual
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVarMode('matrix')}
+                          className={`px-2 py-1 rounded-md transition-colors ${
+                            varMode === 'matrix' ? 'bg-[var(--ac)] text-white' : 'tx-mu'
+                          }`}
+                        >
+                          ⚡ Matriz Rápida
+                        </button>
+                      </div>
+                    </div>
+
+                    {varMode === 'single' ? (
+                      <form onSubmit={handleAddSingleVariant} className="space-y-3">
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                            Color *
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="w-6 h-6 rounded-lg border border-[var(--bd)] shrink-0"
+                              style={{ backgroundColor: getColorHex(varColor) }}
+                            />
+                            <input
+                              type="text"
+                              value={varColor}
+                              onChange={e => setVarColor(e.target.value)}
+                              placeholder="Ej. Gris, Negro, Azul Marino..."
+                              className="flex-1 p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs outline-none focus:border-[var(--ac)]"
+                            />
                           </div>
-                          <div className="text-right">
-                            <div className="font-bold text-xs">${Number(v.precio || 0).toFixed(2)}</div>
-                            <div className="text-[10px] font-bold text-emerald-500">{disponible} disp.</div>
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {QUICK_COLORS.map(c => (
+                              <button
+                                key={c}
+                                type="button"
+                                onClick={() => setVarColor(c)}
+                                className={`px-1.5 py-0.5 rounded-md border text-[10px] flex items-center gap-1 transition-colors ${
+                                  varColor.toLowerCase() === c.toLowerCase()
+                                    ? 'border-[var(--ac)] bg-[var(--ac)]/10 font-bold'
+                                    : 'border-[var(--bd)] bg-cd tx-mu hover:text-[var(--tx)]'
+                                }`}
+                              >
+                                <span
+                                  className="w-2 h-2 rounded-full border border-black/20"
+                                  style={{ backgroundColor: getColorHex(c) }}
+                                />
+                                {c}
+                              </button>
+                            ))}
                           </div>
                         </div>
-                      );
-                    })}
+
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                            Talla / Tamaño
+                          </label>
+                          <input
+                            type="text"
+                            value={varTalla}
+                            onChange={e => setVarTalla(e.target.value)}
+                            placeholder="Única, S, M, L, XL..."
+                            className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs outline-none focus:border-[var(--ac)]"
+                          />
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {QUICK_SIZES.map(sz => (
+                              <button
+                                key={sz}
+                                type="button"
+                                onClick={() => setVarTalla(sz)}
+                                className={`px-2 py-0.5 rounded-md border text-[10px] font-semibold ${
+                                  varTalla === sz
+                                    ? 'border-[var(--ac)] bg-[var(--ac)]/10 text-[var(--ac)]'
+                                    : 'border-[var(--bd)] bg-cd tx-mu hover:text-[var(--tx)]'
+                                }`}
+                              >
+                                {sz}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                              Unidades *
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={varStock}
+                              onChange={e => setVarStock(e.target.value)}
+                              className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs font-bold outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                              Precio ($)
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={varPrecio}
+                              onChange={e => setVarPrecio(e.target.value)}
+                              placeholder={selectedItem.precio_venta ? String(selectedItem.precio_venta) : '15.00'}
+                              className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs font-bold outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                              SKU (Opc.)
+                            </label>
+                            <input
+                              type="text"
+                              value={varCustomSku}
+                              onChange={e => setVarCustomSku(e.target.value.toUpperCase())}
+                              placeholder={buildVariantSku(selectedItem.sku, varColor, varTalla)}
+                              className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-[10px] font-mono outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={isSavingVariant}
+                          className="w-full py-2 bg-[var(--ac)] hover:opacity-90 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm"
+                        >
+                          <Plus size={14} /> {isSavingVariant ? 'Guardando...' : 'Agregar Variante'}
+                        </button>
+                      </form>
+                    ) : (
+                      <form onSubmit={handleGenerateMatrixVariants} className="space-y-3">
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                            Colores (separados por coma) *
+                          </label>
+                          <input
+                            type="text"
+                            value={matrixColores}
+                            onChange={e => setMatrixColores(e.target.value)}
+                            placeholder="Ej. Negro, Gris, Azul, Rosado"
+                            className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs outline-none focus:border-[var(--ac)]"
+                          />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                              Tallas (coma)
+                            </label>
+                            <input
+                              type="text"
+                              value={matrixTallas}
+                              onChange={e => setMatrixTallas(e.target.value)}
+                              placeholder="Única o S, M, L"
+                              className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                              Uds c/u
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={matrixStockPorVar}
+                              onChange={e => setMatrixStockPorVar(e.target.value)}
+                              className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs font-bold outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                              Precio ($)
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={matrixPrecio}
+                              onChange={e => setMatrixPrecio(e.target.value)}
+                              placeholder={selectedItem.precio_venta ? String(selectedItem.precio_venta) : '15.00'}
+                              className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs font-bold outline-none"
+                            />
+                          </div>
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={isSavingVariant}
+                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm"
+                        >
+                          <Sparkles size={14} /> {isSavingVariant ? 'Generando...' : 'Generar Combinaciones'}
+                        </button>
+                      </form>
+                    )}
+                  </div>
+
+                  {/* Lista Editable de Variantes Registradas */}
+                  <div className="space-y-2">
+                    <h4 className="font-bold text-xs uppercase tx-mu flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Package size={14} /> Variantes Registradas ({productVariants.length})
+                      </span>
+                      {toddVariantsPreview.bulletLines.length > 0 && (
+                        <span className="text-[10px] font-normal text-purple-500">Todd Activo ✓</span>
+                      )}
+                    </h4>
+
+                    {productVariants.length === 0 ? (
+                      <div className="text-xs tx-mu p-4 bg-sf rounded-xl border border-[var(--bd)] text-center">
+                        Este producto aún no tiene variantes de color o talla. Agrega una arriba para dividir tu stock por color/talla y alimentar a Bot Todd.
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {productVariants.map((v) => {
+                          const inputVal =
+                            editingVarStock[v.variante_id] !== undefined
+                              ? editingVarStock[v.variante_id]
+                              : String(v.stock);
+                          const isDirty =
+                            editingVarStock[v.variante_id] !== undefined &&
+                            Number(editingVarStock[v.variante_id]) !== v.stock;
+
+                          return (
+                            <div
+                              key={v.variante_id || v.sku}
+                              className="p-3 bg-sf border border-[var(--bd)] rounded-xl flex items-center justify-between gap-2"
+                            >
+                              <div className="min-w-0 flex items-center gap-2.5">
+                                <span
+                                  className="w-7 h-7 rounded-lg border border-black/20 shrink-0 shadow-inner"
+                                  style={{ backgroundColor: getColorHex(v.color) }}
+                                  title={v.color}
+                                />
+                                <div className="min-w-0">
+                                  <div className="text-xs font-bold text-[var(--tx)] truncate flex items-center gap-1.5">
+                                    <span>{v.color || 'Estándar'}</span>
+                                    {v.talla && v.talla !== 'Única' && (
+                                      <span className="px-1.5 py-0.2 rounded bg-cd border border-[var(--bd)] text-[10px] font-mono">
+                                        {v.talla}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="mono text-[10px] tx-mu truncate">
+                                    {v.sku} · ${Number(v.precio || selectedItem.precio_venta || 0).toFixed(2)}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={isSavingVariant || v.stock <= 0}
+                                  onClick={() => handleVariantStockUpdate(v, Math.max(v.stock - 1, 0))}
+                                  className="w-6 h-6 rounded-lg border border-[var(--bd)] bg-cd hover:bg-black/10 disabled:opacity-40 text-xs font-bold flex items-center justify-center"
+                                  title="Restar 1 unidad"
+                                >
+                                  −
+                                </button>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={inputVal}
+                                  onChange={e =>
+                                    setEditingVarStock(prev => ({
+                                      ...prev,
+                                      [v.variante_id]: e.target.value
+                                    }))
+                                  }
+                                  onBlur={() => {
+                                    if (isDirty) {
+                                      handleVariantStockUpdate(v, parseInt(inputVal || '0', 10) || 0);
+                                    }
+                                  }}
+                                  className="w-12 p-1 text-center rounded-lg border border-[var(--bd)] bg-cd text-xs font-mono font-bold outline-none focus:border-[var(--ac)]"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={isSavingVariant}
+                                  onClick={() => handleVariantStockUpdate(v, v.stock + 1)}
+                                  className="w-6 h-6 rounded-lg border border-[var(--bd)] bg-cd hover:bg-black/10 disabled:opacity-40 text-xs font-bold flex items-center justify-center"
+                                  title="Sumar 1 unidad"
+                                >
+                                  +
+                                </button>
+                                {isDirty && (
+                                  <button
+                                    type="button"
+                                    disabled={isSavingVariant}
+                                    onClick={() => handleVariantStockUpdate(v, parseInt(inputVal || '0', 10) || 0)}
+                                    className="px-2 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-bold"
+                                  >
+                                    OK
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={isSavingVariant}
+                                  onClick={() => handleDeleteVariant(v)}
+                                  className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
+                                  title="Eliminar variante"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1478,6 +2231,33 @@ export function CatalogoPage() {
                     <Upload size={13} /> Subir
                   </button>
                 </div>
+              </div>
+
+              <div className="p-3 bg-indigo-500/5 rounded-xl border border-indigo-500/20 space-y-2">
+                <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                  <Layers size={13} /> Variantes iniciales por Color / Talla (Opcional)
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={prodColoresInit}
+                    onChange={e => setProdColoresInit(e.target.value)}
+                    placeholder="Colores: Negro, Gris, Azul"
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                  />
+                  <input
+                    type="text"
+                    value={prodTallasInit}
+                    onChange={e => setProdTallasInit(e.target.value)}
+                    placeholder="Tallas: Única o S, M, L"
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                  />
+                </div>
+                {prodColoresInit.trim() && (
+                  <p className="text-[10px] tx-mu">
+                    Se creará cada combinación con <strong>{prodStockInicial || '0'} uds</strong> iniciales y se sincronizarán con Bot Todd y Bodega.
+                  </p>
+                )}
               </div>
 
               <div className="p-3 bg-purple-500/5 rounded-xl border border-purple-500/20 space-y-2">

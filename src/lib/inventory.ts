@@ -7,7 +7,9 @@ import type {
   KardexMovement, 
   EntradaMercaderiaFormData, 
   ProductFormData,
-  KardexMovementType
+  KardexMovementType,
+  ProductVariant,
+  ProductVariantInput
 } from '@/types/inventory';
 
 // Almacén local de respaldo en memoria (solo cuando Supabase no está disponible)
@@ -1540,6 +1542,33 @@ export async function syncOrderInventoryOnStatusChange(params: {
     }
   }
 
+  // Si hubo venta o devolución de una variante específica (color/talla), ajustar también public.productos_variantes + Bot Todd
+  if (actions.length > 0 && Array.isArray(order.items) && order.items.length > 0) {
+    for (const a of actions) {
+      if (a.tipo === 'venta_salida' || a.tipo === 'devolucion_entrada') {
+        const matchedItem = order.items.find((it: any) =>
+          (it?.variante_id || it?.variante_sku || it?.color || it?.talla) &&
+          (!it?.catalogo_sku || normalizeSku(it.catalogo_sku) === a.sku)
+        );
+        if (matchedItem) {
+          const delta = a.tipo === 'venta_salida' ? -a.cantidad : a.cantidad;
+          try {
+            await applyVariantStockDelta({
+              masterSku: a.sku,
+              varianteId: matchedItem.variante_id ? Number(matchedItem.variante_id) : undefined,
+              varianteSku: matchedItem.variante_sku || undefined,
+              color: matchedItem.color || undefined,
+              talla: matchedItem.talla || undefined,
+              delta
+            });
+          } catch {
+            // no bloquear flujo principal de pedidos
+          }
+        }
+      }
+    }
+  }
+
   // Construir mensaje amigable de resumen
   let summaryText = 'Sin cambios de inventario';
   if (actions.length > 0) {
@@ -1566,4 +1595,572 @@ export async function syncOrderInventoryOnStatusChange(params: {
     error: errors.length > 0 ? errors.join(' | ') : undefined
   };
 }
+
+/* ============================================================================
+ * VARIANTES DE PRODUCTOS (COLOR, TALLA, STOCK POR VARIANTE & BOT TODD)
+ * ========================================================================== */
+
+const TODD_VARIANTS_MARKER = '[VARIANTES_DISPONIBLES]:';
+
+function slugToken(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 18);
+}
+
+export function buildVariantSku(baseSku: string, color?: string, talla?: string): string {
+  const parts = [normalizeSku(baseSku)];
+  const c = slugToken(color || '');
+  const t = slugToken(talla || '');
+  if (c && c !== 'ESTANDAR' && c !== 'UNICO') parts.push(c);
+  if (t && t !== 'UNICA' && t !== 'ESTANDAR') parts.push(t);
+  if (parts.length === 1) parts.push('STD');
+  return parts.join('-');
+}
+
+function generateSafeInt4Id(): number {
+  return Math.floor(100_000_000 + Math.random() * 1_850_000_000);
+}
+
+/**
+ * Quita el bloque autogenerado de variantes para preservar las instrucciones manuales del usuario.
+ */
+export function stripVariantToddBlock(text: string | null | undefined): string {
+  const raw = (text || '').trim();
+  const idx = raw.indexOf(TODD_VARIANTS_MARKER);
+  if (idx === -1) return raw;
+  return raw.slice(0, idx).trim();
+}
+
+/**
+ * Genera el resumen legible de colores, tallas, precios y stock para Bot Todd y palabras clave.
+ */
+export function formatVariantsForTodd(
+  variants: ProductVariant[],
+  basePrice = 0
+): {
+  summaryBlock: string;
+  bulletLines: string[];
+  keywordsExtra: string[];
+  totalStock: number;
+} {
+  const activeVars = variants.filter(v => v.estado !== 'PAUSADO');
+  const totalStock = activeVars.reduce((acc, v) => acc + Math.max(Number(v.stock) || 0, 0), 0);
+
+  if (activeVars.length === 0) {
+    return { summaryBlock: '', bulletLines: [], keywordsExtra: [], totalStock: 0 };
+  }
+
+  const kwSet = new Set<string>();
+  const bulletLines = activeVars.map(v => {
+    const colorTxt = (v.color || '').trim();
+    const tallaTxt = (v.talla || '').trim();
+    if (colorTxt) kwSet.add(colorTxt.toLowerCase());
+    if (tallaTxt && tallaTxt.toLowerCase() !== 'única' && tallaTxt.toLowerCase() !== 'unica') {
+      kwSet.add(`talla ${tallaTxt.toLowerCase()}`);
+    }
+    const labelParts = [colorTxt, tallaTxt && tallaTxt.toLowerCase() !== 'única' ? `Talla ${tallaTxt}` : ''].filter(Boolean);
+    const label = labelParts.join(' · ') || 'Estándar';
+    const qty = Math.max(Number(v.stock) || 0, 0);
+    const price = Number(v.precio) > 0 ? Number(v.precio) : basePrice;
+    const priceTag = price > 0 ? ` ($${price.toFixed(2)})` : '';
+    return qty > 0 ? `${label}: ${qty} uds${priceTag}` : `${label}: AGOTADO`;
+  });
+
+  const summaryBlock = `${TODD_VARIANTS_MARKER} ${bulletLines.join(' | ')}`;
+  return {
+    summaryBlock,
+    bulletLines,
+    keywordsExtra: Array.from(kwSet),
+    totalStock
+  };
+}
+
+/**
+ * Garantiza que exista una fila padre válida en public.productos con template_id int4
+ * para que la FK de public.productos_variantes nunca falle.
+ */
+export async function ensureProductTemplateExists(params: {
+  sku: string;
+  template_id?: string | number | null;
+  nombre: string;
+  image_url?: string | null;
+  todd_pitch?: string;
+  todd_instrucciones?: string;
+  todd_keywords?: string;
+  activo?: boolean;
+  activo_todd?: boolean;
+}): Promise<{ templateId: number | null; error?: string }> {
+  const rawTpl = params.template_id !== undefined && params.template_id !== null
+    ? String(params.template_id).trim()
+    : '';
+  let numericId = /^\d+$/.test(rawTpl) ? Number(rawTpl) : 0;
+
+  if (numericId > 0 && numericId <= 2_147_483_647) {
+    const { data: existing } = await supabase
+      .from('productos')
+      .select('template_id')
+      .eq('template_id', numericId)
+      .maybeSingle();
+
+    if (existing?.template_id) {
+      return { templateId: Number(existing.template_id) };
+    }
+  } else {
+    numericId = Math.min(Math.floor(Date.now() / 1000), 2_147_483_647);
+  }
+
+  const insertPayload: Record<string, any> = {
+    template_id: numericId,
+    nombre_base: params.nombre || params.sku,
+    image_url: params.image_url || null,
+    active: params.activo !== false,
+    is_published: params.activo !== false,
+    todd_pitch: params.todd_pitch || '',
+    todd_instrucciones: params.todd_instrucciones || '',
+    todd_keywords: params.todd_keywords || '',
+    activo_todd: params.activo_todd !== false
+  };
+
+  let res = await supabase.from('productos').insert(insertPayload);
+  if (res.error && res.error.message?.includes('column')) {
+    res = await supabase.from('productos').insert({
+      template_id: numericId,
+      nombre_base: params.nombre || params.sku,
+      image_url: params.image_url || null,
+      active: params.activo !== false,
+      is_published: params.activo !== false
+    });
+  }
+
+  // Si hubo colisión de PK con otro producto, generar otro template_id int4
+  if (res.error && (res.error.code === '23505' || res.error.message?.includes('duplicate'))) {
+    numericId = generateSafeInt4Id();
+    res = await supabase.from('productos').insert({
+      template_id: numericId,
+      nombre_base: params.nombre || params.sku,
+      image_url: params.image_url || null,
+      active: params.activo !== false,
+      is_published: params.activo !== false
+    });
+  }
+
+  if (res.error) {
+    return { templateId: null, error: res.error.message };
+  }
+
+  if (params.sku) {
+    await upsertInventoryStockRow(params.sku, { template_id: String(numericId) });
+  }
+
+  return { templateId: numericId };
+}
+
+/**
+ * Consulta variantes de public.productos_variantes (todas o por template_id)
+ */
+export async function fetchProductVariants(templateId?: string | number | null): Promise<ProductVariant[]> {
+  try {
+    let query = supabase
+      .from('productos_variantes')
+      .select('*')
+      .order('color', { ascending: true })
+      .order('talla', { ascending: true });
+
+    if (templateId !== undefined && templateId !== null && String(templateId).trim() !== '') {
+      query = query.eq('template_id', Number(templateId));
+    }
+
+    const { data, error } = await query;
+    if (error || !Array.isArray(data)) return [];
+    return data.map((v: any) => ({
+      variante_id: Number(v.variante_id),
+      template_id: Number(v.template_id),
+      sku: normalizeSku(v.sku),
+      nombre_completo: v.nombre_completo || v.sku || '',
+      color: v.color || '',
+      talla: v.talla || 'Única',
+      stock: Math.max(Number(v.stock) || 0, 0),
+      precio: Number(v.precio) || 0,
+      estado: v.estado || (Number(v.stock) > 0 ? 'DISPONIBLE' : 'NO_DISPONIBLE'),
+      es_test: Boolean(v.es_test),
+      image_url: v.image_url || null,
+      updated_at: v.updated_at
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Sincroniza variantes -> inventory_cache (para Bot Todd),
+ * Sumatoria de unidades -> stock_fisico del Producto Maestro en inventory_stock + Kárdex,
+ * y Resumen de colores/tallas/stock -> todd_instrucciones & todd_keywords.
+ */
+export async function syncVariantsToMasterAndTodd(params: {
+  masterSku: string;
+  templateId: number;
+  productName: string;
+  basePrice?: number;
+  syncMasterStock?: boolean;
+  syncToddDetails?: boolean;
+}): Promise<{ variants: ProductVariant[]; totalStock: number }> {
+  const masterSkuClean = normalizeSku(params.masterSku);
+  const variants = await fetchProductVariants(params.templateId);
+  const totalStock = variants
+    .filter(v => v.estado !== 'PAUSADO')
+    .reduce((sum, v) => sum + Math.max(Number(v.stock) || 0, 0), 0);
+
+  // 1. Sincronizar cada variante con public.inventory_cache para lectura instantánea de Todd
+  for (const v of variants) {
+    if (!v.sku) continue;
+    const state = v.stock > 0 && v.estado !== 'PAUSADO' ? 'DISPONIBLE' : 'NO_DISPONIBLE';
+    try {
+      await supabase
+        .from('inventory_cache')
+        .upsert(
+          {
+            sku: v.sku,
+            qty: Math.max(v.stock, 0),
+            state,
+            image_url: v.image_url || null,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'sku' }
+        );
+    } catch {
+      // inventory_cache opcional
+    }
+  }
+
+  // 2. Sincronizar stock físico maestro si tiene variantes (y registrar ajuste en Kárdex)
+  if (params.syncMasterStock !== false && variants.length > 0 && masterSkuClean) {
+    try {
+      await adjustStock({
+        sku: masterSkuClean,
+        nuevo_stock: totalStock,
+        motivo: `Sincronización automática desde variantes (${variants.length} color/talla)`
+      });
+    } catch {
+      // no bloquear
+    }
+  }
+
+  // 3. Alimentar detalles de Bot Todd en inventory_stock, public.productos y localStorage
+  if (params.syncToddDetails !== false && masterSkuClean) {
+    try {
+      const { data: stockRow } = await supabase
+        .from('inventory_stock')
+        .select('todd_instrucciones, todd_keywords, todd_pitch, activo_todd, precio_venta')
+        .eq('sku', masterSkuClean)
+        .maybeSingle();
+
+      const localCfg = getToddProductConfig(masterSkuClean);
+      const baseInstr = stripVariantToddBlock(
+        stockRow?.todd_instrucciones ?? localCfg.todd_instrucciones ?? ''
+      );
+      const formatted = formatVariantsForTodd(
+        variants,
+        params.basePrice ?? Number(stockRow?.precio_venta || 0)
+      );
+
+      const nextInstrucciones = formatted.summaryBlock
+        ? (baseInstr ? `${baseInstr}\n${formatted.summaryBlock}` : formatted.summaryBlock)
+        : baseInstr;
+
+      const existingKw = (stockRow?.todd_keywords ?? localCfg.todd_keywords ?? '')
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean);
+      const existingKwLower = new Set(existingKw.map((k: string) => k.toLowerCase()));
+      formatted.keywordsExtra.forEach(kw => {
+        if (!existingKwLower.has(kw.toLowerCase())) {
+          existingKw.push(kw);
+          existingKwLower.add(kw.toLowerCase());
+        }
+      });
+      const nextKeywords = existingKw.join(', ');
+
+      await updateProductDetails({
+        sku: masterSkuClean,
+        template_id: params.templateId,
+        todd_instrucciones: nextInstrucciones,
+        todd_keywords: nextKeywords
+      });
+    } catch {
+      // no bloquear
+    }
+  }
+
+  return { variants, totalStock };
+}
+
+/**
+ * Crear una o varias variantes (color, talla, stock) para un producto del catálogo
+ */
+export async function createProductVariants(params: {
+  masterSku: string;
+  templateId?: string | number | null;
+  productName: string;
+  basePrice: number;
+  productImage?: string | null;
+  variantsToCreate: ProductVariantInput[];
+  syncMasterStock?: boolean;
+  syncToddDetails?: boolean;
+}): Promise<{ success: boolean; error?: string; createdCount: number; templateId?: number }> {
+  if (!params.variantsToCreate || params.variantsToCreate.length === 0) {
+    return { success: false, error: 'Agrega al menos un color o talla.', createdCount: 0 };
+  }
+
+  const tplRes = await ensureProductTemplateExists({
+    sku: params.masterSku,
+    template_id: params.templateId,
+    nombre: params.productName,
+    image_url: params.productImage
+  });
+
+  if (!tplRes.templateId) {
+    return {
+      success: false,
+      error: tplRes.error || 'No se pudo asegurar el producto padre en public.productos.',
+      createdCount: 0
+    };
+  }
+
+  const templateId = tplRes.templateId;
+  const existing = await fetchProductVariants(templateId);
+  const existingSkus = new Set(existing.map(v => v.sku.toUpperCase()));
+
+  let createdCount = 0;
+  const errors: string[] = [];
+
+  for (const input of params.variantsToCreate) {
+    const colorClean = (input.color || '').trim();
+    const tallaClean = (input.talla || 'Única').trim() || 'Única';
+    if (!colorClean && !tallaClean) continue;
+
+    let varSku = normalizeSku(input.sku || buildVariantSku(params.masterSku, colorClean, tallaClean));
+    if (existingSkus.has(varSku)) {
+      varSku = `${varSku}-${Math.floor(10 + Math.random() * 89)}`;
+    }
+    existingSkus.add(varSku);
+
+    const stockQty = Math.max(Math.round(Number(input.stock) || 0), 0);
+    const precioVal = Math.max(Number(input.precio ?? params.basePrice) || 0, 0);
+    const descParts = [colorClean, tallaClean !== 'Única' ? `Talla ${tallaClean}` : ''].filter(Boolean).join(' / ');
+    const nombreCompleto = descParts ? `${params.productName} (${descParts})` : params.productName;
+
+    const { error } = await supabase.from('productos_variantes').insert({
+      variante_id: generateSafeInt4Id(),
+      template_id: templateId,
+      sku: varSku,
+      nombre_completo: nombreCompleto,
+      color: colorClean || 'Estándar',
+      talla: tallaClean,
+      stock: stockQty,
+      precio: precioVal,
+      estado: stockQty > 0 ? 'DISPONIBLE' : 'NO_DISPONIBLE',
+      es_test: false,
+      image_url: input.image_url || params.productImage || null,
+      updated_at: new Date().toISOString()
+    });
+
+    if (error) {
+      errors.push(`${colorClean || varSku}: ${error.message}`);
+    } else {
+      createdCount++;
+    }
+  }
+
+  if (createdCount > 0) {
+    await syncVariantsToMasterAndTodd({
+      masterSku: params.masterSku,
+      templateId,
+      productName: params.productName,
+      basePrice: params.basePrice,
+      syncMasterStock: params.syncMasterStock,
+      syncToddDetails: params.syncToddDetails
+    });
+  }
+
+  if (errors.length > 0 && createdCount === 0) {
+    return { success: false, error: errors.join(' | '), createdCount: 0, templateId };
+  }
+
+  return {
+    success: true,
+    createdCount,
+    templateId,
+    error: errors.length > 0 ? errors.join(' | ') : undefined
+  };
+}
+
+/**
+ * Actualizar stock, precio, color o talla de una variante y resincronizar Bodega + Bot Todd
+ */
+export async function updateProductVariant(params: {
+  varianteId: number;
+  masterSku: string;
+  templateId: number;
+  productName: string;
+  basePrice?: number;
+  patch: {
+    color?: string;
+    talla?: string;
+    stock?: number;
+    precio?: number;
+    estado?: string;
+  };
+  syncMasterStock?: boolean;
+  syncToddDetails?: boolean;
+}): Promise<{ success: boolean; error?: string }> {
+  const updateObj: Record<string, any> = {
+    updated_at: new Date().toISOString()
+  };
+
+  if (params.patch.color !== undefined) updateObj.color = params.patch.color.trim() || 'Estándar';
+  if (params.patch.talla !== undefined) updateObj.talla = params.patch.talla.trim() || 'Única';
+  if (params.patch.precio !== undefined) updateObj.precio = Math.max(Number(params.patch.precio) || 0, 0);
+  if (params.patch.stock !== undefined) {
+    const st = Math.max(Math.round(Number(params.patch.stock) || 0), 0);
+    updateObj.stock = st;
+    if (params.patch.estado === undefined) {
+      updateObj.estado = st > 0 ? 'DISPONIBLE' : 'NO_DISPONIBLE';
+    }
+  }
+  if (params.patch.estado !== undefined) updateObj.estado = params.patch.estado;
+
+  const { error } = await supabase
+    .from('productos_variantes')
+    .update(updateObj)
+    .eq('variante_id', params.varianteId);
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  await syncVariantsToMasterAndTodd({
+    masterSku: params.masterSku,
+    templateId: params.templateId,
+    productName: params.productName,
+    basePrice: params.basePrice,
+    syncMasterStock: params.syncMasterStock,
+    syncToddDetails: params.syncToddDetails
+  });
+
+  return { success: true };
+}
+
+/**
+ * Eliminar una variante de productos_variantes y resincronizar Bodega + Bot Todd
+ */
+export async function deleteProductVariant(params: {
+  varianteId: number;
+  variantSku?: string;
+  masterSku: string;
+  templateId: number;
+  productName: string;
+  basePrice?: number;
+  syncMasterStock?: boolean;
+  syncToddDetails?: boolean;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    await supabase.from('post_queue').update({ variante_id: null }).eq('variante_id', params.varianteId);
+  } catch {
+    // opcional
+  }
+
+  const { error } = await supabase
+    .from('productos_variantes')
+    .delete()
+    .eq('variante_id', params.varianteId);
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  if (params.variantSku) {
+    try {
+      await supabase.from('inventory_cache').delete().eq('sku', normalizeSku(params.variantSku));
+    } catch {}
+  }
+
+  await syncVariantsToMasterAndTodd({
+    masterSku: params.masterSku,
+    templateId: params.templateId,
+    productName: params.productName,
+    basePrice: params.basePrice,
+    syncMasterStock: params.syncMasterStock,
+    syncToddDetails: params.syncToddDetails
+  });
+
+  return { success: true };
+}
+
+/**
+ * Ajusta el stock de una variante específica cuando se entrega o devuelve un pedido en Pedidos / Motorista.
+ */
+async function applyVariantStockDelta(params: {
+  masterSku: string;
+  varianteId?: number;
+  varianteSku?: string;
+  color?: string;
+  talla?: string;
+  delta: number;
+}): Promise<void> {
+  if (!params.delta) return;
+
+  let target: any = null;
+  if (params.varianteId) {
+    const { data } = await supabase
+      .from('productos_variantes')
+      .select('*')
+      .eq('variante_id', params.varianteId)
+      .maybeSingle();
+    target = data;
+  } else if (params.varianteSku) {
+    const { data } = await supabase
+      .from('productos_variantes')
+      .select('*')
+      .eq('sku', normalizeSku(params.varianteSku))
+      .maybeSingle();
+    target = data;
+  }
+
+  if (!target || !target.variante_id) return;
+
+  const nextStock = Math.max((Number(target.stock) || 0) + params.delta, 0);
+  const nextEstado = nextStock > 0 ? 'DISPONIBLE' : 'NO_DISPONIBLE';
+
+  await supabase
+    .from('productos_variantes')
+    .update({ stock: nextStock, estado: nextEstado, updated_at: new Date().toISOString() })
+    .eq('variante_id', target.variante_id);
+
+  if (target.sku) {
+    try {
+      await supabase
+        .from('inventory_cache')
+        .upsert(
+          { sku: target.sku, qty: nextStock, state: nextEstado, updated_at: new Date().toISOString() },
+          { onConflict: 'sku' }
+        );
+    } catch {}
+  }
+
+  if (target.template_id) {
+    await syncVariantsToMasterAndTodd({
+      masterSku: params.masterSku,
+      templateId: Number(target.template_id),
+      productName: target.nombre_completo || params.masterSku,
+      syncMasterStock: false, // El Kárdex del pedido ya ajustó inventory.stock
+      syncToddDetails: true
+    });
+  }
+}
+
 

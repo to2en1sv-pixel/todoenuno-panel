@@ -77,3 +77,28 @@ export interface EntradaMercaderiaFormData {
   asentar_en_finanzas: boolean;
   cuenta_finanzas_id?: string;
 }
+
+export interface ProductVariant {
+  variante_id: number;
+  template_id: number;
+  sku: string;
+  nombre_completo: string;
+  color: string;
+  talla: string;
+  stock: number;
+  precio: number;
+  estado: 'DISPONIBLE' | 'NO_DISPONIBLE' | 'PAUSADO' | string;
+  es_test?: boolean;
+  image_url?: string | null;
+  updated_at?: string;
+}
+
+export interface ProductVariantInput {
+  color: string;
+  talla?: string;
+  stock: number;
+  precio?: number;
+  sku?: string;
+  image_url?: string | null;
+}
+
