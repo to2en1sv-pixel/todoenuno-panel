@@ -1,0 +1,773 @@
+{
+  "name": "Todd - State Machine Checkout",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "todd-checkout",
+        "options": {}
+      },
+      "id": "f3bac032-bbf1-4287-ba7c-46f9ce51663e",
+      "name": "1. Webhook Evolution",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        304
+      ],
+      "webhookId": "3f2b9820-2345-4497-80c1-87cb53d638fb"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst valid = [];\n\nfor (const item of items) {\n  const body = item.json.body || item.json;\n  let data = body.data;\n  if (Array.isArray(data)) data = data[0];\n  if (!data) continue;\n\n  if (data.key && data.key.fromMe === true) continue;\n\n  // FORZAMOS A USAR EL REMOTEJID DEL CLIENTE\n  const phone = data.key && data.key.remoteJid ? data.key.remoteJid.split('@')[0] : '';\n  \n  let text = '';\n  if (data.message) {\n    text = data.message.conversation || \n           data.message.extendedTextMessage?.text || \n           data.message.buttonsResponseMessage?.selectedDisplayText || '';\n  }\n  \n  if (text && phone) {\n    valid.push({ json: { text, phone, raw: data } });\n  }\n}\nreturn valid;"
+      },
+      "id": "430d6117-703d-49fe-b245-af97883b8ed6",
+      "name": "2. Anti-Eco y Limpieza",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://trgywmhxmkbjfcdvxpnz.supabase.co/rest/v1/whatsapp_state?telefono=eq.{{ $json.phone }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyZ3l3bWh4bWtiamZjZHZ4cG56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjM3OTQzMSwiZXhwIjoyMTA3OTU1NDMxfQ.U735gMP_0_3Mok0rskiFhXHDaHG0Ct-QegJG079Cl8A"
+            },
+            {
+              "name": "Authorization ",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyZ3l3bWh4bWtiamZjZHZ4cG56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjM3OTQzMSwiZXhwIjoyMTA3OTU1NDMxfQ.U735gMP_0_3Mok0rskiFhXHDaHG0Ct-QegJG079Cl8A"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fd14f69b-84c8-4ce1-a25a-ffe10659fca5",
+      "name": "3. Buscar Estado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        448,
+        288
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const stateData = $('3. Buscar Estado').first().json;\nconst msgData = $('2. Anti-Eco y Limpieza').first().json;\nlet paso = 'inicio';\nif (Array.isArray(stateData) && stateData.length > 0) {\n  paso = stateData[0].paso_actual || 'inicio';\n}\nreturn [{ json: { ...msgData, paso_actual: paso } }];"
+      },
+      "id": "a72f50c7-1def-4911-8009-1670b873e43b",
+      "name": "4. Unir Datos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.paso_actual }}",
+                    "rightValue": "inicio",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Inicio / Menu"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.paso_actual }}",
+                    "rightValue": "esperando_nombre",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Esperando Nombre"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.paso_actual }}",
+                    "rightValue": "esperando_direccion",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Esperando Direccion"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.paso_actual }}",
+                    "rightValue": "esperando_pago",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Esperando Pago"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bf5c2146-df56-4116-9f8f-945a4262e812",
+      "name": "5. Router Principal",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        880,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.text }}",
+                    "rightValue": "1",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Opcion 1 (Comprar)"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.text }}",
+                    "rightValue": "2",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Opcion 2 (Video)"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.text }}",
+                    "rightValue": "3",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Opcion 3 (Tallas)"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "d90849b6-b5da-4153-950e-840ea7c8cffc",
+      "name": "6. Sub-Menu (Inicio)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1104,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://trgywmhxmkbjfcdvxpnz.supabase.co/rest/v1/whatsapp_state",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyZ3l3bWh4bWtiamZjZHZ4cG56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjM3OTQzMSwiZXhwIjoyMTA3OTU1NDMxfQ.U735gMP_0_3Mok0rskiFhXHDaHG0Ct-QegJG079Cl8A"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyZ3l3bWh4bWtiamZjZHZ4cG56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjM3OTQzMSwiZXhwIjoyMTA3OTU1NDMxfQ.U735gMP_0_3Mok0rskiFhXHDaHG0Ct-QegJG079Cl8A"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"telefono\": \"{{ $('2. Anti-Eco y Limpieza').item.json.phone }}\",\n  \"paso_actual\": \"esperando_nombre\"\n}",
+        "options": {}
+      },
+      "id": "5449c620-a415-4a23-aafd-15037350d4e4",
+      "name": "7. Guardar Paso: Nombre",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1328,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://67.205.174.134:8080/message/sendText/eee",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "12D06A324483-4CB9-A415-3D7769858267"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $('2. Anti-Eco y Limpieza').item.json.phone }}\",\n  \"text\": \"¡Excelente elección! 🛒\\n\\nPara comenzar, ¿me dices tu nombre completo?\"\n}",
+        "options": {}
+      },
+      "id": "9b93a81d-c185-4ac0-9b33-4f9630e22c11",
+      "name": "8. Enviar: Pedir Nombre",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1552,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://67.205.174.134:8080/message/sendText/eee",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "12D06A324483-4CB9-A415-3D7769858267"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $('2. Anti-Eco y Limpieza').item.json.phone }}\",\n  \"text\": \"¡Claro! Aquí tienes el video real: https://youtube.com/shorts/ejemplo 🎥\\n\\n¿Te gustaría comprarlo ahora? Responde 1.\"\n}",
+        "options": {}
+      },
+      "id": "3dde1524-85fc-4b6d-a10f-a743f9eec8d9",
+      "name": "9. Enviar: Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1328,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://67.205.174.134:8080/message/sendText/eee",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "12D06A324483-4CB9-A415-3D7769858267"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $('2. Anti-Eco y Limpieza').item.json.phone }}\",\n  \"text\": \"No entendí tu mensaje. Responde solo con el número:\\n\\n1️⃣ Comprar\\n2️⃣ Ver Video\\n3️⃣ Ver Tallas\"\n}",
+        "options": {}
+      },
+      "id": "dfbe4d5a-9fda-4035-b7a8-a5c9278bcc30",
+      "name": "11. Enviar: Fallback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1344,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://trgywmhxmkbjfcdvxpnz.supabase.co/rest/v1/whatsapp_state?telefono=eq.{{ $json.phone }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyZ3l3bWh4bWtiamZjZHZ4cG56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjM3OTQzMSwiZXhwIjoyMTA3OTU1NDMxfQ.U735gMP_0_3Mok0rskiFhXHDaHG0Ct-QegJG079Cl8A"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyZ3l3bWh4bWtiamZjZHZ4cG56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjM3OTQzMSwiZXhwIjoyMTA3OTU1NDMxfQ.U735gMP_0_3Mok0rskiFhXHDaHG0Ct-QegJG079Cl8A"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"nombre_cliente\": \"{{ $json.text }}\",\n  \"paso_actual\": \"esperando_direccion\"\n}",
+        "options": {}
+      },
+      "id": "0b2fc554-47ab-49c1-bf75-534bc3402952",
+      "name": "12. Guardar: Nombre",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1104,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://67.205.174.134:8080/message/sendText/eee",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "12D06A324483-4CB9-A415-3D7769858267"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $json.phone }}\",\n  \"text\": \"¡Gracias, {{ $json.text }}! 📦\\n\\n¿A qué dirección de entrega te lo enviamos?\"\n}",
+        "options": {}
+      },
+      "id": "bb79901c-a3bd-46cd-bf48-1d3d3d01aa6a",
+      "name": "13. Enviar: Pedir Direccion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1328,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://trgywmhxmkbjfcdvxpnz.supabase.co/rest/v1/whatsapp_state?telefono=eq.{{ $json.phone }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyZ3l3bWh4bWtiamZjZHZ4cG56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjM3OTQzMSwiZXhwIjoyMTA3OTU1NDMxfQ.U735gMP_0_3Mok0rskiFhXHDaHG0Ct-QegJG079Cl8A"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyZ3l3bWh4bWtiamZjZHZ4cG56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjM3OTQzMSwiZXhwIjoyMTA3OTU1NDMxfQ.U735gMP_0_3Mok0rskiFhXHDaHG0Ct-QegJG079Cl8A"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"direccion\": \"{{ $json.text }}\",\n  \"paso_actual\": \"esperando_pago\"\n}",
+        "options": {}
+      },
+      "id": "e69017fa-0198-48ed-8a6e-6bed395e10d1",
+      "name": "14. Guardar: Direccion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1104,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://67.205.174.134:8080/message/sendText/eee",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "12D06A324483-4CB9-A415-3D7769858267"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $json.phone }}\",\n  \"text\": \"¡Perfecto! 🏠\\n\\n¿Cómo prefieres pagar?\\nResponde 1 para Contra Entrega.\\nResponde 2 para Transferencia.\"\n}",
+        "options": {}
+      },
+      "id": "f72d8c8a-7637-43b3-bfc9-8e92d7d7860b",
+      "name": "15. Enviar: Pedir Pago",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1328,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://trgywmhxmkbjfcdvxpnz.supabase.co/rest/v1/whatsapp_state?telefono=eq.{{ $json.phone }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyZ3l3bWh4bWtiamZjZHZ4cG56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjM3OTQzMSwiZXhwIjoyMTA3OTU1NDMxfQ.U735gMP_0_3Mok0rskiFhXHDaHG0Ct-QegJG079Cl8A"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyZ3l3bWh4bWtiamZjZHZ4cG56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjM3OTQzMSwiZXhwIjoyMTA3OTU1NDMxfQ.U735gMP_0_3Mok0rskiFhXHDaHG0Ct-QegJG079Cl8A"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"metodo_pago\": \"{{ $json.text }}\",\n  \"paso_actual\": \"completado\"\n}",
+        "options": {}
+      },
+      "id": "adb19610-ea5d-4ffd-863e-1d7275e7904f",
+      "name": "16. Guardar: Pago",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1104,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://67.205.174.134:8080/message/sendText/eee",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "12D06A324483-4CB9-A415-3D7769858267"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $json.phone }}\",\n  \"text\": \"¡Pedido registrado con éxito! 🎉\\n\\nEn breve un asesor se comunicará contigo para confirmar la entrega.\"\n}",
+        "options": {}
+      },
+      "id": "55c98628-f902-429d-ab54-4b0d8a73a952",
+      "name": "17. Enviar: Exito",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1328,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://67.205.174.134:8080/message/sendText/eee",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "12D06A324483-4CB9-A415-3D7769858267"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $('2. Anti-Eco y Limpieza').item.json.phone }}\",\n  \"text\": \"Aquí tienes las tallas disponibles 📏. ¿Te gustaría comprar alguna? Responde 1.\"\n}",
+        "options": {}
+      },
+      "id": "150cf1ab-92cd-4281-91bb-1758dc3d5769",
+      "name": "10. Enviar: Tallas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1328,
+        240
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "1. Webhook Evolution": {
+      "main": [
+        [
+          {
+            "node": "2. Anti-Eco y Limpieza",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Anti-Eco y Limpieza": {
+      "main": [
+        [
+          {
+            "node": "3. Buscar Estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Buscar Estado": {
+      "main": [
+        [
+          {
+            "node": "4. Unir Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Unir Datos": {
+      "main": [
+        [
+          {
+            "node": "5. Router Principal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Router Principal": {
+      "main": [
+        [
+          {
+            "node": "6. Sub-Menu (Inicio)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "12. Guardar: Nombre",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "14. Guardar: Direccion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "16. Guardar: Pago",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Sub-Menu (Inicio)": {
+      "main": [
+        [
+          {
+            "node": "7. Guardar Paso: Nombre",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "9. Enviar: Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "10. Enviar: Tallas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "11. Enviar: Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7. Guardar Paso: Nombre": {
+      "main": [
+        [
+          {
+            "node": "8. Enviar: Pedir Nombre",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "12. Guardar: Nombre": {
+      "main": [
+        [
+          {
+            "node": "13. Enviar: Pedir Direccion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "14. Guardar: Direccion": {
+      "main": [
+        [
+          {
+            "node": "15. Enviar: Pedir Pago",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "16. Guardar: Pago": {
+      "main": [
+        [
+          {
+            "node": "17. Enviar: Exito",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "bbee50db-378d-4584-9e72-ec7117d2fe43",
+  "meta": {
+    "instanceId": "5503467d94f74366c43b24f2bbc6d5b2dfc53e327ef144640ab016cdc04c7803"
+  },
+  "nodeGroups": [],
+  "id": "Rq0vjltrEVxWg5rK",
+  "tags": []
+}
