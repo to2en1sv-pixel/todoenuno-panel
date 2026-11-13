@@ -110,7 +110,7 @@ export function Layout() {
         <div className="fixed inset-0 bg-black/50 z-30 lg:hidden top-14" onClick={() => setIsMobileOpen(false)} />
       )}
 
-      <main className="flex-1 overflow-y-auto p-4 lg:p-6 pt-20 lg:pt-6 w-full text-[var(--tx)]">
+      <main className="flex-1 min-w-0 overflow-y-auto p-4 lg:p-6 pt-20 lg:pt-6 w-full text-[var(--tx)]">
         <Outlet />
       </main>
     </div>

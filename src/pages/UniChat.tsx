@@ -29,7 +29,6 @@ import {
   X,
   Phone,
   MessageSquare,
-  ShieldAlert,
   Paperclip,
   Image as ImageIcon,
   Volume2,
@@ -180,7 +179,7 @@ function parseInlineMediaMarker(body: string): { imgUrl: string | null; text: st
 }
 
 function detectMediaType(body: string): 'image' | 'audio' | 'video' | null {
-  if (body.startsWith('📷 [Imagen]')) return 'image';
+  if (body.startsWith('📷 [Imagen]') || body.startsWith('📷 [Imagen enviada]')) return 'image';
   if (body.startsWith('🎤 [Nota de voz]')) return 'audio';
   if (body.startsWith('🎥 [Video]')) return 'video';
   return null;
@@ -708,10 +707,17 @@ export function UniChatPage() {
           },
         ];
       });
-      if (opts.mediaBase64) {
+      const inlineDataImage =
+        opts.mediaBase64 ||
+        (opts.mediaUrl && opts.mediaUrl.startsWith('data:') ? opts.mediaUrl : null);
+      if (inlineDataImage) {
+        const mimeMatch = inlineDataImage.match(/^data:([^;]+);/i);
         setMediaCache(prev => ({
           ...prev,
-          [optimisticId]: { dataUrl: opts.mediaBase64!, mimetype: 'image/jpeg' },
+          [optimisticId]: {
+            dataUrl: inlineDataImage,
+            mimetype: mimeMatch?.[1] || 'image/jpeg',
+          },
         }));
       }
 
@@ -782,10 +788,16 @@ export function UniChatPage() {
     }
     lines.push('\n¿Te gustaría reservarlo o tienes alguna duda? 😊');
 
+    let resolvedMediaUrl: string | null = null;
+    if (withImage && prod.image_url) {
+      const rawUrl = prod.image_url.trim();
+      resolvedMediaUrl = rawUrl.startsWith('/') ? `${window.location.origin}${rawUrl}` : rawUrl;
+    }
+
     setShowCatalogPicker(false);
     await sendPayloadToEvolution({
       text: lines.join('\n'),
-      mediaUrl: withImage && prod.image_url ? prod.image_url : null,
+      mediaUrl: resolvedMediaUrl,
       fileName: `${prod.sku}.jpg`,
     });
   };
@@ -855,7 +867,7 @@ export function UniChatPage() {
   }, [selectedConv, whatsappState, selectedPhone8, detectedAdTag]);
 
   return (
-    <div className="flex flex-col gap-3 h-[calc(100vh-105px)]">
+    <div className="flex flex-col gap-3 h-[calc(100dvh-96px)] lg:h-[calc(100dvh-48px)] min-h-[520px] w-full min-w-0">
       {/* Notificación inline */}
       {banner && (
         <div
@@ -865,20 +877,20 @@ export function UniChatPage() {
               : 'bg-rose-500/10 border-rose-500/30 text-rose-500'
           }`}
         >
-          <span className="flex items-center gap-2">
-            {banner.type === 'ok' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
-            {banner.text}
+          <span className="flex items-center gap-2 min-w-0">
+            {banner.type === 'ok' ? <CheckCircle2 size={15} className="shrink-0" /> : <AlertCircle size={15} className="shrink-0" />}
+            <span className="truncate">{banner.text}</span>
           </span>
-          <button onClick={() => setBanner(null)} className="opacity-70 hover:opacity-100">
+          <button onClick={() => setBanner(null)} className="opacity-70 hover:opacity-100 shrink-0">
             <X size={14} />
           </button>
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row flex-1 min-h-0 bg-cd bd rounded-2xl overflow-hidden shadow-sm">
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0 min-w-0 w-full bg-cd bd rounded-2xl overflow-hidden shadow-sm">
         {/* 1. COLUMNA IZQUIERDA: BANDEJA INTELIGENTE */}
         <div
-          className={`w-full lg:w-[310px] border-r border-[var(--bd)] flex-col min-h-0 ${
+          className={`w-full lg:w-[265px] xl:w-[300px] shrink-0 border-r border-[var(--bd)] flex-col min-h-0 ${
             selectedConv ? 'hidden lg:flex' : 'flex'
           }`}
         >
@@ -1066,7 +1078,7 @@ export function UniChatPage() {
         </div>
 
         {/* 2. COLUMNA CENTRAL: VENTANA DE CHAT */}
-        <div className={`flex-1 flex-col bg-sf min-h-0 min-w-0 ${selectedConv ? 'flex' : 'hidden lg:flex'}`}>
+        <div className={`flex-1 flex-col bg-sf min-h-0 min-w-0 overflow-hidden ${selectedConv ? 'flex' : 'hidden lg:flex'}`}>
           {selectedConv ? (
             <>
               {/* Header del Chat */}
@@ -1496,7 +1508,7 @@ export function UniChatPage() {
 
         {/* 3. COLUMNA DERECHA: CONTEXTO DEL CLIENTE, TODD & PEDIDOS */}
         {selectedConv && showContextPanel && (
-          <div className="w-full lg:w-[295px] border-t lg:border-t-0 lg:border-l border-[var(--bd)] bg-cd flex flex-col overflow-y-auto p-3.5 gap-3.5 shrink-0 max-h-[45vh] lg:max-h-none">
+          <div className="w-full lg:w-[255px] xl:w-[290px] border-t lg:border-t-0 lg:border-l border-[var(--bd)] bg-cd flex flex-col overflow-y-auto overflow-x-hidden p-3.5 gap-3.5 shrink-0 max-h-[45vh] lg:max-h-none">
             {/* Semáforo Antifraude */}
             <div className="p-3 rounded-xl bg-sf border border-[var(--bd)] space-y-2">
               <div className="flex items-center justify-between">

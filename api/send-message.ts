@@ -67,9 +67,61 @@ function resolveEvolutionTarget(rawPhone?: string | null, rawConvId?: string | n
   };
 }
 
-function stripDataUrlPrefix(raw: string): string {
-  const idx = raw.indexOf('base64,');
-  return idx !== -1 ? raw.slice(idx + 7) : raw;
+function normalizeEvolutionMedia(
+  rawUrl?: string | null,
+  rawBase64?: string | null,
+  fallbackFileName = 'producto.jpg',
+  fallbackMediaType = 'image'
+): {
+  media: string;
+  mimetype?: string;
+  fileName: string;
+  isPublicUrl: boolean;
+} {
+  const source = String(rawBase64 || rawUrl || '').trim();
+  const dataUriMatch = source.match(/^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([\s\S]+)$/i);
+
+  if (dataUriMatch) {
+    const mimetype = dataUriMatch[1].toLowerCase();
+    const cleanBase64 = dataUriMatch[2].replace(/\s+/g, '');
+    const extMap: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/jpg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'image/gif': 'gif',
+      'video/mp4': 'mp4',
+      'application/pdf': 'pdf',
+    };
+    const ext = extMap[mimetype];
+    let fileName = String(fallbackFileName || `archivo.${ext || 'jpg'}`);
+    if (ext && /\.[a-z0-9]+$/i.test(fileName)) {
+      fileName = fileName.replace(/\.[a-z0-9]+$/i, `.${ext}`);
+    }
+    return {
+      media: cleanBase64,
+      mimetype,
+      fileName,
+      isPublicUrl: false,
+    };
+  }
+
+  if (/^https?:\/\//i.test(source)) {
+    return {
+      media: source,
+      fileName: String(fallbackFileName || 'producto.jpg'),
+      isPublicUrl: true,
+    };
+  }
+
+  const idx = source.indexOf('base64,');
+  const rawOnly = (idx !== -1 ? source.slice(idx + 7) : source).replace(/\s+/g, '');
+  return {
+    media: rawOnly,
+    mimetype: fallbackMediaType === 'video' ? 'video/mp4' : 'image/jpeg',
+    fileName: String(fallbackFileName || 'imagen.jpg'),
+    isPublicUrl: false,
+  };
 }
 
 export default async function handler(req: any, res: any) {
@@ -146,24 +198,34 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'No se encontró un número o JID de WhatsApp válido para este chat' });
     }
 
+    const normalizedMedia = hasMedia
+      ? normalizeEvolutionMedia(mediaUrl, mediaBase64, fileName, mediaType)
+      : null;
+
+    if (hasMedia && (!normalizedMedia || !normalizedMedia.media)) {
+      return res.status(400).json({ error: 'El archivo multimedia está vacío o tiene un formato inválido.' });
+    }
+
     const endpoint = hasMedia
       ? `${evolutionUrl}/message/sendMedia/${encodeURIComponent(targetInstance)}`
       : `${evolutionUrl}/message/sendText/${encodeURIComponent(targetInstance)}`;
 
-    const payload = hasMedia
-      ? {
-          number: sendTarget,
-          mediatype: mediaType || 'image',
-          media: mediaUrl ? String(mediaUrl) : stripDataUrlPrefix(String(mediaBase64)),
-          caption: messageText,
-          fileName: String(fileName || 'producto.jpg'),
-          delay: 250,
-        }
-      : {
-          number: sendTarget,
-          text: messageText,
-          delay: 250,
-        };
+    const payload =
+      hasMedia && normalizedMedia
+        ? {
+            number: sendTarget,
+            mediatype: mediaType || 'image',
+            ...(normalizedMedia.mimetype ? { mimetype: normalizedMedia.mimetype } : {}),
+            media: normalizedMedia.media,
+            caption: messageText,
+            fileName: normalizedMedia.fileName,
+            delay: 250,
+          }
+        : {
+            number: sendTarget,
+            text: messageText,
+            delay: 250,
+          };
 
     const evoRes = await fetch(endpoint, {
       method: 'POST',
@@ -197,11 +259,12 @@ export default async function handler(req: any, res: any) {
 
     const nowIso = new Date().toISOString();
 
-    const storedBody = mediaUrl
-      ? `[IMG:${mediaUrl}]${messageText ? `\n${messageText}` : ''}`
-      : hasMedia
-      ? `📷 [Imagen enviada]${messageText ? ` ${messageText}` : ''}`
-      : messageText;
+    const storedBody =
+      normalizedMedia?.isPublicUrl
+        ? `[IMG:${normalizedMedia.media}]${messageText ? `\n${messageText}` : ''}`
+        : hasMedia
+        ? `📷 [Imagen enviada]${messageText ? `\n${messageText}` : ''}`
+        : messageText;
 
     const lastMessagePreview = hasMedia
       ? `📷 ${messageText || 'Imagen enviada'}`
