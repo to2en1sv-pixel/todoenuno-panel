@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { emitOsEvent } from '@/lib/osEvents';
 import { addManualTransaction } from '@/lib/finance';
-import { resolveCatalogSku } from '@/lib/catalogAliases';
+import { resolveCatalogSku, getInventoryCutoffDate, isOrderBeforeCutoff } from '@/lib/catalogAliases';
 import type { 
   StockItem, 
   KardexMovement, 
@@ -1135,6 +1135,7 @@ export interface OrderForInventory {
   catalogo_sku?: string | null;
   codigo_anuncio?: string | null;
   estado?: string | null;
+  created_at?: string | null;
   items?: any;
   cantidad?: number | null;
   nombre_cliente?: string | null;
@@ -1335,12 +1336,26 @@ export async function syncOrderInventoryOnStatusChange(params: {
   motivoCancelacion?: string;
   usuario?: string;
   stockItemsCache?: StockItem[];
+  forzarHistorico?: boolean;
 }): Promise<SyncOrderInventoryResult> {
   const { order, nextEstado } = params;
   const prevNorm = (params.prevEstado || 'nuevo').trim().toLowerCase();
   const nextNorm = (nextEstado || 'nuevo').trim().toLowerCase();
   const shortId = order.id.slice(0, 8).toUpperCase();
   const usuario = params.usuario || 'Panel Pedidos';
+
+  // Blindaje histórico: si el pedido es anterior a la fecha de corte/reinicio de inventario,
+  // nunca reserva ni descuenta del inventario nuevo a menos que se fuerce explícitamente.
+  const invCutoff = getInventoryCutoffDate();
+  if (!params.forzarHistorico && invCutoff && isOrderBeforeCutoff(order.created_at, invCutoff)) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'historical_cutoff',
+      actions: [],
+      summaryText: 'Pedido histórico pre-reinicio: protegido (no descuenta inventario nuevo)'
+    };
+  }
 
   let stockList = params.stockItemsCache;
   if (!stockList || stockList.length === 0) {

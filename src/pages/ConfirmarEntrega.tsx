@@ -28,6 +28,7 @@ import {
   ShieldAlert
 } from "lucide-react";
 import { compressImageFile, syncOrderInventoryOnStatusChange } from "@/lib/inventory";
+import { hydrateCutoffsFromOsEvents } from "@/lib/catalogAliases";
 import { addOrUpdateBlacklist, evaluateCustomerRisk } from "@/lib/blacklist";
 
 export function ConfirmarEntregaPage() {
@@ -69,11 +70,14 @@ export function ConfirmarEntregaPage() {
   const cargarDatos = async () => {
     setCargando(true);
 
-    // Cargar todos los pedidos activos para la ruta
-    const { data: todos } = await supabase
-      .from("whatsapp_orders")
-      .select("*")
-      .order("created_at", { ascending: false });
+    // Hidratar corte de inventario y cargar pedidos activos para la ruta
+    const [, { data: todos }] = await Promise.all([
+      hydrateCutoffsFromOsEvents(supabase),
+      supabase
+        .from("whatsapp_orders")
+        .select("*")
+        .order("created_at", { ascending: false })
+    ]);
 
     if (todos) {
       setTodosLosPedidos(todos);

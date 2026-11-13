@@ -14,6 +14,9 @@ export interface ProductAttribution {
 }
 
 const STORAGE_KEY = 'todoenuno_catalog_attribution_v1';
+const RESET_FLAG_KEY = 'todoenuno_attribution_reset_v1';
+const VAULT_CUTOFF_KEY = 'todoenuno_vault_cutoff_v1';
+const INVENTORY_CUTOFF_KEY = 'todoenuno_inventory_cutoff_v1';
 
 /**
  * Normaliza un texto para comparaciones flexibles:
@@ -31,7 +34,7 @@ export function normalizeKey(text: string | null | undefined): string {
 }
 
 /**
- * Mapeo semilla pre-cargado con base en los productos y anuncios reales de TODOENUNO OS
+ * Mapeo semilla inicial (solo para instalaciones vírgenes antes del primer reinicio)
  */
 const DEFAULT_ATTRIBUTION_SEED: Record<string, { aliases: string[]; adCodes: string[] }> = {
   'PORTA-BEBES': {
@@ -57,19 +60,27 @@ const DEFAULT_ATTRIBUTION_SEED: Record<string, { aliases: string[]; adCodes: str
 };
 
 /**
- * Cargar el mapa de atribución desde localStorage fusionado con valores por defecto
+ * Cargar el mapa de atribución desde localStorage.
+ * Respeta el reinicio desde 0 sin volver a inyectar SKUs viejos de Odoo.
  */
 export function loadAttributionMap(): Record<string, { aliases: string[]; adCodes: string[] }> {
   try {
+    const isReset = localStorage.getItem(RESET_FLAG_KEY) === '1';
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
+
+    if (raw === null) {
+      if (isReset) {
+        return {};
+      }
       saveAttributionMap(DEFAULT_ATTRIBUTION_SEED);
       return { ...DEFAULT_ATTRIBUTION_SEED };
     }
+
     const parsed = JSON.parse(raw);
-    return { ...DEFAULT_ATTRIBUTION_SEED, ...parsed };
+    if (!parsed || typeof parsed !== 'object') return {};
+    return { ...parsed };
   } catch {
-    return { ...DEFAULT_ATTRIBUTION_SEED };
+    return {};
   }
 }
 
@@ -82,6 +93,148 @@ export function saveAttributionMap(map: Record<string, { aliases: string[]; adCo
   } catch (err) {
     console.error('Error guardando mapa de atribución:', err);
   }
+}
+
+/**
+ * Limpia todos los alias heredados y memorias locales roas_vault_* de la Bóveda
+ */
+export function resetVaultAndAliasesStorage(): void {
+  try {
+    localStorage.setItem(RESET_FLAG_KEY, '1');
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({}));
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('roas_vault_')) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+  } catch (err) {
+    console.error('Error limpiando almacenamiento local de Bóveda:', err);
+  }
+}
+
+export function getVaultCutoffDate(): string | null {
+  try {
+    return localStorage.getItem(VAULT_CUTOFF_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setVaultCutoffDate(iso: string | null): void {
+  try {
+    if (iso) {
+      localStorage.setItem(VAULT_CUTOFF_KEY, iso);
+    } else {
+      localStorage.removeItem(VAULT_CUTOFF_KEY);
+    }
+  } catch {
+    // ignorar
+  }
+}
+
+export function getInventoryCutoffDate(): string | null {
+  try {
+    return localStorage.getItem(INVENTORY_CUTOFF_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setInventoryCutoffDate(iso: string | null): void {
+  try {
+    if (iso) {
+      localStorage.setItem(INVENTORY_CUTOFF_KEY, iso);
+    } else {
+      localStorage.removeItem(INVENTORY_CUTOFF_KEY);
+    }
+  } catch {
+    // ignorar
+  }
+}
+
+/**
+ * Indica si un pedido (por su created_at) fue registrado antes o en el corte de reinicio.
+ */
+export function isOrderBeforeCutoff(
+  createdAt: string | null | undefined,
+  cutoffIso?: string | null
+): boolean {
+  const cutoff = cutoffIso !== undefined ? cutoffIso : getInventoryCutoffDate();
+  if (!cutoff || !createdAt) return false;
+  const orderMs = new Date(createdAt).getTime();
+  const cutoffMs = new Date(cutoff).getTime();
+  if (!Number.isFinite(orderMs) || !Number.isFinite(cutoffMs)) return false;
+  return orderMs <= cutoffMs;
+}
+
+/**
+ * Indica si un gasto publicitario pertenece a un período anterior al corte de Bóveda.
+ */
+export function isAdSpendBeforeCutoff(
+  fecha: string | null | undefined,
+  createdAt: string | null | undefined,
+  cutoffIso?: string | null
+): boolean {
+  const cutoff = cutoffIso !== undefined ? cutoffIso : getVaultCutoffDate();
+  if (!cutoff) return false;
+  const cutoffMs = new Date(cutoff).getTime();
+  if (!Number.isFinite(cutoffMs)) return false;
+
+  if (createdAt) {
+    const createdMs = new Date(createdAt).getTime();
+    if (Number.isFinite(createdMs)) return createdMs <= cutoffMs;
+  }
+
+  if (fecha) {
+    const cutoffDay = cutoff.slice(0, 10);
+    return fecha.slice(0, 10) < cutoffDay;
+  }
+
+  return false;
+}
+
+/**
+ * Sincroniza fechas de corte desde os_events si el navegador aún no las tiene en localStorage.
+ */
+export async function hydrateCutoffsFromOsEvents(supabaseClient: any): Promise<{
+  vaultCutoff: string | null;
+  inventoryCutoff: string | null;
+}> {
+  const localVault = getVaultCutoffDate();
+  const localInv = getInventoryCutoffDate();
+
+  if (localVault || localInv) {
+    return { vaultCutoff: localVault, inventoryCutoff: localInv };
+  }
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('os_events')
+      .select('type,payload,occurred_at')
+      .in('type', ['system.vault_reset', 'system.vault_cutoff_cleared'])
+      .order('occurred_at', { ascending: false })
+      .limit(1);
+
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const latest = data[0];
+      if (latest.type === 'system.vault_reset') {
+        const p = latest.payload || {};
+        const vCut = p.vault_cutoff || latest.occurred_at || null;
+        const iCut = p.inventory_cutoff || null;
+        if (vCut) setVaultCutoffDate(vCut);
+        if (iCut) setInventoryCutoffDate(iCut);
+        localStorage.setItem(RESET_FLAG_KEY, '1');
+        return { vaultCutoff: vCut, inventoryCutoff: iCut };
+      }
+    }
+  } catch {
+    // os_events opcional
+  }
+
+  return { vaultCutoff: localVault, inventoryCutoff: localInv };
 }
 
 /**

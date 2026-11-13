@@ -29,7 +29,8 @@ import {
   Trash2,
   ExternalLink,
   ShieldCheck,
-  Check
+  Check,
+  RotateCcw
 } from 'lucide-react';
 import { formatCurrency, formatRoas, roasColorClass } from '@/lib/rentabilidad';
 import type { 
@@ -39,13 +40,21 @@ import type {
   GastoPublicidad 
 } from '@/types/rentabilidad';
 import { fetchStockItems } from '@/lib/inventory';
+import { emitOsEvent } from '@/lib/osEvents';
 import type { StockItem } from '@/types/inventory';
 import { 
   resolveCatalogSku, 
   linkRawSkuToProduct, 
   linkAdCodeToProduct, 
   removeAttribution, 
-  loadAttributionMap 
+  loadAttributionMap,
+  resetVaultAndAliasesStorage,
+  getVaultCutoffDate,
+  setVaultCutoffDate,
+  setInventoryCutoffDate,
+  isOrderBeforeCutoff,
+  isAdSpendBeforeCutoff,
+  hydrateCutoffsFromOsEvents
 } from '@/lib/catalogAliases';
 
 const MESES_NOMBRES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -78,11 +87,22 @@ export function BovedaProductosRoas() {
   const [textoParaVincular, setTextoParaVincular] = useState('');
   const [targetCatalogSku, setTargetCatalogSku] = useState('');
 
+  // Reinicio desde 0 / Fecha de Corte de la Bóveda
+  const [vaultCutoff, setVaultCutoffState] = useState<string | null>(() => getVaultCutoffDate());
+  const [modalResetAbierto, setModalResetAbierto] = useState(false);
+  const [reseteandoBoveda, setReseteandoBoveda] = useState(false);
+  const [optCorteBoveda, setOptCorteBoveda] = useState(true);
+  const [optDesvincularSupabase, setOptDesvincularSupabase] = useState(true);
+  const [optBlindarInventario, setOptBlindarInventario] = useState(true);
+  const [optLimpiarAliases, setOptLimpiarAliases] = useState(true);
+  const [resetToast, setResetToast] = useState<{ tipo: 'ok' | 'warn'; msg: string } | null>(null);
+
   // Cargar todos los datos históricos
   const cargarHistorico = async () => {
     setCargando(true);
     try {
-      const [{ items: itemsStock }, resOrdenes, resGastos, resProd] = await Promise.all([
+      const [cutoffs, { items: itemsStock }, resOrdenes, resGastos, resProd] = await Promise.all([
+        hydrateCutoffsFromOsEvents(supabase),
         fetchStockItems(),
         supabase
           .from('whatsapp_orders')
@@ -97,6 +117,11 @@ export function BovedaProductosRoas() {
           .select('*')
       ]);
 
+      if (cutoffs?.vaultCutoff && !getVaultCutoffDate()) {
+        setVaultCutoffState(cutoffs.vaultCutoff);
+      } else {
+        setVaultCutoffState(getVaultCutoffDate());
+      }
       setStockItems(itemsStock || []);
       setOrdenes(resOrdenes.data || []);
       setGastos(resGastos.data || []);
@@ -128,6 +153,7 @@ export function BovedaProductosRoas() {
       precio_venta: number;
       stock_actual: number;
       esOficial: boolean;
+      activoItem: boolean;
       ventasTotales: number;
       pedidosTotales: number;
       gastoTotal: number;
@@ -140,9 +166,15 @@ export function BovedaProductosRoas() {
     const initMeses = () => Array.from({ length: 12 }, () => ({ ventas: 0, pedidos: 0 }));
     const initMesesGasto = () => Array.from({ length: 12 }, () => 0);
 
+    // Rastrear template_id ya cubiertos por inventory_stock para evitar duplicados (#SKU vs #template_id)
+    const seenTemplateIds = new Set<string>();
+
     // Registrar productos del inventario/stock
     stockItems.forEach(item => {
       const cSku = item.sku.trim().toUpperCase();
+      if (item.template_id) {
+        seenTemplateIds.add(String(item.template_id).trim().toUpperCase());
+      }
       canonicalMap.set(cSku, {
         sku: cSku,
         nombre: item.nombre || cSku,
@@ -151,6 +183,7 @@ export function BovedaProductosRoas() {
         precio_venta: item.precio_venta || 0,
         stock_actual: item.stock_disponible ?? item.stock_fisico ?? 0,
         esOficial: true,
+        activoItem: item.activo !== false,
         ventasTotales: 0,
         pedidosTotales: 0,
         gastoTotal: 0,
@@ -161,10 +194,11 @@ export function BovedaProductosRoas() {
       });
     });
 
-    // Registrar productos de la tabla productos que no estén aún
+    // Registrar productos de la tabla legacy productos SOLO si no tienen ya SKU en inventory_stock y están activos
     productosDb.forEach(p => {
+      if (p.active === false) return;
       const tId = String(p.template_id || '').trim().toUpperCase();
-      if (tId && !canonicalMap.has(tId)) {
+      if (tId && !seenTemplateIds.has(tId) && !canonicalMap.has(tId)) {
         canonicalMap.set(tId, {
           sku: tId,
           nombre: p.nombre_base || tId,
@@ -173,6 +207,7 @@ export function BovedaProductosRoas() {
           precio_venta: 0,
           stock_actual: 0,
           esOficial: true,
+          activoItem: true,
           ventasTotales: 0,
           pedidosTotales: 0,
           gastoTotal: 0,
@@ -188,8 +223,11 @@ export function BovedaProductosRoas() {
     const sinMapearTextos = new Set<string>();
     const sinMapearAnuncios = new Set<string>();
 
-    // 2. Procesar y Atribuir Órdenes de WhatsApp
+    // 2. Procesar y Atribuir Órdenes de WhatsApp (respetando fecha de corte de Bóveda si está activa)
     ordenes.forEach(o => {
+      if (vaultCutoff && isOrderBeforeCutoff(o.created_at, vaultCutoff)) {
+        return;
+      }
       const rawSku = (o.sku || '').trim();
       const catSkuDirecto = (o.catalogo_sku || '').trim();
       const codAnuncio = (o.codigo_anuncio || '').trim();
@@ -225,6 +263,7 @@ export function BovedaProductosRoas() {
             precio_venta: monto,
             stock_actual: 0,
             esOficial: false,
+            activoItem: true,
             ventasTotales: 0,
             pedidosTotales: 0,
             gastoTotal: 0,
@@ -246,8 +285,11 @@ export function BovedaProductosRoas() {
       }
     });
 
-    // 3. Procesar y Atribuir Gastos de Publicidad
+    // 3. Procesar y Atribuir Gastos de Publicidad (respetando fecha de corte de Bóveda)
     gastos.forEach(g => {
+      if (vaultCutoff && isAdSpendBeforeCutoff(g.fecha, g.created_at, vaultCutoff)) {
+        return;
+      }
       const codGasto = (g.codigo_anuncio || '').trim();
       const montoGasto = Number(g.monto || 0);
       const fechaGasto = g.fecha ? new Date(g.fecha) : new Date();
@@ -287,6 +329,7 @@ export function BovedaProductosRoas() {
             precio_venta: 0,
             stock_actual: 0,
             esOficial: false,
+            activoItem: true,
             ventasTotales: 0,
             pedidosTotales: 0,
             gastoTotal: 0,
@@ -308,8 +351,8 @@ export function BovedaProductosRoas() {
     const listaConsolidada: ProductoBovedaRoas[] = [];
 
     canonicalMap.forEach(prod => {
-      // Filtrar productos que no tengan ninguna venta ni ningún gasto registrado
-      if (prod.ventasTotales === 0 && prod.gastoTotal === 0 && !prod.esOficial) {
+      // Filtrar productos sin ventas ni gastos que además estén pausados o no sean oficiales
+      if (prod.ventasTotales === 0 && prod.gastoTotal === 0 && (!prod.esOficial || !prod.activoItem)) {
         return;
       }
 
@@ -424,7 +467,7 @@ export function BovedaProductosRoas() {
       textosSinMapear: Array.from(sinMapearTextos),
       codigosSinMapear: Array.from(sinMapearAnuncios)
     };
-  }, [ordenes, gastos, stockItems, productosDb, versionAtribucion]);
+  }, [ordenes, gastos, stockItems, productosDb, versionAtribucion, vaultCutoff]);
 
   // Filtros y ordenamiento
   const productosFiltrados = useMemo(() => {
@@ -598,12 +641,122 @@ export function BovedaProductosRoas() {
     }
   };
 
+  // Ejecutar reinicio limpio de la Bóveda desde 0
+  const ejecutarReinicioBoveda = async () => {
+    setReseteandoBoveda(true);
+    const nowIso = new Date().toISOString();
+    try {
+      if (optLimpiarAliases) {
+        resetVaultAndAliasesStorage();
+      }
+      if (optCorteBoveda) {
+        setVaultCutoffDate(nowIso);
+        setVaultCutoffState(nowIso);
+      }
+      if (optBlindarInventario) {
+        setInventoryCutoffDate(nowIso);
+      }
+      if (optDesvincularSupabase) {
+        const { error: unlinkErr } = await supabase
+          .from('whatsapp_orders')
+          .update({ catalogo_sku: null })
+          .lte('created_at', nowIso);
+        if (unlinkErr) {
+          console.warn('No se pudo desvincular catalogo_sku antiguo:', unlinkErr.message);
+        }
+      }
+
+      try {
+        await emitOsEvent({
+          type: 'system.vault_reset',
+          source_table: 'whatsapp_orders',
+          source_id: nowIso,
+          payload: {
+            vault_cutoff: optCorteBoveda ? nowIso : null,
+            inventory_cutoff: optBlindarInventario ? nowIso : null,
+            unlinked_orders: optDesvincularSupabase,
+            cleared_aliases: optLimpiarAliases
+          }
+        });
+      } catch {
+        // os_events opcional
+      }
+
+      setProductoSeleccionado(null);
+      setVersionAtribucion(v => v + 1);
+      setModalResetAbierto(false);
+      setResetToast({
+        tipo: 'ok',
+        msg: 'Bóveda reiniciada desde 0: los pedidos anteriores quedaron archivados y tu inventario nuevo está blindado.'
+      });
+      setTimeout(() => setResetToast(null), 6000);
+      await cargarHistorico();
+    } catch (err: any) {
+      setResetToast({
+        tipo: 'warn',
+        msg: err?.message || 'Ocurrió un error al reiniciar la Bóveda.'
+      });
+    } finally {
+      setReseteandoBoveda(false);
+    }
+  };
+
+  const handleQuitarCorteVista = async () => {
+    setVaultCutoffDate(null);
+    setVaultCutoffState(null);
+    setVersionAtribucion(v => v + 1);
+    try {
+      await emitOsEvent({
+        type: 'system.vault_cutoff_cleared',
+        source_table: 'whatsapp_orders',
+        source_id: 'view_all',
+        payload: { restored_at: new Date().toISOString() }
+      });
+    } catch {
+      // opcional
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {/* Encabezado de la Bóveda con Botón de Unificación & Atribución */}
+      {resetToast && (
+        <div className={`px-4 py-3 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 ${
+          resetToast.tipo === 'ok'
+            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+            : 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
+        }`}>
+          <span className="flex items-center gap-2">
+            <ShieldCheck size={16} /> {resetToast.msg}
+          </span>
+          <button onClick={() => setResetToast(null)} className="opacity-60 hover:opacity-100">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {vaultCutoff && (
+        <div className="px-4 py-2.5 rounded-xl border border-indigo-500/25 bg-indigo-500/5 text-xs flex flex-wrap items-center justify-between gap-2">
+          <span className="flex items-center gap-2 text-indigo-700 dark:text-indigo-300 font-medium">
+            <ShieldCheck size={15} className="shrink-0 text-indigo-500" />
+            <span>
+              <strong>Bóveda limpia desde el {new Date(vaultCutoff).toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</strong>
+              {' '}— Pedidos y gastos previos archivados (no ensucian KPIs ni tocan stock nuevo).
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={handleQuitarCorteVista}
+            className="text-[11px] font-bold text-indigo-600 dark:text-indigo-300 hover:underline whitespace-nowrap"
+          >
+            Mostrar histórico anterior
+          </button>
+        </div>
+      )}
+
+      {/* Encabezado de la Bóveda con Botón de Unificación, Reinicio & Atribución */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Sparkles className="text-amber-500" size={24} />
             <h2 className="text-xl font-black">Bóveda de Productos Ganadores & Ciclos de Pauta</h2>
             <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/30">
@@ -615,12 +768,20 @@ export function BovedaProductosRoas() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setModalMapeoAbierto(true)}
             className="px-3.5 py-2 border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
           >
             <LinkIcon size={14} /> Mapeo de Atribución & Alias
+          </button>
+
+          <button
+            onClick={() => setModalResetAbierto(true)}
+            className="px-3.5 py-2 border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
+            title="Archivar datos legacy y empezar la Bóveda desde 0 con tus productos nuevos"
+          >
+            <RotateCcw size={14} /> Reiniciar Bóveda desde 0
           </button>
 
           <button
@@ -1329,7 +1490,7 @@ export function BovedaProductosRoas() {
                       className="w-full p-2 bg-cd border border-[var(--bd)] rounded-lg text-xs outline-none focus:border-indigo-500 font-semibold"
                     >
                       <option value="">Selecciona un producto...</option>
-                      {stockItems.map(item => (
+                      {stockItems.filter(item => item.activo !== false).map(item => (
                         <option key={item.sku} value={item.sku}>
                           {item.nombre} (#{item.sku})
                         </option>
@@ -1379,6 +1540,126 @@ export function BovedaProductosRoas() {
                 className="px-4 py-1.5 bg-[var(--cd)] border border-[var(--bd)] rounded-xl text-xs font-bold"
               >
                 Listo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: REINICIAR BÓVEDA DESDE 0 & BLINDAJE DE INVENTARIO */}
+      {modalResetAbierto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm p-4"
+          onClick={() => !reseteandoBoveda && setModalResetAbierto(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-lg overflow-hidden rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl flex flex-col"
+          >
+            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-rose-500/10">
+              <div className="flex items-center gap-2">
+                <RotateCcw size={18} className="text-rose-500" />
+                <h3 className="font-bold text-sm text-rose-600 dark:text-rose-400">
+                  Reiniciar Bóveda desde 0 (Corte Limpio)
+                </h3>
+              </div>
+              <button
+                type="button"
+                disabled={reseteandoBoveda}
+                onClick={() => setModalResetAbierto(false)}
+                className="p-1 rounded-lg hover:bg-black/10"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-700 dark:text-emerald-300 leading-relaxed">
+                <strong>Tus Pedidos, Finanzas y Lista Negra NO se borran.</strong> Esto solo limpia la Bóveda de productos viejos/Odoo y blinda tu inventario nuevo para que los ~50 pedidos anteriores nunca descuenten unidades nuevas.
+              </div>
+
+              <div className="space-y-2.5">
+                <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-sf border border-[var(--bd)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={optCorteBoveda}
+                    onChange={e => setOptCorteBoveda(e.target.checked)}
+                    className="mt-0.5 accent-indigo-600"
+                  />
+                  <div>
+                    <span className="font-bold block">1. Iniciar Bóveda desde este instante (Fecha de Corte)</span>
+                    <span className="text-[11px] tx-mu">
+                      Archiva en la vista de Bóveda todos los pedidos y gastos anteriores a hoy para empezar solo con tus productos nuevos reales.
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-sf border border-[var(--bd)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={optDesvincularSupabase}
+                    onChange={e => setOptDesvincularSupabase(e.target.checked)}
+                    className="mt-0.5 accent-indigo-600"
+                  />
+                  <div>
+                    <span className="font-bold block">2. Limpiar SKUs vinculados en pedidos viejos (Supabase)</span>
+                    <span className="text-[11px] tx-mu">
+                      Quita <code className="font-mono">catalogo_sku</code> de los pedidos anteriores a este corte para desconectarlos de los productos eliminados.
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-sf border border-[var(--bd)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={optBlindarInventario}
+                    onChange={e => setOptBlindarInventario(e.target.checked)}
+                    className="mt-0.5 accent-emerald-600"
+                  />
+                  <div>
+                    <span className="font-bold block text-emerald-600 dark:text-emerald-400">
+                      3. Blindar Inventario Nuevo contra pedidos anteriores (Recomendado)
+                    </span>
+                    <span className="text-[11px] tx-mu">
+                      Garantiza que ningún pedido anterior a este corte pueda reservar ni descontar unidades de tu bodega actual, aunque le cambies de estado o le asignes SKU.
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-sf border border-[var(--bd)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={optLimpiarAliases}
+                    onChange={e => setOptLimpiarAliases(e.target.checked)}
+                    className="mt-0.5 accent-rose-600"
+                  />
+                  <div>
+                    <span className="font-bold block">4. Borrar alias viejos de Odoo y notas locales de Bóveda</span>
+                    <span className="text-[11px] tx-mu">
+                      Elimina los mapeos heredados (#PORTA-BEBES, #ASIS-BB-01, etc.) para que no reaparezcan tarjetas fantasma.
+                    </span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-[var(--bd)] bg-sf flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={reseteandoBoveda}
+                onClick={() => setModalResetAbierto(false)}
+                className="px-4 py-2 rounded-xl border border-[var(--bd)] text-xs font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={reseteandoBoveda || (!optCorteBoveda && !optDesvincularSupabase && !optBlindarInventario && !optLimpiarAliases)}
+                onClick={ejecutarReinicioBoveda}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1.5 shadow"
+              >
+                <RotateCcw size={14} className={reseteandoBoveda ? 'animate-spin' : ''} />
+                {reseteandoBoveda ? 'Reiniciando Bóveda...' : 'Sí, Reiniciar Bóveda desde 0'}
               </button>
             </div>
           </div>

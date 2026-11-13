@@ -64,6 +64,11 @@ import {
   computeOrderLedgerFromMovements,
   extractOrderQuantity
 } from "@/lib/inventory";
+import {
+  getInventoryCutoffDate,
+  isOrderBeforeCutoff,
+  hydrateCutoffsFromOsEvents
+} from "@/lib/catalogAliases";
 import type { StockItem, KardexMovement } from "@/types/inventory";
 
 /* ------------------------------------------------------------------ */
@@ -298,7 +303,8 @@ export function PedidosPage() {
         .select("*")
         .order("created_at", { ascending: false }),
       fetchStockItems(),
-      fetchOrderKardexMap()
+      fetchOrderKardexMap(),
+      hydrateCutoffsFromOsEvents(supabase)
     ]);
 
     if (ordersRes.error) {
@@ -494,9 +500,12 @@ export function PedidosPage() {
 
     const prevEstado = normalizarEstado(pedido.estado);
 
-    // Si pasa a Empaque o En Camino desde Nuevo/Encargo, verificar stock disponible real
+    const esHistoricoPreCorte = isOrderBeforeCutoff(pedido.created_at, getInventoryCutoffDate());
+
+    // Si pasa a Empaque o En Camino desde Nuevo/Encargo, verificar stock disponible real (salvo histórico pre-corte)
     if (
       !omitirAlertaStock &&
+      !esHistoricoPreCorte &&
       (destino === 'por_empacar' || destino === 'en_camino') &&
       (prevEstado === 'nuevo' || prevEstado === 'programado')
     ) {
@@ -539,6 +548,8 @@ export function PedidosPage() {
         });
         if (!invRes.skipped && invRes.actions.length > 0) {
           showInvToast(invRes.success ? 'ok' : 'warn', invRes.summaryText);
+        } else if (invRes.reason === 'historical_cutoff' && (destino === 'por_empacar' || destino === 'en_camino' || destino === 'entregado')) {
+          showInvToast('ok', `Pedido histórico #${pedido.id.slice(0, 8).toUpperCase()} protegido: movido sin descontar inventario nuevo.`);
         } else if (invRes.reason === 'unmapped_sku' && (destino === 'por_empacar' || destino === 'entregado')) {
           showInvToast('warn', `Pedido #${pedido.id.slice(0, 8).toUpperCase()} sin SKU vinculado: no movió inventario.`);
         }
@@ -2093,8 +2104,20 @@ function OrderStockBadge({
   const estado = normalizarEstado(pedido.estado);
   const lines = useMemo(() => resolveOrderInventoryLines(pedido, stockItems), [pedido, stockItems]);
   const ledger = useMemo(() => computeOrderLedgerFromMovements(kardexMovs), [kardexMovs]);
+  const esHistoricoPreCorte = isOrderBeforeCutoff(pedido.created_at, getInventoryCutoffDate());
 
   if (stockItems.length === 0) return null;
+
+  if (esHistoricoPreCorte && ledger.reservedNet === 0 && ledger.soldNet === 0) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-[9px] font-medium px-1.5 py-0.2 rounded bg-sf tx-mu border border-[var(--bd)]"
+        title="Pedido anterior al reinicio de inventario: protegido, no reserva ni descuenta stock nuevo"
+      >
+        🗂️ Histórico (no toca stock)
+      </span>
+    );
+  }
 
   if (lines.length === 0) {
     if (estado === 'cancelado') return null;
