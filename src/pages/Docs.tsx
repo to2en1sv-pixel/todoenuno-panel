@@ -565,7 +565,9 @@ export function DocsPage() {
         } catch {}
       }
 
-      const visibleDbDocs = allRows.filter(d => d.titulo !== ROADMAP_SYNC_DOC_TITLE);
+      const visibleDbDocs = allRows.filter(
+        d => d.titulo !== ROADMAP_SYNC_DOC_TITLE && !d.titulo.startsWith('__SYSTEM_')
+      );
       const dbTitles = new Set(visibleDbDocs.map(d => d.titulo.trim().toLowerCase()));
       const mergedDocs = [
         ...visibleDbDocs,

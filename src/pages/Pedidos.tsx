@@ -49,7 +49,14 @@ import {
   ShieldAlert,
   UserX
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
+import {
+  fetchOrderWhatsappTemplates,
+  getCachedOrderWhatsappTemplates,
+  renderWhatsappTemplate,
+  type OrderWhatsappTemplate,
+} from "@/lib/whatsappTemplates";
 import PedidoModal from "@/components/PedidoModal";
 import GuiaEnvio, { type GuiaPedido } from "@/components/GuiaEnvio";
 import ManifiestoDespacho from "@/components/ManifiestoDespacho";
@@ -269,8 +276,17 @@ export function PedidosPage() {
   const [esMermaDevolucion, setEsMermaDevolucion] = useState(false);
   const [cancelando, setCancelando] = useState(false);
 
-  // Modal WhatsApp con Plantillas
+  // Modal WhatsApp con Plantillas (editables desde Sistema)
   const [pedidoWhatsapp, setPedidoWhatsapp] = useState<Pedido | null>(null);
+  const [waTemplates, setWaTemplates] = useState<OrderWhatsappTemplate[]>(() =>
+    getCachedOrderWhatsappTemplates()
+  );
+
+  useEffect(() => {
+    fetchOrderWhatsappTemplates().then(({ templates }) => {
+      setWaTemplates(templates);
+    });
+  }, [pedidoWhatsapp]);
 
   // Sincronización con Inventario & Kárdex
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
@@ -1983,101 +1999,87 @@ export function PedidosPage() {
         </div>
       )}
 
-      {/* MODAL 7: PLANTILLAS INTELIGENTES DE WHATSAPP */}
+      {/* MODAL 7: PLANTILLAS INTELIGENTES DE WHATSAPP (EDITABLES EN SISTEMA) */}
       {pedidoWhatsapp && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setPedidoWhatsapp(null)}>
-          <div onClick={e => e.stopPropagation()} className="w-full max-w-lg rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
-              <div className="flex items-center gap-2 text-emerald-600">
-                <MessageCircle size={18} />
-                <h3 className="font-bold text-sm">Enviar WhatsApp a {pedidoWhatsapp.nombre_cliente}</h3>
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-lg max-h-[88vh] flex flex-col rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf shrink-0">
+              <div className="flex items-center gap-2 text-emerald-600 min-w-0">
+                <MessageCircle size={18} className="shrink-0" />
+                <h3 className="font-bold text-sm truncate">Enviar WhatsApp a {pedidoWhatsapp.nombre_cliente}</h3>
               </div>
-              <button onClick={() => setPedidoWhatsapp(null)} className="p-1 rounded-lg"><X size={16} /></button>
+              <button onClick={() => setPedidoWhatsapp(null)} className="p-1 rounded-lg shrink-0"><X size={16} /></button>
             </div>
 
-            <div className="p-5 space-y-3">
-              <span className="text-[10px] uppercase font-bold tx-mu block">Selecciona una plantilla rápida:</span>
-
-              {/* Plantilla 1: Confirmación de Pedido */}
-              <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] space-y-1.5">
-                <span className="text-xs font-bold text-[var(--tx)] block">1. 📦 Confirmar Pedido y Dirección</span>
-                <p className="text-[11px] tx-mu italic bg-cd p-2 rounded-lg border border-[var(--bd)]">
-                  "¡Hola {pedidoWhatsapp.nombre_cliente}! 👋 Confirmamos tu pedido de *{pedidoWhatsapp.sku || 'tu producto'}* por un total de *{dinero(pedidoWhatsapp.total)}*. ¿Nos confirmas que recibirás en 📍 {pedidoWhatsapp.direccion || 'tu dirección'}?"
-                </p>
-                <a
-                  href={`https://wa.me/${(pedidoWhatsapp.telefono || '').replace(/\D/g, '')}?text=${encodeURIComponent(
-                    `¡Hola ${pedidoWhatsapp.nombre_cliente || ''}! 👋 Confirmamos tu pedido de *${pedidoWhatsapp.sku || 'tu producto'}* por un total de *${dinero(pedidoWhatsapp.total)}*. ¿Nos confirmas si recibirás en 📍 ${pedidoWhatsapp.direccion || 'tu dirección'}?`
-                  )}`}
-                  target="_blank"
-                  rel="noreferrer"
+            <div className="p-5 space-y-3 overflow-y-auto flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] uppercase font-bold tx-mu">Selecciona una plantilla rápida:</span>
+                <Link
+                  to="/sistema?tab=plantillas"
                   onClick={() => setPedidoWhatsapp(null)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold"
+                  className="text-[11px] font-semibold hover:underline"
+                  style={{ color: 'var(--ac)' }}
                 >
-                  <Send size={12} /> Enviar Confirmación
-                </a>
+                  Editar plantillas en Sistema →
+                </Link>
               </div>
 
-              {/* Plantilla 2: En Camino */}
-              <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] space-y-1.5">
-                <span className="text-xs font-bold text-[var(--tx)] block">2. 🛵 Paquete en Camino con Motorista</span>
-                <p className="text-[11px] tx-mu italic bg-cd p-2 rounded-lg border border-[var(--bd)]">
-                  "¡Buenas noticias {pedidoWhatsapp.nombre_cliente}! 🛵 Tu pedido va en camino hoy con nuestro repartidor ({pedidoWhatsapp.courier || 'Motorista'}). Recuerda tener listo *{dinero(pedidoWhatsapp.total)}* en efectivo contra entrega."
-                </p>
-                <a
-                  href={`https://wa.me/${(pedidoWhatsapp.telefono || '').replace(/\D/g, '')}?text=${encodeURIComponent(
-                    `¡Buenas noticias ${pedidoWhatsapp.nombre_cliente || ''}! 🛵 Tu pedido va en camino hoy con nuestro repartidor (${pedidoWhatsapp.courier || 'Motorista'}). Recuerda tener listo *${dinero(pedidoWhatsapp.total)}* en efectivo contra entrega.`
-                  )}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={() => setPedidoWhatsapp(null)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold"
-                >
-                  <Send size={12} /> Enviar Aviso de Ruta
-                </a>
-              </div>
+              {waTemplates
+                .filter((tpl) => tpl.activo && tpl.categoria !== 'repartidor')
+                .map((tpl) => {
+                  const renderedMsg = renderWhatsappTemplate(tpl.mensaje, pedidoWhatsapp);
+                  const cleanPhone = (pedidoWhatsapp.telefono || '').replace(/\D/g, '');
+                  const isEncargo = tpl.id === 'encargo';
+                  const isWarn = tpl.id === 'reprogramar';
 
-              {/* Plantilla 3: Novedad / Reintento */}
-              <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] space-y-1.5">
-                <span className="text-xs font-bold text-[var(--tx)] block">3. ⚠️ No Contesta / Reprogramar Entrega</span>
-                <p className="text-[11px] tx-mu italic bg-cd p-2 rounded-lg border border-[var(--bd)]">
-                  "Hola {pedidoWhatsapp.nombre_cliente}, nuestro repartidor estuvo en tu zona pero no logramos comunicarnos. ¿Nos confirmas si te queda bien reprogramar la entrega para mañana?"
-                </p>
-                <a
-                  href={`https://wa.me/${(pedidoWhatsapp.telefono || '').replace(/\D/g, '')}?text=${encodeURIComponent(
-                    `Hola ${pedidoWhatsapp.nombre_cliente || ''}, nuestro repartidor estuvo en tu zona pero no logramos comunicarnos. ¿Nos confirmas si te queda bien reprogramar la entrega para mañana?`
-                  )}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={() => setPedidoWhatsapp(null)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold"
-                >
-                  <Send size={12} /> Enviar Reprogramación
-                </a>
-              </div>
+                  return (
+                    <div
+                      key={tpl.id}
+                      className={`p-3 rounded-xl border space-y-1.5 ${
+                        isEncargo
+                          ? 'bg-indigo-500/10 border-indigo-500/30'
+                          : 'bg-sf border-[var(--bd)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`text-xs font-bold block ${
+                            isEncargo
+                              ? 'text-indigo-700 dark:text-indigo-300'
+                              : 'text-[var(--tx)]'
+                          }`}
+                        >
+                          {tpl.titulo}
+                        </span>
+                        {isEncargo && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-bold shrink-0">
+                            Quincena / Futuro
+                          </span>
+                        )}
+                      </div>
 
-              {/* Plantilla 4: Recordatorio de Encargo Programado */}
-              <div className="p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/30 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300 block">4. 📅 Recordatorio de Encargo Programado</span>
-                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-bold">
-                    Quincena / Futuro
-                  </span>
-                </div>
-                <p className="text-[11px] tx-mu italic bg-cd p-2 rounded-lg border border-[var(--bd)]">
-                  "¡Hola {pedidoWhatsapp.nombre_cliente}! 👋 Te saludamos de TODOENUNO. Te recordamos que tu encargo de *{pedidoWhatsapp.sku || 'tu producto'}* por *{dinero(pedidoWhatsapp.total)}* está programado para entrega este {pedidoWhatsapp.fecha_programada || 'día acordado'}. ¿Nos confirmas si todo sigue en pie para despacharlo con el motorista?"
-                </p>
-                <a
-                  href={`https://wa.me/${(pedidoWhatsapp.telefono || '').replace(/\D/g, '')}?text=${encodeURIComponent(
-                    `¡Hola ${pedidoWhatsapp.nombre_cliente || ''}! 👋 Te saludamos de TODOENUNO. Te recordamos que tu encargo de *${pedidoWhatsapp.sku || 'tu producto'}* por *${dinero(pedidoWhatsapp.total)}* está programado para entrega este ${pedidoWhatsapp.fecha_programada || 'día acordado'}. ¿Nos confirmas si todo sigue en pie para despacharlo con el motorista?`
-                  )}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={() => setPedidoWhatsapp(null)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold shadow-sm"
-                >
-                  <Send size={12} /> Enviar Recordatorio de Encargo
-                </a>
-              </div>
+                      <p className="text-[11px] tx-mu italic bg-cd p-2 rounded-lg border border-[var(--bd)] whitespace-pre-wrap break-words">
+                        "{renderedMsg}"
+                      </p>
+
+                      <a
+                        href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(renderedMsg)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => setPedidoWhatsapp(null)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-white rounded-lg text-xs font-bold ${
+                          isEncargo
+                            ? 'bg-indigo-600 hover:bg-indigo-500 shadow-sm'
+                            : isWarn
+                              ? 'bg-amber-600 hover:bg-amber-500'
+                              : 'bg-emerald-600 hover:bg-emerald-500'
+                        }`}
+                      >
+                        <Send size={12} /> {tpl.etiquetaBoton || 'Enviar WhatsApp'}
+                      </a>
+                    </div>
+                  );
+                })}
             </div>
           </div>
         </div>

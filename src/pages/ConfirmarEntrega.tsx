@@ -30,6 +30,11 @@ import {
 import { compressImageFile, syncOrderInventoryOnStatusChange } from "@/lib/inventory";
 import { hydrateCutoffsFromOsEvents } from "@/lib/catalogAliases";
 import { addOrUpdateBlacklist, evaluateCustomerRisk } from "@/lib/blacklist";
+import {
+  fetchOrderWhatsappTemplates,
+  getCachedOrderWhatsappTemplates,
+  renderWhatsappTemplate,
+} from "@/lib/whatsappTemplates";
 
 export function ConfirmarEntregaPage() {
   const { id } = useParams();
@@ -41,6 +46,20 @@ export function ConfirmarEntregaPage() {
   const [todosLosPedidos, setTodosLosPedidos] = useState<any[]>([]);
   const [actualizando, setActualizando] = useState(false);
   const [exito, setExito] = useState(false);
+  const [driverTemplate, setDriverTemplate] = useState<string>(() => {
+    const cached = getCachedOrderWhatsappTemplates().find((t) => t.id === "repartidor_llegando");
+    return (
+      cached?.mensaje ||
+      "Hola {nombre}, soy el repartidor de To2en1.app. Estoy llegando a tu dirección con tu pedido de *{producto}*. ¿Te encuentras disponible para recibir? 🛵"
+    );
+  });
+
+  useEffect(() => {
+    fetchOrderWhatsappTemplates().then(({ templates }) => {
+      const tpl = templates.find((t) => t.id === "repartidor_llegando");
+      if (tpl?.mensaje) setDriverTemplate(tpl.mensaje);
+    });
+  }, []);
 
   // Vista de Hoja de Ruta vs Entrega Individual
   const [modoRuta, setModoRuta] = useState(!id);
@@ -322,7 +341,7 @@ export function ConfirmarEntregaPage() {
   const direccionCodificada = encodeURIComponent(`${pedido?.direccion || ""}, El Salvador`);
   const urlWaze = `https://waze.com/ul?q=${direccionCodificada}`;
   const urlMaps = `https://www.google.com/maps/search/?api=1&query=${direccionCodificada}`;
-  const mensajeWa = `Hola ${pedido?.nombre_cliente || ""}, soy el repartidor de To2en1.app. Estoy llegando a tu dirección con tu pedido de *${pedido?.sku || "tu producto"}*. ¿Te encuentras disponible para recibir? 🛵`;
+  const mensajeWa = renderWhatsappTemplate(driverTemplate, pedido);
   const urlWa = telefonoLimpio ? `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensajeWa)}` : undefined;
 
   if (cargando) {
