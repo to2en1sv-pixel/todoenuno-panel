@@ -506,6 +506,38 @@ export function SistemaToddConfig() {
                   className="w-full bg-sf bd rounded-xl p-3 text-xs leading-relaxed outline-none focus:border-[var(--ac)] resize-none"
                 />
               </div>
+
+              <div className="sm:col-span-2 pt-2 border-t border-[var(--bd)]">
+                <label className="flex items-start justify-between gap-3 p-3 rounded-xl bg-sf bd cursor-pointer select-none">
+                  <div>
+                    <div className="text-xs font-bold flex items-center gap-1.5 flex-wrap">
+                      Comportamiento después de cerrar un pedido
+                      <span
+                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-md"
+                        style={{
+                          background: settings.autoPauseOnOrder
+                            ? 'var(--cd)'
+                            : 'color-mix(in srgb, var(--ok) 15%, transparent)',
+                          color: settings.autoPauseOnOrder ? 'var(--ac)' : 'var(--ok)',
+                        }}
+                      >
+                        {settings.autoPauseOnOrder
+                          ? 'Pausar directo a Humano'
+                          : 'Segunda fase inteligente (Activo)'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] tx-mu mt-0.5 leading-relaxed">
+                      Por defecto Todd entra en <strong>segunda fase post-cierre</strong>: responde despedidas, anota indicaciones extra de entrega directo en las notas del pedido y solo escala a Humano si piden cambios o casos complejos. Marca esta casilla solo si prefieres apagar a Todd inmediatamente al cerrar el pedido.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="mt-1 shrink-0"
+                    checked={settings.autoPauseOnOrder}
+                    onChange={e => updateField('autoPauseOnOrder', e.target.checked)}
+                  />
+                </label>
+              </div>
             </div>
           </section>
         </div>

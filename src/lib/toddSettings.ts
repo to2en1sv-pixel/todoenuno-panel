@@ -29,6 +29,7 @@ export interface ToddBusinessSettings {
   bankTransferInfo: string;
   warrantyNote: string;
   extraRules: string;
+  autoPauseOnOrder: boolean;
 }
 
 export const SYSTEM_TODD_SETTINGS_DOC_TITLE = '__SYSTEM_TODD_CATALOG_SETTINGS_V1__';
@@ -72,6 +73,7 @@ export const DEFAULT_TODD_BUSINESS_SETTINGS: ToddBusinessSettings = {
   bankTransferInfo: '',
   warrantyNote: '7 días de garantía por defectos de fábrica.',
   extraRules: '',
+  autoPauseOnOrder: false,
 };
 
 export function extractYouTubeVideoId(rawUrl?: string | null): string | null {
@@ -187,6 +189,7 @@ export function normalizeBusinessSettings(raw: any): ToddBusinessSettings {
     warrantyNote:
       String(raw.warrantyNote ?? DEFAULT_TODD_BUSINESS_SETTINGS.warrantyNote).trim(),
     extraRules: String(raw.extraRules || '').trim(),
+    autoPauseOnOrder: raw.autoPauseOnOrder === true,
   };
 }
 

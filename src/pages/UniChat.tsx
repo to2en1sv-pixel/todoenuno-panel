@@ -9,6 +9,7 @@ import {
 } from '@/lib/inventory';
 import {
   fetchToddCatalogSettings,
+  fetchToddBusinessSettings,
   getCachedToddCatalogSettings,
   buildHowToVideoMessage,
   type ToddCatalogSettings,
@@ -2146,7 +2147,19 @@ export function UniChatPage() {
       {showOrderModal && selectedConv && (
         <PedidoModal
           onClose={() => setShowOrderModal(false)}
-          onSaved={() => {
+          onSaved={async () => {
+            try {
+              if (selectedConv.status !== 'human') {
+                const { settings } = await fetchToddBusinessSettings();
+                if (settings.autoPauseOnOrder === true) {
+                  await supabase
+                    .from('bb_conversations')
+                    .update({ status: 'human', updated_at: new Date().toISOString() })
+                    .eq('id', selectedConv.id);
+                  setSelectedConv(prev => (prev ? { ...prev, status: 'human' } : prev));
+                }
+              }
+            } catch {}
             loadConversations(true);
             showBanner('ok', 'Pedido creado desde UniChat y registrado en Pedidos.');
           }}

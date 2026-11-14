@@ -121,7 +121,12 @@ const historyText = (ctx.recentMessages || [])
 
 const st = ctx.state || {};
 const af = ctx.antifraud || {};
+const recentOrder = ctx.recentOrder || null;
 const businessRules = String(ctx.businessRulesText || '').trim();
+
+const recentOrderLine = recentOrder
+  ? \`- Último pedido activo: #\${recentOrder.pedido_codigo || recentOrder.id} | \${recentOrder.sku || 'Producto'} | $\${Number(recentOrder.total || 0).toFixed(2)} | Estado: \${recentOrder.estado} | Notas actuales: \${recentOrder.notas || 'ninguna'}\`
+  : '- Último pedido activo: ninguno';
 
 const systemPrompt = \`Eres Todd, asistente comercial experto en ventas contra entrega (COD) en El Salvador para TODO EN UNO.
 Tu objetivo es HÍBRIDO:
@@ -144,6 +149,15 @@ REGLAS CRÍTICAS:
 - RIESGO ANTIFRAUDE DEL CLIENTE ACTUAL: Total pedidos=\${af.totalPedidos || 0}, Entregados=\${af.entregados || 0}, Cancelados=\${af.cancelados || 0}, ListaNegra=\${af.enListaNegra ? 'SI (' + (af.motivoListaNegra || 'Reportado') + ')' : 'NO'}.
   * Si ListaNegra=SI o Cancelados>=2: NO confirmes contra entrega directo; indica amablemente que para procesar su orden se requiere pago anticipado por transferencia o escala a humano ("escalate_to_human": true).
 - Solo pon "create_order_now": true cuando YA tengas confirmados TODOS estos datos: producto/SKU, nombre_cliente, direccion completa y metodo_pago.
+- HORA EXACTA DE ENTREGA: NUNCA prometas una hora exacta ni rango horario fijo de entrega; explica con amabilidad que la ruta y hora aproximada las confirma el repartidor el mismo día antes de salir.
+
+SEGUNDA FASE POST-CIERRE (cuando paso_actual = "completado" o ya existe un pedido reciente):
+- Al momento de cerrar el pedido ("create_order_now": true), pon "paso_actual": "completado", confirma el resumen e invita brevemente: "Si tienes alguna indicación especial para la entrega (día preferido, referencia adicional o quién recibe), déjamela por aquí para anotarla en tu orden."
+- Si el cliente ya está en "completado" y escribe después de cerrar su pedido:
+  1) Despedida o confirmación simple ("Gracias", "Ok", "Perfecto", "Bendiciones"): responde cordial y breve; pon "create_order_now": false, "order_note": null y "escalate_to_human": false.
+  2) Indicación especial de entrega (ej. "envíenmelo el miércoles", "solo puedo después de las 2pm", "llamar antes", "recibe mi esposa"): resúmela claro en "order_note" (ej. "Entrega solicitada para el miércoles"), confirma que ya quedó anotado en su pedido, pon "create_order_now": false (NO dupliques el pedido) y "escalate_to_human": false.
+  3) Cambio de pedido o reclamo (cambiar cantidad, producto, dirección completa, cancelar o situación compleja): pon el detalle en "order_note" si aplica, avisa brevemente que un asesor lo revisará y pon "escalate_to_human": true.
+  4) Nueva compra adicional: solo si explícitamente pide comprar otro producto distinto, vuelve a "paso_actual": "cotizando".
 
 REGLAS OPERATIVAS, ENVÍOS Y HORARIOS DEL NEGOCIO:
 \${businessRules || '- Envíos en El Salvador: San Salvador y área metropolitana mismo día o siguiente; departamentos 24-48h hábiles.'}
@@ -160,6 +174,7 @@ ESTADO ACTUAL DEL CLIENTE (whatsapp_state):
 - direccion: \${st.direccion || 'pendiente'}
 - metodo_pago: \${st.metodo_pago || 'pendiente'}
 - etiqueta_anuncio_meta: \${incoming.adTag || st.last_detalle || 'ninguna'}
+\${recentOrderLine}
 
 Responde ESTRICTAMENTE con un objeto JSON válido con estas llaves exactas:
 {
@@ -177,6 +192,7 @@ Responde ESTRICTAMENTE con un objeto JSON válido con estas llaves exactas:
   "customer_address": "Dirección completa o null",
   "department": "San Salvador | La Libertad | Santa Ana | San Miguel | Sonsonate | Usulután | Otro | null",
   "payment_method": "Contra entrega | Transferencia | null",
+  "order_note": "Indicación especial de entrega para anexar al pedido o null",
   "create_order_now": false,
   "escalate_to_human": false
 }\`;
@@ -229,6 +245,8 @@ if (parsed.send_product_image === true && sku) {
   sendPayload.productSku = sku;
 }
 
+const cleanOrderNote = parsed.order_note ? String(parsed.order_note).trim() : null;
+
 const statePayload = {
   action: 'update_state',
   conversationId: incoming.conversationId,
@@ -241,6 +259,7 @@ const statePayload = {
   nombre_cliente: parsed.customer_name || st.nombre_cliente || null,
   direccion: parsed.customer_address || st.direccion || null,
   metodo_pago: parsed.payment_method || st.metodo_pago || null,
+  order_note: cleanOrderNote,
 };
 
 const orderPayload = {
@@ -258,7 +277,9 @@ const orderPayload = {
   color: parsed.variant_color || null,
   talla: parsed.variant_size || null,
   codigo_anuncio: incoming.adTag || (String(st.last_detalle || '').startsWith('AD:') ? String(st.last_detalle).slice(3) : null),
-  notas: \`Pedido automático Bot Todd (\${incoming.conversationId})\`,
+  notas: cleanOrderNote
+    ? \`Pedido automático Bot Todd (\${incoming.conversationId}) | Indicación: \${cleanOrderNote}\`
+    : \`Pedido automático Bot Todd (\${incoming.conversationId})\`,
 };
 
 return [{
@@ -593,7 +614,7 @@ export default async function handler(req: any, res: any) {
         p8.length === 8
           ? supabase
               .from('whatsapp_orders')
-              .select('id, estado, total, sku, created_at, motivo_cancelacion')
+              .select('id, pedido_codigo, estado, total, sku, created_at, motivo_cancelacion, notas')
               .ilike('telefono', `%${p8}%`)
               .order('created_at', { ascending: false })
               .limit(15)
@@ -680,6 +701,7 @@ export default async function handler(req: any, res: any) {
         bankTransferInfo: '',
         warrantyNote: '7 días de garantía por defectos de fábrica.',
         extraRules: '',
+        autoPauseOnOrder: false,
       };
 
       try {
@@ -710,6 +732,7 @@ export default async function handler(req: any, res: any) {
               bankTransferInfo: String(b.bankTransferInfo || '').trim(),
               warrantyNote: String(b.warrantyNote ?? businessSettings.warrantyNote).trim(),
               extraRules: String(b.extraRules || '').trim(),
+              autoPauseOnOrder: b.autoPauseOnOrder === true,
             };
           }
         }
@@ -869,6 +892,8 @@ export default async function handler(req: any, res: any) {
       const entregados = orderRows.filter((o: any) => String(o.estado || '').toLowerCase() === 'entregado').length;
       const cancelados = orderRows.filter((o: any) => String(o.estado || '').toLowerCase() === 'cancelado').length;
       const blEntry = Array.isArray(blRes.data) && blRes.data.length > 0 ? blRes.data[0] : null;
+      const recentOrderRow =
+        orderRows.find((o: any) => String(o.estado || '').toLowerCase() !== 'cancelado') || null;
 
       return res.status(200).json({
         ok: true,
@@ -886,6 +911,17 @@ export default async function handler(req: any, res: any) {
             }
           : { id: conversationId, status: convStatus },
         state,
+        recentOrder: recentOrderRow
+          ? {
+              id: recentOrderRow.id,
+              pedido_codigo: recentOrderRow.pedido_codigo || null,
+              sku: recentOrderRow.sku || null,
+              total: Number(recentOrderRow.total || 0),
+              estado: recentOrderRow.estado || 'nuevo',
+              notas: recentOrderRow.notas || null,
+              created_at: recentOrderRow.created_at || null,
+            }
+          : null,
         recentMessages,
         catalog,
         adTag: adTag || null,
@@ -899,7 +935,7 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // 2. ACTUALIZAR ESTADO EN WHATSAPP_STATE
+    // 2. ACTUALIZAR ESTADO EN WHATSAPP_STATE (+ NOTA POST-CIERRE EN PEDIDO)
     if (action === 'update_state') {
       const {
         conversationId,
@@ -912,6 +948,8 @@ export default async function handler(req: any, res: any) {
         nombre_cliente,
         direccion,
         metodo_pago,
+        order_note,
+        orderNote,
       } = req.body || {};
 
       const keyPhone = resolveCanonicalPhoneKey(phone, conversationId);
@@ -942,7 +980,52 @@ export default async function handler(req: any, res: any) {
         return res.status(500).json({ error: 'Error actualizando whatsapp_state', details: error.message });
       }
 
-      return res.status(200).json({ ok: true, telefono: keyPhone, paso_actual: patch.paso_actual });
+      // Guardar indicación extra post-cierre en las notas del pedido activo más reciente
+      let orderNoteSaved = false;
+      let notedOrderId: string | number | null = null;
+      const rawNote = String(order_note || orderNote || '').trim();
+      if (rawNote) {
+        try {
+          const p8 = cleanDigits8(phone || keyPhone || conversationId);
+          const phoneFilter = p8.length === 8 ? p8 : keyPhone;
+          const { data: recentOrders } = await supabase
+            .from('whatsapp_orders')
+            .select('id, notas, estado')
+            .ilike('telefono', `%${phoneFilter}%`)
+            .neq('estado', 'cancelado')
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          const targetOrder = Array.isArray(recentOrders) && recentOrders.length > 0 ? recentOrders[0] : null;
+          if (targetOrder?.id) {
+            const currentNotes = String(targetOrder.notas || '').trim();
+            if (!currentNotes.toLowerCase().includes(rawNote.toLowerCase())) {
+              const nextNotes = currentNotes
+                ? `${currentNotes}\n[Indicación cliente]: ${rawNote}`
+                : `[Indicación cliente]: ${rawNote}`;
+              const { error: noteErr } = await supabase
+                .from('whatsapp_orders')
+                .update({ notas: nextNotes })
+                .eq('id', targetOrder.id);
+              if (!noteErr) {
+                orderNoteSaved = true;
+                notedOrderId = targetOrder.id;
+              }
+            } else {
+              orderNoteSaved = true;
+              notedOrderId = targetOrder.id;
+            }
+          }
+        } catch {}
+      }
+
+      return res.status(200).json({
+        ok: true,
+        telefono: keyPhone,
+        paso_actual: patch.paso_actual,
+        orderNoteSaved,
+        orderId: notedOrderId,
+      });
     }
 
     // 3. CREAR PEDIDO DESDE BOT TODD
@@ -997,6 +1080,22 @@ export default async function handler(req: any, res: any) {
         }
       }
 
+      // Verificar si debe pausar el bot automáticamente al cerrar pedido (default: false -> segunda fase inteligente)
+      let autoPauseOnOrder = false;
+      try {
+        const { data: bizDoc } = await supabase
+          .from('panel_docs')
+          .select('contenido')
+          .eq('titulo', '__SYSTEM_TODD_BUSINESS_SETTINGS_V1__')
+          .maybeSingle();
+        if (bizDoc?.contenido) {
+          const parsedBiz = JSON.parse(bizDoc.contenido);
+          if (parsedBiz && typeof parsedBiz === 'object' && parsedBiz.autoPauseOnOrder === true) {
+            autoPauseOnOrder = true;
+          }
+        }
+      } catch {}
+
       // Evitar duplicados en una ventana de 3 minutos
       if (keyPhone) {
         const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
@@ -1007,7 +1106,20 @@ export default async function handler(req: any, res: any) {
           .gte('created_at', threeMinAgo)
           .limit(1);
         if (recentDup && recentDup.length > 0) {
-          return res.status(200).json({ ok: true, deduplicated: true, order: recentDup[0] });
+          if (autoPauseOnOrder && conversationId) {
+            try {
+              await supabase
+                .from('bb_conversations')
+                .update({ status: 'human', updated_at: new Date().toISOString() })
+                .eq('id', conversationId);
+            } catch {}
+          }
+          return res.status(200).json({
+            ok: true,
+            deduplicated: true,
+            order: recentDup[0],
+            pausedToHuman: Boolean(autoPauseOnOrder && conversationId),
+          });
         }
       }
 
@@ -1094,6 +1206,9 @@ export default async function handler(req: any, res: any) {
       if (conversationId) {
         try {
           const convPatch: Record<string, any> = { updated_at: nowIso };
+          if (autoPauseOnOrder) {
+            convPatch.status = 'human';
+          }
           if (baseOrder.nombre_cliente && baseOrder.nombre_cliente !== 'Cliente WhatsApp') {
             convPatch.contact_name = baseOrder.nombre_cliente;
           }
@@ -1125,7 +1240,11 @@ export default async function handler(req: any, res: any) {
           });
       } catch {}
 
-      return res.status(200).json({ ok: true, order: insertRes.data });
+      return res.status(200).json({
+        ok: true,
+        order: insertRes.data,
+        pausedToHuman: Boolean(autoPauseOnOrder && conversationId),
+      });
     }
 
     return res.status(400).json({ error: `Acción no soportada: ${action}` });

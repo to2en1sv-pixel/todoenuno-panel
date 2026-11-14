@@ -12,7 +12,10 @@
       "name": "1. Webhook Panel -> Todd",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 260],
+      "position": [
+        0,
+        260
+      ],
       "webhookId": "todd-v2-panel-bridge"
     },
     {
@@ -23,7 +26,10 @@
       "name": "2. Normalizar Entrada",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [220, 260]
+      "position": [
+        220,
+        260
+      ]
     },
     {
       "parameters": {
@@ -47,7 +53,10 @@
       "name": "3. Cargar Contexto Todd (Panel)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [450, 260]
+      "position": [
+        450,
+        260
+      ]
     },
     {
       "parameters": {
@@ -78,17 +87,23 @@
       "name": "4. ¿Bot Activo?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [670, 260]
+      "position": [
+        670,
+        260
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const incoming = $('2. Normalizar Entrada').first().json;\nconst ctx = $('3. Cargar Contexto Todd (Panel)').first().json;\nconst hideCounts = ctx.toddSettings?.hideExactStockCounts !== false;\n\nconst catalogLines = (ctx.catalog || []).map((p, idx) => {\n  const vars = Array.isArray(p.variantes) && p.variantes.length > 0\n    ? p.variantes.map(v => {\n        const label = `${v.color}${v.talla && v.talla !== 'Única' ? ' Talla ' + v.talla : ''}`;\n        const stLabel = v.disponible === false\n          ? 'Agotado'\n          : (hideCounts ? 'Disponible' : `${v.stock} uds`);\n        return `${label}: ${stLabel} ($${Number(v.precio || p.precio).toFixed(2)})`;\n      }).join(' | ')\n    : (p.disponible === false\n        ? 'Agotado temporalmente'\n        : (hideCounts\n            ? (p.bajoPedido ? 'Disponible (venta sin stock / bajo pedido habilitada)' : 'Disponible')\n            : `Stock general: ${p.stockDisponible} uds`));\n  return [\n    `${idx + 1}. SKU: ${p.sku} | Nombre: ${p.nombre} | Precio: $${Number(p.precio || 0).toFixed(2)} | TieneFoto: ${p.tieneFoto ? 'SI' : 'NO'} | TieneVideo: ${p.tieneVideo ? 'SI (' + p.videoUrl + ')' : 'NO'}`,\n    `   Disponibilidad: ${vars}`,\n    p.pitch ? `   Pitch: ${p.pitch}` : '',\n    p.instrucciones ? `   Reglas/Detalles: ${p.instrucciones}` : '',\n    p.keywords ? `   Keywords: ${p.keywords}` : '',\n  ].filter(Boolean).join('\\n');\n}).join('\\n\\n');\n\nconst historyText = (ctx.recentMessages || [])\n  .map(m => `${m.from_me ? 'Todd/Asesor' : 'Cliente'}: ${m.body}`)\n  .join('\\n');\n\nconst st = ctx.state || {};\nconst af = ctx.antifraud || {};\nconst businessRules = String(ctx.businessRulesText || '').trim();\n\nconst systemPrompt = `Eres Todd, asistente comercial experto en ventas contra entrega (COD) en El Salvador para TODO EN UNO.\nTu objetivo es HÍBRIDO:\n1) Responder dudas abiertas con amabilidad, brevedad y tono cercano salvadoreño (precios, envíos, colores, tallas, uso, horarios, días festivos) usando ÚNICAMENTE la información real del CATÁLOGO ACTIVO y las REGLAS OPERATIVAS DEL NEGOCIO.\n2) Guiar la conversación paso a paso hacia el cierre del pedido recopilando:\n   - Producto y variante (color/talla si aplica)\n   - Nombre completo\n   - Dirección exacta con punto de referencia y departamento\n   - Método de pago (\"Contra entrega\" o \"Transferencia\")\n\nREGLAS CRÍTICAS:\n- NUNCA inventes productos, precios, colores ni stock fuera del catálogo.\n- PRIVACIDAD DE INVENTARIO: NUNCA digas al cliente cuántas unidades hay disponibles (prohibido decir \"quedan 2\", \"solo tenemos 1\", \"hay 3 disponibles\", etc.). Confirma únicamente si está disponible y qué colores o tallas hay.\n- VENTA SIN STOCK / BAJO PEDIDO: Si un producto o variante aparece marcado como \"Disponible\" (incluyendo venta sin stock / bajo pedido habilitada), véndelo y cierra el pedido con normalidad. NUNCA pauses el bot (\"escalate_to_human\": false) ni rechaces la venta por stock 0 cuando aparezca disponible.\n- Si un producto aparece marcado como \"Agotado\" o \"Agotado temporalmente\", indica amablemente que por el momento no está disponible y sugiere opciones similares del catálogo.\n- Si existe un AVISO TEMPORAL / DÍA FESTIVO ACTIVO en las reglas operativas, respétalo y comunícalo con prioridad cuando aplique a fechas de entrega o despacho.\n- Si el cliente pide ver fotos o pregunta por un producto por primera vez y TieneFoto = SI, pon \"send_product_image\": true y \"product_sku\" con el SKU exacto.\n- VIDEO HOW-TO (YOUTUBE): Si un producto tiene TieneVideo = SI, el video tutorial se envía automáticamente junto con la foto al activar \"send_product_image\": true. Además, si el cliente pregunta cómo se usa, cómo funciona, cómo se arma o pide video, compártele el enlace de YouTube directamente en \"reply_text\".\n- Si el cliente te da su número real de 8 dígitos en el chat (útil cuando escribe desde @lid), guárdalo en \"customer_phone\".\n- RIESGO ANTIFRAUDE DEL CLIENTE ACTUAL: Total pedidos=${af.totalPedidos || 0}, Entregados=${af.entregados || 0}, Cancelados=${af.cancelados || 0}, ListaNegra=${af.enListaNegra ? 'SI (' + (af.motivoListaNegra || 'Reportado') + ')' : 'NO'}.\n  * Si ListaNegra=SI o Cancelados>=2: NO confirmes contra entrega directo; indica amablemente que para procesar su orden se requiere pago anticipado por transferencia o escala a humano (\"escalate_to_human\": true).\n- Solo pon \"create_order_now\": true cuando YA tengas confirmados TODOS estos datos: producto/SKU, nombre_cliente, direccion completa y metodo_pago.\n\nREGLAS OPERATIVAS, ENVÍOS Y HORARIOS DEL NEGOCIO:\n${businessRules || '- Envíos en El Salvador: San Salvador y área metropolitana mismo día o siguiente; departamentos 24-48h hábiles.'}\n\nCATÁLOGO ACTIVO:\n${catalogLines || 'Sin productos activos.'}\n\nESTADO ACTUAL DEL CLIENTE (whatsapp_state):\n- paso_actual: ${st.paso_actual || 'inicio'}\n- last_sku: ${st.last_sku || 'ninguno'}\n- last_nombre: ${st.last_nombre || 'ninguno'}\n- last_precio: ${st.last_precio || 0}\n- nombre_cliente: ${st.nombre_cliente || incoming.pushName || 'desconocido'}\n- direccion: ${st.direccion || 'pendiente'}\n- metodo_pago: ${st.metodo_pago || 'pendiente'}\n- etiqueta_anuncio_meta: ${incoming.adTag || st.last_detalle || 'ninguna'}\n\nResponde ESTRICTAMENTE con un objeto JSON válido con estas llaves exactas:\n{\n  \"reply_text\": \"Mensaje corto para WhatsApp (máx 4-6 líneas, usa *negritas* simples de WhatsApp)\",\n  \"paso_actual\": \"inicio | cotizando | esperando_nombre | esperando_direccion | esperando_pago | completado\",\n  \"send_product_image\": false,\n  \"product_sku\": \"SKU exacto o null\",\n  \"product_name\": \"Nombre del producto o null\",\n  \"unit_price\": 0,\n  \"quantity\": 1,\n  \"variant_color\": \"Color elegido o null\",\n  \"variant_size\": \"Talla elegida o null\",\n  \"customer_name\": \"Nombre completo o null\",\n  \"customer_phone\": \"8 dígitos si lo dio en el texto o null\",\n  \"customer_address\": \"Dirección completa o null\",\n  \"department\": \"San Salvador | La Libertad | Santa Ana | San Miguel | Sonsonate | Usulután | Otro | null\",\n  \"payment_method\": \"Contra entrega | Transferencia | null\",\n  \"create_order_now\": false,\n  \"escalate_to_human\": false\n}`;\n\nconst userPrompt = `HISTORIAL RECIENTE:\\n${historyText || '(Sin mensajes previos)'}\\n\\nMENSAJE NUEVO DEL CLIENTE (${incoming.pushName || incoming.phone}):\\n\"${incoming.text}\"`;\n\nreturn [{\n  json: {\n    openAiBody: {\n      model: 'gpt-4o-mini',\n      temperature: 0.35,\n      response_format: { type: 'json_object' },\n      messages: [\n        { role: 'system', content: systemPrompt },\n        { role: 'user', content: userPrompt },\n      ],\n    },\n  },\n}];"
+        "jsCode": "const incoming = $('2. Normalizar Entrada').first().json;\nconst ctx = $('3. Cargar Contexto Todd (Panel)').first().json;\nconst hideCounts = ctx.toddSettings?.hideExactStockCounts !== false;\n\nconst catalogLines = (ctx.catalog || []).map((p, idx) => {\n  const vars = Array.isArray(p.variantes) && p.variantes.length > 0\n    ? p.variantes.map(v => {\n        const label = `${v.color}${v.talla && v.talla !== 'Única' ? ' Talla ' + v.talla : ''}`;\n        const stLabel = v.disponible === false\n          ? 'Agotado'\n          : (hideCounts ? 'Disponible' : `${v.stock} uds`);\n        return `${label}: ${stLabel} ($${Number(v.precio || p.precio).toFixed(2)})`;\n      }).join(' | ')\n    : (p.disponible === false\n        ? 'Agotado temporalmente'\n        : (hideCounts\n            ? (p.bajoPedido ? 'Disponible (venta sin stock / bajo pedido habilitada)' : 'Disponible')\n            : `Stock general: ${p.stockDisponible} uds`));\n  return [\n    `${idx + 1}. SKU: ${p.sku} | Nombre: ${p.nombre} | Precio: $${Number(p.precio || 0).toFixed(2)} | TieneFoto: ${p.tieneFoto ? 'SI' : 'NO'} | TieneVideo: ${p.tieneVideo ? 'SI (' + p.videoUrl + ')' : 'NO'}`,\n    `   Disponibilidad: ${vars}`,\n    p.pitch ? `   Pitch: ${p.pitch}` : '',\n    p.instrucciones ? `   Reglas/Detalles: ${p.instrucciones}` : '',\n    p.keywords ? `   Keywords: ${p.keywords}` : '',\n  ].filter(Boolean).join('\\n');\n}).join('\\n\\n');\n\nconst historyText = (ctx.recentMessages || [])\n  .map(m => `${m.from_me ? 'Todd/Asesor' : 'Cliente'}: ${m.body}`)\n  .join('\\n');\n\nconst st = ctx.state || {};\nconst af = ctx.antifraud || {};\nconst recentOrder = ctx.recentOrder || null;\nconst businessRules = String(ctx.businessRulesText || '').trim();\n\nconst recentOrderLine = recentOrder\n  ? `- Último pedido activo: #${recentOrder.pedido_codigo || recentOrder.id} | ${recentOrder.sku || 'Producto'} | $${Number(recentOrder.total || 0).toFixed(2)} | Estado: ${recentOrder.estado} | Notas actuales: ${recentOrder.notas || 'ninguna'}`\n  : '- Último pedido activo: ninguno';\n\nconst systemPrompt = `Eres Todd, asistente comercial experto en ventas contra entrega (COD) en El Salvador para TODO EN UNO.\nTu objetivo es HÍBRIDO:\n1) Responder dudas abiertas con amabilidad, brevedad y tono cercano salvadoreño (precios, envíos, colores, tallas, uso, horarios, días festivos) usando ÚNICAMENTE la información real del CATÁLOGO ACTIVO y las REGLAS OPERATIVAS DEL NEGOCIO.\n2) Guiar la conversación paso a paso hacia el cierre del pedido recopilando:\n   - Producto y variante (color/talla si aplica)\n   - Nombre completo\n   - Dirección exacta con punto de referencia y departamento\n   - Método de pago (\"Contra entrega\" o \"Transferencia\")\n\nREGLAS CRÍTICAS:\n- NUNCA inventes productos, precios, colores ni stock fuera del catálogo.\n- PRIVACIDAD DE INVENTARIO: NUNCA digas al cliente cuántas unidades hay disponibles (prohibido decir \"quedan 2\", \"solo tenemos 1\", \"hay 3 disponibles\", etc.). Confirma únicamente si está disponible y qué colores o tallas hay.\n- VENTA SIN STOCK / BAJO PEDIDO: Si un producto o variante aparece marcado como \"Disponible\" (incluyendo venta sin stock / bajo pedido habilitada), véndelo y cierra el pedido con normalidad. NUNCA pauses el bot (\"escalate_to_human\": false) ni rechaces la venta por stock 0 cuando aparezca disponible.\n- Si un producto aparece marcado como \"Agotado\" o \"Agotado temporalmente\", indica amablemente que por el momento no está disponible y sugiere opciones similares del catálogo.\n- Si existe un AVISO TEMPORAL / DÍA FESTIVO ACTIVO en las reglas operativas, respétalo y comunícalo con prioridad cuando aplique a fechas de entrega o despacho.\n- Si el cliente pide ver fotos o pregunta por un producto por primera vez y TieneFoto = SI, pon \"send_product_image\": true y \"product_sku\" con el SKU exacto.\n- VIDEO HOW-TO (YOUTUBE): Si un producto tiene TieneVideo = SI, el video tutorial se envía automáticamente junto con la foto al activar \"send_product_image\": true. Además, si el cliente pregunta cómo se usa, cómo funciona, cómo se arma o pide video, compártele el enlace de YouTube directamente en \"reply_text\".\n- Si el cliente te da su número real de 8 dígitos en el chat (útil cuando escribe desde @lid), guárdalo en \"customer_phone\".\n- RIESGO ANTIFRAUDE DEL CLIENTE ACTUAL: Total pedidos=${af.totalPedidos || 0}, Entregados=${af.entregados || 0}, Cancelados=${af.cancelados || 0}, ListaNegra=${af.enListaNegra ? 'SI (' + (af.motivoListaNegra || 'Reportado') + ')' : 'NO'}.\n  * Si ListaNegra=SI o Cancelados>=2: NO confirmes contra entrega directo; indica amablemente que para procesar su orden se requiere pago anticipado por transferencia o escala a humano (\"escalate_to_human\": true).\n- Solo pon \"create_order_now\": true cuando YA tengas confirmados TODOS estos datos: producto/SKU, nombre_cliente, direccion completa y metodo_pago.\n- HORA EXACTA DE ENTREGA: NUNCA prometas una hora exacta ni rango horario fijo de entrega; explica con amabilidad que la ruta y hora aproximada las confirma el repartidor el mismo día antes de salir.\n\nSEGUNDA FASE POST-CIERRE (cuando paso_actual = \"completado\" o ya existe un pedido reciente):\n- Al momento de cerrar el pedido (\"create_order_now\": true), pon \"paso_actual\": \"completado\", confirma el resumen e invita brevemente: \"Si tienes alguna indicación especial para la entrega (día preferido, referencia adicional o quién recibe), déjamela por aquí para anotarla en tu orden.\"\n- Si el cliente ya está en \"completado\" y escribe después de cerrar su pedido:\n  1) Despedida o confirmación simple (\"Gracias\", \"Ok\", \"Perfecto\", \"Bendiciones\"): responde cordial y breve; pon \"create_order_now\": false, \"order_note\": null y \"escalate_to_human\": false.\n  2) Indicación especial de entrega (ej. \"envíenmelo el miércoles\", \"solo puedo después de las 2pm\", \"llamar antes\", \"recibe mi esposa\"): resúmela claro en \"order_note\" (ej. \"Entrega solicitada para el miércoles\"), confirma que ya quedó anotado en su pedido, pon \"create_order_now\": false (NO dupliques el pedido) y \"escalate_to_human\": false.\n  3) Cambio de pedido o reclamo (cambiar cantidad, producto, dirección completa, cancelar o situación compleja): pon el detalle en \"order_note\" si aplica, avisa brevemente que un asesor lo revisará y pon \"escalate_to_human\": true.\n  4) Nueva compra adicional: solo si explícitamente pide comprar otro producto distinto, vuelve a \"paso_actual\": \"cotizando\".\n\nREGLAS OPERATIVAS, ENVÍOS Y HORARIOS DEL NEGOCIO:\n${businessRules || '- Envíos en El Salvador: San Salvador y área metropolitana mismo día o siguiente; departamentos 24-48h hábiles.'}\n\nCATÁLOGO ACTIVO:\n${catalogLines || 'Sin productos activos.'}\n\nESTADO ACTUAL DEL CLIENTE (whatsapp_state):\n- paso_actual: ${st.paso_actual || 'inicio'}\n- last_sku: ${st.last_sku || 'ninguno'}\n- last_nombre: ${st.last_nombre || 'ninguno'}\n- last_precio: ${st.last_precio || 0}\n- nombre_cliente: ${st.nombre_cliente || incoming.pushName || 'desconocido'}\n- direccion: ${st.direccion || 'pendiente'}\n- metodo_pago: ${st.metodo_pago || 'pendiente'}\n- etiqueta_anuncio_meta: ${incoming.adTag || st.last_detalle || 'ninguna'}\n${recentOrderLine}\n\nResponde ESTRICTAMENTE con un objeto JSON válido con estas llaves exactas:\n{\n  \"reply_text\": \"Mensaje corto para WhatsApp (máx 4-6 líneas, usa *negritas* simples de WhatsApp)\",\n  \"paso_actual\": \"inicio | cotizando | esperando_nombre | esperando_direccion | esperando_pago | completado\",\n  \"send_product_image\": false,\n  \"product_sku\": \"SKU exacto o null\",\n  \"product_name\": \"Nombre del producto o null\",\n  \"unit_price\": 0,\n  \"quantity\": 1,\n  \"variant_color\": \"Color elegido o null\",\n  \"variant_size\": \"Talla elegida o null\",\n  \"customer_name\": \"Nombre completo o null\",\n  \"customer_phone\": \"8 dígitos si lo dio en el texto o null\",\n  \"customer_address\": \"Dirección completa o null\",\n  \"department\": \"San Salvador | La Libertad | Santa Ana | San Miguel | Sonsonate | Usulután | Otro | null\",\n  \"payment_method\": \"Contra entrega | Transferencia | null\",\n  \"order_note\": \"Indicación especial de entrega para anexar al pedido o null\",\n  \"create_order_now\": false,\n  \"escalate_to_human\": false\n}`;\n\nconst userPrompt = `HISTORIAL RECIENTE:\\n${historyText || '(Sin mensajes previos)'}\\n\\nMENSAJE NUEVO DEL CLIENTE (${incoming.pushName || incoming.phone}):\\n\"${incoming.text}\"`;\n\nreturn [{\n  json: {\n    openAiBody: {\n      model: 'gpt-4o-mini',\n      temperature: 0.35,\n      response_format: { type: 'json_object' },\n      messages: [\n        { role: 'system', content: systemPrompt },\n        { role: 'user', content: userPrompt },\n      ],\n    },\n  },\n}];"
       },
       "id": "todd-v2-prompt",
       "name": "5. Construir Prompt OpenAI",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [900, 180]
+      "position": [
+        900,
+        180
+      ]
     },
     {
       "parameters": {
@@ -116,17 +131,23 @@
       "name": "6. OpenAI GPT-4o-mini (Hibrido)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [1130, 180]
+      "position": [
+        1130,
+        180
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const incoming = $('2. Normalizar Entrada').first().json;\nconst ctx = $('3. Cargar Contexto Todd (Panel)').first().json;\nconst aiRaw = $input.first().json;\n\nlet parsed = {};\ntry {\n  const content = aiRaw?.choices?.[0]?.message?.content || '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch {\n  parsed = {\n    reply_text: '¡Hola! 😊 Con gusto te ayudo. ¿Qué producto de nuestro catálogo te interesa hoy?',\n    paso_actual: 'inicio',\n  };\n}\n\nconst st = ctx.state || {};\nconst sku = parsed.product_sku || st.last_sku || null;\nconst qty = Math.max(Number(parsed.quantity || 1) || 1, 1);\nconst unitPrice = Number(parsed.unit_price || st.last_precio || 0) || 0;\nconst replyText = String(parsed.reply_text || '').trim() || '¡Hola! ¿En qué producto te puedo ayudar?';\n\nconst sendPayload = {\n  conversationId: incoming.conversationId,\n  contactPhone: parsed.customer_phone || incoming.replyTarget,\n  instanceId: incoming.instance || 'eee',\n  text: replyText,\n  pauseBot: parsed.escalate_to_human === true,\n};\nif (parsed.send_product_image === true && sku) {\n  sendPayload.productSku = sku;\n}\n\nconst statePayload = {\n  action: 'update_state',\n  conversationId: incoming.conversationId,\n  phone: parsed.customer_phone || incoming.phone,\n  paso_actual: parsed.paso_actual || st.paso_actual || 'cotizando',\n  last_sku: sku,\n  last_nombre: parsed.product_name || st.last_nombre || null,\n  last_precio: unitPrice > 0 ? unitPrice : null,\n  last_detalle: incoming.adTag ? `AD:${incoming.adTag}` : st.last_detalle || null,\n  nombre_cliente: parsed.customer_name || st.nombre_cliente || null,\n  direccion: parsed.customer_address || st.direccion || null,\n  metodo_pago: parsed.payment_method || st.metodo_pago || null,\n};\n\nconst orderPayload = {\n  action: 'create_order',\n  conversationId: incoming.conversationId,\n  phone: parsed.customer_phone || incoming.phone,\n  nombre_cliente: parsed.customer_name || st.nombre_cliente || incoming.pushName || 'Cliente WhatsApp',\n  direccion: parsed.customer_address || st.direccion || '',\n  departamento: parsed.department || 'San Salvador',\n  metodo_pago: parsed.payment_method || st.metodo_pago || 'Contra entrega',\n  sku: parsed.product_name || st.last_nombre || sku || 'Producto WhatsApp',\n  catalogo_sku: sku,\n  cantidad: qty,\n  total: unitPrice > 0 ? Number((unitPrice * qty).toFixed(2)) : 0,\n  color: parsed.variant_color || null,\n  talla: parsed.variant_size || null,\n  codigo_anuncio: incoming.adTag || (String(st.last_detalle || '').startsWith('AD:') ? String(st.last_detalle).slice(3) : null),\n  notas: `Pedido automático Bot Todd (${incoming.conversationId})`,\n};\n\nreturn [{\n  json: {\n    sendPayload,\n    statePayload,\n    orderPayload,\n    createOrderNow: Boolean(parsed.create_order_now),\n  },\n}];"
+        "jsCode": "const incoming = $('2. Normalizar Entrada').first().json;\nconst ctx = $('3. Cargar Contexto Todd (Panel)').first().json;\nconst aiRaw = $input.first().json;\n\nlet parsed = {};\ntry {\n  const content = aiRaw?.choices?.[0]?.message?.content || '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch {\n  parsed = {\n    reply_text: '¡Hola! 😊 Con gusto te ayudo. ¿Qué producto de nuestro catálogo te interesa hoy?',\n    paso_actual: 'inicio',\n  };\n}\n\nconst st = ctx.state || {};\nconst sku = parsed.product_sku || st.last_sku || null;\nconst qty = Math.max(Number(parsed.quantity || 1) || 1, 1);\nconst unitPrice = Number(parsed.unit_price || st.last_precio || 0) || 0;\nconst replyText = String(parsed.reply_text || '').trim() || '¡Hola! ¿En qué producto te puedo ayudar?';\n\nconst sendPayload = {\n  conversationId: incoming.conversationId,\n  contactPhone: parsed.customer_phone || incoming.replyTarget,\n  instanceId: incoming.instance || 'eee',\n  text: replyText,\n  pauseBot: parsed.escalate_to_human === true,\n};\nif (parsed.send_product_image === true && sku) {\n  sendPayload.productSku = sku;\n}\n\nconst cleanOrderNote = parsed.order_note ? String(parsed.order_note).trim() : null;\n\nconst statePayload = {\n  action: 'update_state',\n  conversationId: incoming.conversationId,\n  phone: parsed.customer_phone || incoming.phone,\n  paso_actual: parsed.paso_actual || st.paso_actual || 'cotizando',\n  last_sku: sku,\n  last_nombre: parsed.product_name || st.last_nombre || null,\n  last_precio: unitPrice > 0 ? unitPrice : null,\n  last_detalle: incoming.adTag ? `AD:${incoming.adTag}` : st.last_detalle || null,\n  nombre_cliente: parsed.customer_name || st.nombre_cliente || null,\n  direccion: parsed.customer_address || st.direccion || null,\n  metodo_pago: parsed.payment_method || st.metodo_pago || null,\n  order_note: cleanOrderNote,\n};\n\nconst orderPayload = {\n  action: 'create_order',\n  conversationId: incoming.conversationId,\n  phone: parsed.customer_phone || incoming.phone,\n  nombre_cliente: parsed.customer_name || st.nombre_cliente || incoming.pushName || 'Cliente WhatsApp',\n  direccion: parsed.customer_address || st.direccion || '',\n  departamento: parsed.department || 'San Salvador',\n  metodo_pago: parsed.payment_method || st.metodo_pago || 'Contra entrega',\n  sku: parsed.product_name || st.last_nombre || sku || 'Producto WhatsApp',\n  catalogo_sku: sku,\n  cantidad: qty,\n  total: unitPrice > 0 ? Number((unitPrice * qty).toFixed(2)) : 0,\n  color: parsed.variant_color || null,\n  talla: parsed.variant_size || null,\n  codigo_anuncio: incoming.adTag || (String(st.last_detalle || '').startsWith('AD:') ? String(st.last_detalle).slice(3) : null),\n  notas: cleanOrderNote\n    ? `Pedido automático Bot Todd (${incoming.conversationId}) | Indicación: ${cleanOrderNote}`\n    : `Pedido automático Bot Todd (${incoming.conversationId})`,\n};\n\nreturn [{\n  json: {\n    sendPayload,\n    statePayload,\n    orderPayload,\n    createOrderNow: Boolean(parsed.create_order_now),\n  },\n}];"
       },
       "id": "todd-v2-parse",
       "name": "7. Parsear Respuesta IA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1360, 180]
+      "position": [
+        1360,
+        180
+      ]
     },
     {
       "parameters": {
@@ -150,7 +171,10 @@
       "name": "8. Enviar Mensaje/Foto por Panel",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [1590, 180]
+      "position": [
+        1590,
+        180
+      ]
     },
     {
       "parameters": {
@@ -181,7 +205,10 @@
       "name": "9. ¿Crear Pedido?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1820, 180]
+      "position": [
+        1820,
+        180
+      ]
     },
     {
       "parameters": {
@@ -205,7 +232,10 @@
       "name": "10A. Crear Pedido en Sistema",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [2060, 100]
+      "position": [
+        2060,
+        100
+      ]
     },
     {
       "parameters": {
@@ -229,7 +259,10 @@
       "name": "10B. Actualizar Estado Todd",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [2060, 300]
+      "position": [
+        2060,
+        300
+      ]
     }
   ],
   "pinData": {},
