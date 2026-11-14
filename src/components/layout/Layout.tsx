@@ -175,7 +175,6 @@ function LayoutShell() {
           )}
 
           <div className={`flex items-center gap-1 ${isCollapsed ? 'flex-col' : ''}`}>
-            <NotificationSettingsButton />
             <button
               type="button"
               onClick={toggleTheme}
@@ -253,7 +252,12 @@ function LayoutShell() {
           ))}
         </nav>
 
-        <div className={`mt-4 pt-3 border-t border-[var(--bd)] flex ${isCollapsed ? 'lg:justify-center' : ''}`}>
+        <div
+          className={`mt-4 pt-3 border-t border-[var(--bd)] flex flex-col gap-2 ${
+            isCollapsed ? 'lg:items-center' : ''
+          }`}
+        >
+          <NotificationSettingsButton sidebarRow iconOnly={isCollapsed} />
           <PWAInstallButton iconOnly={isCollapsed} />
         </div>
       </aside>

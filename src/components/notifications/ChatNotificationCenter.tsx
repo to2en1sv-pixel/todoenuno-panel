@@ -65,7 +65,7 @@ type ChatNotificationContextValue = {
 
 const SOUND_KEY = 'unichat_notif_sound_v1';
 const DESKTOP_KEY = 'unichat_notif_desktop_v1';
-const TOAST_TTL_MS = 9500;
+const TOAST_TTL_MS = 10000;
 const MAX_VISIBLE_TOASTS = 3;
 
 const ChatNotificationContext = createContext<ChatNotificationContextValue | null>(null);
@@ -171,8 +171,8 @@ function playNotificationChime() {
 
     const now = ctx.currentTime;
     const notes = [
-      { freq: 659.25, start: 0, dur: 0.11 }, // E5
-      { freq: 880.0, start: 0.09, dur: 0.16 }, // A5
+      { freq: 659.25, start: 0, dur: 0.11 },
+      { freq: 880.0, start: 0.09, dur: 0.16 },
     ];
 
     for (const note of notes) {
@@ -214,6 +214,8 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
   conversationsRef.current = conversationsMap;
 
   const seenMsgIdsRef = useRef<Set<string>>(new Set());
+  const initializedRef = useRef(false);
+  const bootIsoRef = useRef(new Date(Date.now() - 2000).toISOString());
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const hoveredIdsRef = useRef<Set<string>>(new Set());
 
@@ -301,42 +303,6 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
     [navigate]
   );
 
-  const syncUnreadAndConversations = useCallback(async () => {
-    try {
-      const [{ data: convData }, { data: recentMsgs }] = await Promise.all([
-        supabase
-          .from('bb_conversations')
-          .select('id,instance_id,contact_name,contact_phone,last_message,status,updated_at')
-          .order('updated_at', { ascending: false }),
-        supabase
-          .from('bb_messages')
-          .select('conversation_id,from_me,created_at')
-          .order('created_at', { ascending: false })
-          .limit(300),
-      ]);
-
-      if (Array.isArray(convData)) {
-        const map: Record<string, ConversationMeta> = {};
-        for (const c of convData as ConversationMeta[]) {
-          if (c.id) map[c.id] = c;
-        }
-        setConversationsMap(map);
-      }
-
-      if (Array.isArray(recentMsgs)) {
-        const dirMap: Record<string, boolean> = {};
-        for (const m of recentMsgs as Array<{ conversation_id: string; from_me: boolean }>) {
-          if (m.conversation_id && dirMap[m.conversation_id] === undefined) {
-            dirMap[m.conversation_id] = Boolean(m.from_me);
-          }
-        }
-        setLastMsgFromMeMap(dirMap);
-      }
-    } catch {
-      // Ignorar fallo transitorio de red
-    }
-  }, []);
-
   const showOSNotification = useCallback(
     (toast: ToastNotification) => {
       if (
@@ -347,7 +313,6 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
       ) {
         return;
       }
-      // En escritorio, mostrar notificación del sistema si la pestaña está oculta o si está habilitado
       if (document.visibilityState === 'visible' && pathnameRef.current === '/unichat') {
         return;
       }
@@ -369,7 +334,130 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
     [openChatFromToast]
   );
 
-  // Cargar metadata inicial y suscribirse a Realtime global
+  const notifyForIncomingMessage = useCallback(
+    async (msg: IncomingMessageRow, convMapOverride?: Record<string, ConversationMeta>) => {
+      if (!msg || !msg.conversation_id || msg.from_me) return;
+
+      const dedupeKey = msg.id || `${msg.conversation_id}:${msg.created_at}:${msg.body}`;
+      if (seenMsgIdsRef.current.has(dedupeKey)) return;
+      seenMsgIdsRef.current.add(dedupeKey);
+      if (seenMsgIdsRef.current.size > 400) {
+        const first = seenMsgIdsRef.current.values().next().value;
+        if (first) seenMsgIdsRef.current.delete(first);
+      }
+
+      let conv = convMapOverride?.[msg.conversation_id] || conversationsRef.current[msg.conversation_id];
+      if (!conv) {
+        try {
+          const { data } = await supabase
+            .from('bb_conversations')
+            .select('id,instance_id,contact_name,contact_phone,last_message,status,updated_at')
+            .eq('id', msg.conversation_id)
+            .maybeSingle();
+          if (data) {
+            conv = data as ConversationMeta;
+            setConversationsMap(prev => ({ ...prev, [conv!.id]: conv! }));
+          }
+        } catch {
+          // Seguir con fallback si falla
+        }
+      }
+
+      if (isLegacyConversationMeta(conv)) return;
+
+      const formattedPhone = formatPhone(conv, msg.telefono_real || msg.conversation_id);
+      const senderName = conv?.contact_name?.trim() || formattedPhone;
+      const senderPhone = conv?.contact_name?.trim() ? formattedPhone : null;
+      const mode: 'bot' | 'human' = conv?.status === 'human' ? 'human' : 'bot';
+
+      const toast: ToastNotification = {
+        id: dedupeKey,
+        conversationId: msg.conversation_id,
+        senderName,
+        senderPhone,
+        mode,
+        preview: formatMessagePreview(msg.body),
+        createdAt: msg.created_at || new Date().toISOString(),
+      };
+
+      const isInsideUniChat = pathnameRef.current === '/unichat';
+      const isTabHidden = typeof document !== 'undefined' && document.visibilityState !== 'visible';
+
+      if (!isInsideUniChat) {
+        enqueueToast(toast);
+        if (soundEnabledRef.current) {
+          playNotificationChime();
+        }
+      } else if (isTabHidden && soundEnabledRef.current) {
+        playNotificationChime();
+      }
+
+      if (isTabHidden || !isInsideUniChat) {
+        showOSNotification(toast);
+      }
+    },
+    [enqueueToast, showOSNotification]
+  );
+
+  const syncUnreadAndConversations = useCallback(async () => {
+    try {
+      const [{ data: convData }, { data: recentMsgs }] = await Promise.all([
+        supabase
+          .from('bb_conversations')
+          .select('id,instance_id,contact_name,contact_phone,last_message,status,updated_at')
+          .order('updated_at', { ascending: false }),
+        supabase
+          .from('bb_messages')
+          .select('id,conversation_id,body,from_me,created_at,telefono_real')
+          .order('created_at', { ascending: false })
+          .limit(300),
+      ]);
+
+      const nextConvMap: Record<string, ConversationMeta> = {};
+      if (Array.isArray(convData)) {
+        for (const c of convData as ConversationMeta[]) {
+          if (c.id) nextConvMap[c.id] = c;
+        }
+        setConversationsMap(nextConvMap);
+      }
+
+      if (Array.isArray(recentMsgs)) {
+        const msgs = recentMsgs as IncomingMessageRow[];
+        const dirMap: Record<string, boolean> = {};
+        for (const m of msgs) {
+          if (m.conversation_id && dirMap[m.conversation_id] === undefined) {
+            dirMap[m.conversation_id] = Boolean(m.from_me);
+          }
+        }
+        setLastMsgFromMeMap(dirMap);
+
+        if (!initializedRef.current) {
+          // Primer arranque: registrar IDs existentes para no disparar tarjetas de mensajes viejos
+          for (const m of msgs) {
+            const key = m.id || `${m.conversation_id}:${m.created_at}:${m.body}`;
+            seenMsgIdsRef.current.add(key);
+          }
+          initializedRef.current = true;
+        } else {
+          // Respaldo por polling cada 4s (garantiza tarjetas aunque Realtime de bb_messages no emita)
+          const freshIncoming = msgs
+            .filter(m => !m.from_me && m.created_at >= bootIsoRef.current)
+            .slice(0, 10)
+            .reverse();
+          for (const m of freshIncoming) {
+            const key = m.id || `${m.conversation_id}:${m.created_at}:${m.body}`;
+            if (!seenMsgIdsRef.current.has(key)) {
+              await notifyForIncomingMessage(m, nextConvMap);
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignorar fallo transitorio de red
+    }
+  }, [notifyForIncomingMessage]);
+
+  // Carga inicial, suscripción Realtime y polling rápido de respaldo (4s)
   useEffect(() => {
     void syncUnreadAndConversations();
 
@@ -398,9 +486,11 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
         const row = payload.new as ConversationMeta | null;
         if (row?.id) {
           setConversationsMap(prev => ({ ...prev, [row.id]: row }));
+          // Si llegó un cambio en la conversación, verificar al instante si hay mensaje nuevo
+          void syncUnreadAndConversations();
         }
       })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bb_messages' }, async payload => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bb_messages' }, payload => {
         const msg = payload.new as IncomingMessageRow;
         if (!msg || !msg.conversation_id) return;
 
@@ -409,72 +499,15 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
           [msg.conversation_id]: Boolean(msg.from_me),
         }));
 
-        if (msg.from_me) return;
-
-        const dedupeKey = msg.id || `${msg.conversation_id}:${msg.created_at}:${msg.body}`;
-        if (seenMsgIdsRef.current.has(dedupeKey)) return;
-        seenMsgIdsRef.current.add(dedupeKey);
-        if (seenMsgIdsRef.current.size > 200) {
-          const first = seenMsgIdsRef.current.values().next().value;
-          if (first) seenMsgIdsRef.current.delete(first);
-        }
-
-        let conv = conversationsRef.current[msg.conversation_id];
-        if (!conv) {
-          try {
-            const { data } = await supabase
-              .from('bb_conversations')
-              .select('id,instance_id,contact_name,contact_phone,last_message,status,updated_at')
-              .eq('id', msg.conversation_id)
-              .maybeSingle();
-            if (data) {
-              conv = data as ConversationMeta;
-              setConversationsMap(prev => ({ ...prev, [conv!.id]: conv! }));
-            }
-          } catch {
-            // Seguir con fallback de teléfono si falla
-          }
-        }
-
-        if (isLegacyConversationMeta(conv)) return;
-
-        const formattedPhone = formatPhone(conv, msg.telefono_real || msg.conversation_id);
-        const senderName = conv?.contact_name?.trim() || formattedPhone;
-        const senderPhone = conv?.contact_name?.trim() ? formattedPhone : null;
-        const mode: 'bot' | 'human' = conv?.status === 'human' ? 'human' : 'bot';
-
-        const toast: ToastNotification = {
-          id: dedupeKey,
-          conversationId: msg.conversation_id,
-          senderName,
-          senderPhone,
-          mode,
-          preview: formatMessagePreview(msg.body),
-          createdAt: msg.created_at || new Date().toISOString(),
-        };
-
-        const isInsideUniChat = pathnameRef.current === '/unichat';
-        const isTabHidden = typeof document !== 'undefined' && document.visibilityState !== 'visible';
-
-        // Si el usuario está en cualquier otro módulo, mostrar tarjeta flotante en PC
-        if (!isInsideUniChat) {
-          enqueueToast(toast);
-          if (soundEnabledRef.current) {
-            playNotificationChime();
-          }
-        } else if (isTabHidden && soundEnabledRef.current) {
-          playNotificationChime();
-        }
-
-        if (isTabHidden || !isInsideUniChat) {
-          showOSNotification(toast);
+        if (!msg.from_me) {
+          void notifyForIncomingMessage(msg);
         }
       })
       .subscribe();
 
     const poll = setInterval(() => {
       void syncUnreadAndConversations();
-    }, 30000);
+    }, 4000);
 
     return () => {
       clearInterval(poll);
@@ -484,7 +517,7 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
       }
       timersRef.current = {};
     };
-  }, [enqueueToast, showOSNotification, syncUnreadAndConversations]);
+  }, [notifyForIncomingMessage, syncUnreadAndConversations]);
 
   const unreadCount = useMemo(() => {
     let count = 0;
@@ -603,7 +636,7 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
         <div
           aria-live="polite"
           aria-label="Notificaciones de mensajes entrantes"
-          className="fixed top-16 right-3 left-3 sm:left-auto sm:w-[360px] lg:top-5 lg:right-5 z-[90] flex flex-col gap-2.5 pointer-events-none"
+          className="fixed top-16 right-3 left-3 sm:left-auto sm:w-[370px] lg:top-5 lg:right-5 z-[100] flex flex-col gap-2.5 pointer-events-none"
         >
           {toasts.map(toast => {
             const isHuman = toast.mode === 'human';
@@ -630,9 +663,8 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
                   hoveredIdsRef.current.delete(toast.id);
                   scheduleDismiss(toast.id, 4500);
                 }}
-                className="pointer-events-auto group relative overflow-hidden rounded-2xl bg-cd bd shadow-xl hover:border-[var(--ac)] transition-all duration-150 cursor-pointer text-left"
+                className="pointer-events-auto group relative overflow-hidden rounded-2xl bg-cd bd shadow-2xl hover:border-[var(--ac)] transition-all duration-150 cursor-pointer text-left"
               >
-                {/* Franja superior de color según modo */}
                 <div
                   className="h-1 w-full"
                   style={{ background: isHuman ? 'var(--ok)' : 'var(--ac)' }}
@@ -716,9 +748,16 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
   );
 }
 
-export function NotificationSettingsButton({ compact = false }: { compact?: boolean }) {
+export function NotificationSettingsButton({
+  compact = false,
+  sidebarRow = false,
+  iconOnly = false,
+}: {
+  compact?: boolean;
+  sidebarRow?: boolean;
+  iconOnly?: boolean;
+}) {
   const {
-    unreadCount,
     soundEnabled,
     desktopEnabled,
     desktopPermission,
@@ -742,14 +781,15 @@ export function NotificationSettingsButton({ compact = false }: { compact?: bool
       const rect = btnRef.current?.getBoundingClientRect();
       if (!rect) return;
       const isDesktop = window.innerWidth >= 1024;
+      const panelHeight = 265;
       if (isDesktop) {
         setCoords({
-          top: Math.max(12, Math.min(rect.top, window.innerHeight - 260)),
-          left: Math.min(rect.right + 10, window.innerWidth - 300),
+          top: Math.max(12, Math.min(rect.bottom - panelHeight, window.innerHeight - panelHeight - 12)),
+          left: Math.min(rect.right + 12, window.innerWidth - 296),
         });
       } else {
         setCoords({
-          top: rect.bottom + 8,
+          top: Math.min(rect.bottom + 8, window.innerHeight - panelHeight - 16),
           right: Math.max(12, window.innerWidth - rect.right),
         });
       }
@@ -775,26 +815,57 @@ export function NotificationSettingsButton({ compact = false }: { compact?: bool
 
   return (
     <>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => setOpen(prev => !prev)}
-        title="Notificaciones de UniChat en PC"
-        aria-label="Configurar notificaciones de UniChat"
-        className={`relative rounded-lg bg-sf text-[var(--tx)] hover:opacity-85 transition-opacity ${
-          compact ? 'p-2' : 'p-1.5'
-        }`}
-      >
-        {isMutedAll ? <BellOff size={compact ? 18 : 15} className="tx-mu" /> : <Bell size={compact ? 18 : 15} />}
-        {unreadCount > 0 && (
-          <span
-            className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-extrabold flex items-center justify-center leading-none"
-            style={{ background: 'var(--ac)', color: '#ffffff' }}
-          >
-            {unreadCount > 99 ? '99+' : unreadCount}
+      {sidebarRow ? (
+        <button
+          ref={btnRef}
+          type="button"
+          onClick={() => setOpen(prev => !prev)}
+          title="Configurar alertas de UniChat en PC"
+          aria-label="Configurar notificaciones de UniChat"
+          className={
+            iconOnly
+              ? 'inline-flex items-center justify-center p-2.5 rounded-xl bg-sf bd text-[var(--tx)] hover:border-[var(--ac)] transition-colors cursor-pointer shrink-0'
+              : 'w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl bg-sf bd text-xs font-medium text-[var(--tx)] hover:border-[var(--ac)] transition-colors cursor-pointer'
+          }
+        >
+          <span className="flex items-center gap-2 min-w-0">
+            {isMutedAll ? (
+              <BellOff size={15} className="tx-mu shrink-0" />
+            ) : (
+              <Bell size={15} style={{ color: 'var(--ac)' }} className="shrink-0" />
+            )}
+            {!iconOnly && <span className="truncate">Alertas PC</span>}
           </span>
-        )}
-      </button>
+          {!iconOnly && (
+            <span
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md shrink-0"
+              style={{
+                background: 'var(--cd)',
+                color: isMutedAll ? 'var(--mu)' : 'var(--ok)',
+              }}
+            >
+              {isMutedAll ? 'Silencio' : desktopEnabled ? 'PC + Audio' : 'Activo'}
+            </span>
+          )}
+        </button>
+      ) : (
+        <button
+          ref={btnRef}
+          type="button"
+          onClick={() => setOpen(prev => !prev)}
+          title="Alertas de UniChat en PC"
+          aria-label="Configurar notificaciones de UniChat"
+          className={`rounded-lg bg-sf text-[var(--tx)] hover:opacity-85 transition-opacity ${
+            compact ? 'p-2' : 'p-1.5'
+          }`}
+        >
+          {isMutedAll ? (
+            <BellOff size={compact ? 18 : 15} className="tx-mu" />
+          ) : (
+            <Bell size={compact ? 18 : 15} style={{ color: 'var(--ac)' }} />
+          )}
+        </button>
+      )}
 
       {open && (
         <div
