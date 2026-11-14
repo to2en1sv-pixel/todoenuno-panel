@@ -107,7 +107,7 @@ const catalogLines = (ctx.catalog || []).map((p, idx) => {
             ? (p.bajoPedido ? 'Disponible (venta sin stock / bajo pedido habilitada)' : 'Disponible')
             : \`Stock general: \${p.stockDisponible} uds\`));
   return [
-    \`\${idx + 1}. SKU: \${p.sku} | Nombre: \${p.nombre} | Precio: $\${Number(p.precio || 0).toFixed(2)} | TieneFoto: \${p.tieneFoto ? 'SI' : 'NO'}\`,
+    \`\${idx + 1}. SKU: \${p.sku} | Nombre: \${p.nombre} | Precio: $\${Number(p.precio || 0).toFixed(2)} | TieneFoto: \${p.tieneFoto ? 'SI' : 'NO'} | TieneVideo: \${p.tieneVideo ? 'SI (' + p.videoUrl + ')' : 'NO'}\`,
     \`   Disponibilidad: \${vars}\`,
     p.pitch ? \`   Pitch: \${p.pitch}\` : '',
     p.instrucciones ? \`   Reglas/Detalles: \${p.instrucciones}\` : '',
@@ -138,6 +138,7 @@ REGLAS CRÍTICAS:
 - Si un producto aparece marcado como "Agotado" o "Agotado temporalmente", indica amablemente que por el momento no está disponible y sugiere opciones similares del catálogo.
 - Envíos en El Salvador: San Salvador y área metropolitana mismo día o siguiente; departamentos 24-48h hábiles.
 - Si el cliente pide ver fotos o pregunta por un producto por primera vez y TieneFoto = SI, pon "send_product_image": true y "product_sku" con el SKU exacto.
+- VIDEO HOW-TO (YOUTUBE): Si un producto tiene TieneVideo = SI, el video tutorial se envía automáticamente junto con la foto al activar "send_product_image": true. Además, si el cliente pregunta cómo se usa, cómo funciona, cómo se arma o pide video, compártele el enlace de YouTube directamente en "reply_text".
 - Si el cliente te da su número real de 8 dígitos en el chat (útil cuando escribe desde @lid), guárdalo en "customer_phone".
 - RIESGO ANTIFRAUDE DEL CLIENTE ACTUAL: Total pedidos=\${af.totalPedidos || 0}, Entregados=\${af.entregados || 0}, Cancelados=\${af.cancelados || 0}, ListaNegra=\${af.enListaNegra ? 'SI (' + (af.motivoListaNegra || 'Reportado') + ')' : 'NO'}.
   * Si ListaNegra=SI o Cancelados>=2: NO confirmes contra entrega directo; indica amablemente que para procesar su orden se requiere pago anticipado por transferencia o escala a humano ("escalate_to_human": true).
@@ -611,16 +612,26 @@ export default async function handler(req: any, res: any) {
         allowBackorderGlobal: false,
         backorderSkus: [] as string[],
         hideExactStockCounts: true,
+        productVideos: {} as Record<string, string>,
       };
       try {
         if (settingsRes?.data?.contenido) {
           const parsedCfg = JSON.parse(settingsRes.data.contenido);
+          const productVideos: Record<string, string> = {};
+          if (parsedCfg?.productVideos && typeof parsedCfg.productVideos === 'object') {
+            for (const [k, v] of Object.entries(parsedCfg.productVideos)) {
+              const skuK = String(k || '').trim().toUpperCase();
+              const urlV = String(v || '').trim();
+              if (skuK && urlV) productVideos[skuK] = urlV;
+            }
+          }
           toddSettings = {
             allowBackorderGlobal: Boolean(parsedCfg.allowBackorderGlobal),
             backorderSkus: Array.isArray(parsedCfg.backorderSkus)
               ? parsedCfg.backorderSkus.map((s: any) => String(s || '').trim().toUpperCase()).filter(Boolean)
               : [],
             hideExactStockCounts: parsedCfg.hideExactStockCounts !== false,
+            productVideos,
           };
         }
       } catch {}
@@ -628,6 +639,7 @@ export default async function handler(req: any, res: any) {
       const hideExact = toddSettings.hideExactStockCounts !== false;
       const allowGlobal = toddSettings.allowBackorderGlobal;
       const backorderSkuSet = new Set(toddSettings.backorderSkus);
+      const videoMap = toddSettings.productVideos;
 
       const scrubStockNumbers = (txt?: string | null) => {
         if (!txt) return '';
@@ -672,12 +684,18 @@ export default async function handler(req: any, res: any) {
           const isBackorderActive = allowBackorder && rawStock <= 0;
 
           const baseInstr = scrubStockNumbers(item.todd_instrucciones);
+          const videoUrl = videoMap[skuUpper] || null;
           const extraDirectives: string[] = [];
           if (hideExact) {
             extraDirectives.push('NUNCA digas al cliente cuántas unidades disponibles hay.');
           }
           if (isBackorderActive) {
             extraDirectives.push('VENTA SIN STOCK HABILITADA: disponible bajo pedido, toma la orden sin pausar ni escalar.');
+          }
+          if (videoUrl) {
+            extraDirectives.push(
+              `Video How-To (YouTube): ${videoUrl} — Se envía automático con la foto; si pregunta cómo se usa/arma o pide video, compártele este enlace.`
+            );
           }
           const combinedInstr = [baseInstr, ...extraDirectives].filter(Boolean).join(' | ');
 
@@ -695,6 +713,8 @@ export default async function handler(req: any, res: any) {
                 : 'Agotado temporalmente'
               : rawStock,
             tieneFoto: Boolean(item.image_url),
+            tieneVideo: Boolean(videoUrl),
+            videoUrl,
             categoria: item.categoria || null,
             pitch: item.todd_pitch || null,
             instrucciones: combinedInstr || null,

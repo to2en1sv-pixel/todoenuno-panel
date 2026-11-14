@@ -4,6 +4,7 @@ export interface ToddCatalogSettings {
   allowBackorderGlobal: boolean;
   backorderSkus: string[];
   hideExactStockCounts: boolean;
+  productVideos: Record<string, string>;
 }
 
 export const SYSTEM_TODD_SETTINGS_DOC_TITLE = '__SYSTEM_TODD_CATALOG_SETTINGS_V1__';
@@ -13,11 +14,39 @@ export const DEFAULT_TODD_SETTINGS: ToddCatalogSettings = {
   allowBackorderGlobal: false,
   backorderSkus: [],
   hideExactStockCounts: true,
+  productVideos: {},
 };
+
+export function extractYouTubeVideoId(rawUrl?: string | null): string | null {
+  const raw = String(rawUrl || '').trim();
+  if (!raw) return null;
+  const patterns = [
+    /(?:youtu\.be\/)([A-Za-z0-9_-]{11})/i,
+    /(?:youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/i,
+    /(?:youtube\.com\/embed\/)([A-Za-z0-9_-]{11})/i,
+    /(?:youtube\.com\/live\/)([A-Za-z0-9_-]{11})/i,
+    /[?&]v=([A-Za-z0-9_-]{11})/i,
+  ];
+  for (const re of patterns) {
+    const m = raw.match(re);
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
+
+export function getYouTubeThumbnailUrl(rawUrl?: string | null): string | null {
+  const id = extractYouTubeVideoId(rawUrl);
+  return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
+}
+
+export function buildHowToVideoMessage(productName: string, videoUrl: string): string {
+  const cleanName = String(productName || 'este producto').trim();
+  return `🎥 Mira cómo se usa *${cleanName}* paso a paso:\n${videoUrl.trim()}`;
+}
 
 function normalizeSettings(raw: any): ToddCatalogSettings {
   if (!raw || typeof raw !== 'object') {
-    return { ...DEFAULT_TODD_SETTINGS };
+    return { ...DEFAULT_TODD_SETTINGS, productVideos: {} };
   }
   const skus = Array.isArray(raw.backorderSkus)
     ? Array.from(
@@ -29,10 +58,22 @@ function normalizeSettings(raw: any): ToddCatalogSettings {
       )
     : [];
 
+  const productVideos: Record<string, string> = {};
+  if (raw.productVideos && typeof raw.productVideos === 'object') {
+    for (const [k, v] of Object.entries(raw.productVideos)) {
+      const skuKey = String(k || '').trim().toUpperCase();
+      const urlVal = String(v || '').trim();
+      if (skuKey && urlVal) {
+        productVideos[skuKey] = urlVal;
+      }
+    }
+  }
+
   return {
     allowBackorderGlobal: Boolean(raw.allowBackorderGlobal),
     backorderSkus: skus as string[],
     hideExactStockCounts: raw.hideExactStockCounts !== false,
+    productVideos,
   };
 }
 
@@ -41,7 +82,7 @@ export function getCachedToddCatalogSettings(): ToddCatalogSettings {
     const raw = localStorage.getItem(LOCAL_TODD_SETTINGS_KEY);
     if (raw) return normalizeSettings(JSON.parse(raw));
   } catch {}
-  return { ...DEFAULT_TODD_SETTINGS };
+  return { ...DEFAULT_TODD_SETTINGS, productVideos: {} };
 }
 
 function writeLocalToddSettings(settings: ToddCatalogSettings) {

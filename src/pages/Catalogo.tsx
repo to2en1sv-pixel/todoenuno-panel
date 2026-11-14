@@ -24,7 +24,8 @@ import {
   Database,
   ExternalLink,
   EyeOff,
-  PackageCheck
+  PackageCheck,
+  Video
 } from 'lucide-react';
 import {
   fetchStockItems,
@@ -45,6 +46,9 @@ import {
   fetchToddCatalogSettings,
   saveToddCatalogSettings,
   getCachedToddCatalogSettings,
+  extractYouTubeVideoId,
+  getYouTubeThumbnailUrl,
+  buildHowToVideoMessage,
   type ToddCatalogSettings
 } from '@/lib/toddSettings';
 import { ProductImg } from '@/components/inventory/ProductImg';
@@ -161,6 +165,7 @@ export function CatalogoPage() {
   const [editToddInstrucciones, setEditToddInstrucciones] = useState('');
   const [editToddKeywords, setEditToddKeywords] = useState('');
   const [editActivoTodd, setEditActivoTodd] = useState(true);
+  const [editVideoUrl, setEditVideoUrl] = useState('');
   const [isSavingDetails, setIsSavingDetails] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [showUrlInput, setShowUrlInput] = useState(false);
@@ -180,6 +185,7 @@ export function CatalogoPage() {
   const [prodStockInicial, setProdStockInicial] = useState('0');
   const [prodStockMinimo, setProdStockMinimo] = useState('5');
   const [prodImagen, setProdImagen] = useState('');
+  const [prodVideoUrl, setProdVideoUrl] = useState('');
   const [prodToddPitch, setProdToddPitch] = useState('');
   const [prodToddKeywords, setProdToddKeywords] = useState('');
   const [prodColoresInit, setProdColoresInit] = useState('');
@@ -343,6 +349,7 @@ export function CatalogoPage() {
     setEditToddInstrucciones(item.todd_instrucciones || '');
     setEditToddKeywords(item.todd_keywords || '');
     setEditActivoTodd(item.activo_todd);
+    setEditVideoUrl(toddSettings.productVideos[item.sku.toUpperCase()] || '');
     setDrawerTab('info');
     setSimRespuesta('');
     setShowUrlInput(false);
@@ -770,6 +777,18 @@ export function CatalogoPage() {
       activo_todd: editActivoTodd
     });
 
+    const skuKey = selectedItem.sku.trim().toUpperCase();
+    const cleanVideo = editVideoUrl.trim();
+    const currentSavedVideo = toddSettings.productVideos[skuKey] || '';
+    if (cleanVideo !== currentSavedVideo) {
+      const nextVideos = { ...toddSettings.productVideos };
+      if (cleanVideo) nextVideos[skuKey] = cleanVideo;
+      else delete nextVideos[skuKey];
+      const nextSettings: ToddCatalogSettings = { ...toddSettings, productVideos: nextVideos };
+      setToddSettings(nextSettings);
+      await saveToddCatalogSettings(nextSettings);
+    }
+
     setIsSavingDetails(false);
 
     if (res.success) {
@@ -846,6 +865,13 @@ export function CatalogoPage() {
         ? '📦 *Disponibilidad:* Disponible para envío en 24-48 horas.'
         : `📦 *Disponibilidad total:* Tenemos ${totalUds} uds listas para envío en 24-48 horas.`;
 
+    const videoFollowUp = editVideoUrl.trim()
+      ? `\n\n--- Mensaje 2 automático (con vista previa YouTube) ---\n${buildHowToVideoMessage(
+          editNombre || selectedItem.nombre,
+          editVideoUrl.trim()
+        )}`
+      : '';
+
     setTimeout(() => {
       setSimRespuesta(
         `¡Hola! 👋 Gracias por consultar por el *${editNombre || selectedItem.nombre}*.\n\n` +
@@ -853,7 +879,8 @@ export function CatalogoPage() {
           `💰 *Precio especial:* ${precio} USD con pago contra entrega en todo El Salvador 🇸🇻.` +
           `${variantesTxt}\n` +
           `${availabilityLine}${reglas}\n\n` +
-          `¿Qué color o talla te gustaría pedir y a qué dirección te lo enviamos? 📲`
+          `¿Qué color o talla te gustaría pedir y a qué dirección te lo enviamos? 📲` +
+          videoFollowUp
       );
       setIsSimulating(false);
     }, 250);
@@ -912,6 +939,16 @@ export function CatalogoPage() {
       });
     }
 
+    if (res.success && prodVideoUrl.trim()) {
+      const nextVideos = {
+        ...toddSettings.productVideos,
+        [skuClean]: prodVideoUrl.trim()
+      };
+      const nextSettings: ToddCatalogSettings = { ...toddSettings, productVideos: nextVideos };
+      setToddSettings(nextSettings);
+      await saveToddCatalogSettings(nextSettings);
+    }
+
     setIsSavingProd(false);
 
     if (res.success) {
@@ -930,6 +967,7 @@ export function CatalogoPage() {
       setProdStockInicial('0');
       setProdStockMinimo('5');
       setProdImagen('');
+      setProdVideoUrl('');
       setProdToddPitch('');
       setProdToddKeywords('');
       setProdColoresInit('');
@@ -1301,16 +1339,26 @@ export function CatalogoPage() {
                     </span>
                   </div>
 
-                  {/* Badge de Todd Bot y Venta Bajo Pedido */}
+                  {/* Badge de Todd Bot, Video How-To y Venta Bajo Pedido */}
                   <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-1 pointer-events-none">
-                    {hasToddPitch ? (
-                      <span
-                        className="p-1 rounded-md bg-purple-600 text-white text-[10px] font-bold shadow flex items-center gap-0.5"
-                        title="Entrenado para Bot Todd (WhatsApp)"
-                      >
-                        <Bot size={11} />
-                      </span>
-                    ) : <span />}
+                    <div className="flex items-center gap-1">
+                      {hasToddPitch && (
+                        <span
+                          className="p-1 rounded-md bg-purple-600 text-white text-[10px] font-bold shadow flex items-center gap-0.5"
+                          title="Entrenado para Bot Todd (WhatsApp)"
+                        >
+                          <Bot size={11} />
+                        </span>
+                      )}
+                      {toddSettings.productVideos[item.sku.toUpperCase()] && (
+                        <span
+                          className="p-1 rounded-md bg-rose-600 text-white text-[10px] font-bold shadow flex items-center gap-0.5"
+                          title="Tiene video How-To de YouTube vinculado"
+                        >
+                          <Video size={11} />
+                        </span>
+                      )}
+                    </div>
                     {item.stock_disponible <= 0 &&
                       (toddSettings.allowBackorderGlobal || backorderSkuSet.has(item.sku.toUpperCase())) && (
                         <span
@@ -1513,6 +1561,75 @@ export function CatalogoPage() {
                         </div>
                       )}
                     </div>
+                  </div>
+
+                  {/* Video How-To (YouTube) */}
+                  <div className="p-4 bg-sf rounded-2xl border border-[var(--bd)] space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-[var(--tx)] flex items-center gap-1.5">
+                        <Video size={14} className="text-rose-500" /> Video How-To (YouTube)
+                      </span>
+                      {editVideoUrl.trim() && (
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                            extractYouTubeVideoId(editVideoUrl)
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25'
+                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25'
+                          }`}
+                        >
+                          {extractYouTubeVideoId(editVideoUrl) ? 'YouTube válido' : 'Enlace externo'}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="url"
+                        value={editVideoUrl}
+                        onChange={e => setEditVideoUrl(e.target.value)}
+                        placeholder="https://youtube.com/shorts/... o https://youtu.be/..."
+                        className="flex-1 p-2.5 bg-cd border border-[var(--bd)] rounded-xl text-xs outline-none focus:border-rose-500"
+                      />
+                      {editVideoUrl.trim() && (
+                        <>
+                          <a
+                            href={editVideoUrl.trim()}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="p-2.5 rounded-xl border border-[var(--bd)] bg-cd hover:bg-sf text-xs font-bold text-[var(--tx)]"
+                            title="Abrir video en YouTube"
+                          >
+                            <ExternalLink size={14} />
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => setEditVideoUrl('')}
+                            className="p-2.5 rounded-xl text-rose-500 hover:bg-rose-500/10"
+                            title="Quitar video"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    {getYouTubeThumbnailUrl(editVideoUrl) && (
+                      <div className="flex items-center gap-3 p-2 rounded-xl bg-cd border border-[var(--bd)]">
+                        <img
+                          src={getYouTubeThumbnailUrl(editVideoUrl) || ''}
+                          alt="Miniatura YouTube"
+                          className="w-20 h-12 rounded-lg object-cover border border-[var(--bd)] shrink-0"
+                        />
+                        <p className="text-[11px] tx-mu leading-snug">
+                          Se enviará automáticamente como <strong>mensaje con miniatura</strong> justo después de mandar la foto del producto.
+                        </p>
+                      </div>
+                    )}
+                    {!editVideoUrl.trim() && (
+                      <p className="text-[10px] tx-mu leading-snug">
+                        Opcional: pega el enlace de tu canal de YouTube. Al enviar la foto por Bot Todd o UniChat, el cliente recibirá este tutorial automático.
+                      </p>
+                    )}
                   </div>
 
                   {/* Nombre y Categoría */}
@@ -1742,6 +1859,27 @@ export function CatalogoPage() {
                         : toddSettings.allowBackorderGlobal
                         ? '✓ Global'
                         : 'Solo con stock'}
+                    </button>
+                  </div>
+
+                  {/* Estado del Video How-To en Bot Todd */}
+                  <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="text-xs font-bold text-[var(--tx)] flex items-center gap-1.5">
+                        <Video size={13} className="text-rose-500" /> Video How-To (YouTube)
+                      </span>
+                      <span className="text-[10px] tx-mu block truncate mt-0.5">
+                        {editVideoUrl.trim()
+                          ? editVideoUrl.trim()
+                          : 'Sin video asignado aún (se envía automático con la foto)'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDrawerTab('info')}
+                      className="px-2.5 py-1 rounded-lg border border-[var(--bd)] bg-cd hover:border-[var(--ac)] text-[10px] font-bold shrink-0"
+                    >
+                      {editVideoUrl.trim() ? 'Cambiar' : '+ Agregar'}
                     </button>
                   </div>
 
@@ -2438,6 +2576,19 @@ export function CatalogoPage() {
                     <Upload size={13} /> Subir
                   </button>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold tx-mu mb-1 flex items-center gap-1">
+                  <Video size={11} className="text-rose-500" /> Video How-To YouTube (Opcional)
+                </label>
+                <input
+                  type="url"
+                  value={prodVideoUrl}
+                  onChange={e => setProdVideoUrl(e.target.value)}
+                  placeholder="https://youtube.com/shorts/... o https://youtu.be/..."
+                  className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-rose-500"
+                />
               </div>
 
               <div className="p-3 bg-indigo-500/5 rounded-xl border border-indigo-500/20 space-y-2">

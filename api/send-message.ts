@@ -140,6 +140,7 @@ export default async function handler(req: any, res: any) {
     mediaType = 'image',
     fileName = 'imagen.jpg',
     productSku,
+    sendVideoAfterImage = true,
   } = req.body || {};
 
   const messageText = String(text || '').trim();
@@ -201,19 +202,42 @@ export default async function handler(req: any, res: any) {
 
     let resolvedMediaUrl = mediaUrl ? String(mediaUrl).trim() : '';
     let resolvedFileName = String(fileName || 'producto.jpg');
+    let resolvedProductName = '';
+    let resolvedVideoUrl = '';
 
-    if (!resolvedMediaUrl && !mediaBase64 && productSku) {
+    if (productSku) {
       const skuClean = String(productSku).trim().toUpperCase();
       if (skuClean) {
-        const { data: prodRow } = await supabase
-          .from('inventory_stock')
-          .select('image_url, sku')
-          .eq('sku', skuClean)
-          .maybeSingle();
-        if (prodRow?.image_url) {
-          resolvedMediaUrl = String(prodRow.image_url).trim();
-          resolvedFileName = `${skuClean}.jpg`;
+        const [prodRes, cfgRes] = await Promise.all([
+          supabase
+            .from('inventory_stock')
+            .select('image_url, sku, nombre')
+            .eq('sku', skuClean)
+            .maybeSingle(),
+          supabase
+            .from('panel_docs')
+            .select('contenido')
+            .eq('titulo', '__SYSTEM_TODD_CATALOG_SETTINGS_V1__')
+            .maybeSingle(),
+        ]);
+
+        if (prodRes?.data) {
+          resolvedProductName = String(prodRes.data.nombre || '').trim();
+          if (!resolvedMediaUrl && !mediaBase64 && prodRes.data.image_url) {
+            resolvedMediaUrl = String(prodRes.data.image_url).trim();
+            resolvedFileName = `${skuClean}.jpg`;
+          }
         }
+
+        try {
+          if (cfgRes?.data?.contenido) {
+            const parsedCfg = JSON.parse(cfgRes.data.contenido);
+            const vids = parsedCfg?.productVideos;
+            if (vids && typeof vids === 'object' && vids[skuClean]) {
+              resolvedVideoUrl = String(vids[skuClean]).trim();
+            }
+          }
+        } catch {}
       }
     }
 
@@ -230,6 +254,8 @@ export default async function handler(req: any, res: any) {
       ? `${evolutionUrl}/message/sendMedia/${encodeURIComponent(targetInstance)}`
       : `${evolutionUrl}/message/sendText/${encodeURIComponent(targetInstance)}`;
 
+    const hasYouTubeLink = /youtu\.?be/i.test(messageText);
+
     const payload =
       hasMedia && normalizedMedia
         ? {
@@ -245,6 +271,7 @@ export default async function handler(req: any, res: any) {
             number: sendTarget,
             text: messageText,
             delay: 250,
+            ...(hasYouTubeLink ? { linkPreview: true } : {}),
           };
 
     const evoRes = await fetch(endpoint, {
@@ -323,10 +350,108 @@ export default async function handler(req: any, res: any) {
       );
     } catch {}
 
+    let followUpVideoMessage: { id: string; body: string; created_at: string } | null = null;
+
+    if (hasMedia && sendVideoAfterImage !== false && resolvedVideoUrl) {
+      try {
+        const ytIdMatch = resolvedVideoUrl.match(
+          /(?:youtu\.be\/|shorts\/|embed\/|live\/|[?&]v=)([A-Za-z0-9_-]{11})/i
+        );
+        const ytId = ytIdMatch?.[1] || '';
+
+        const { data: recentConvMsgs } = await supabase
+          .from('bb_messages')
+          .select('body')
+          .eq('conversation_id', conversationId)
+          .order('created_at', { ascending: false })
+          .limit(20);
+
+        const alreadySentVideo = (recentConvMsgs || []).some((m: any) => {
+          const b = String(m?.body || '');
+          return b.includes(resolvedVideoUrl) || (ytId ? b.includes(ytId) : false);
+        });
+
+        if (!alreadySentVideo) {
+          const videoText = `🎥 Mira cómo se usa *${resolvedProductName || String(productSku).toUpperCase()}* paso a paso:\n${resolvedVideoUrl}`;
+          const textEndpoint = `${evolutionUrl}/message/sendText/${encodeURIComponent(targetInstance)}`;
+          const vidRes = await fetch(textEndpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              apikey: evolutionKey,
+            },
+            body: JSON.stringify({
+              number: sendTarget,
+              text: videoText,
+              delay: 900,
+              linkPreview: true,
+            }),
+          });
+
+          if (vidRes.ok) {
+            const vidRaw = await vidRes.text();
+            let vidJson: any = {};
+            try {
+              vidJson = vidRaw ? JSON.parse(vidRaw) : {};
+            } catch {}
+
+            const vidMsgId = String(
+              vidJson?.key?.id ||
+                vidJson?.messageId ||
+                `unichat-vid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+            );
+            const vidIso = new Date().toISOString();
+
+            await supabase.from('bb_messages').upsert(
+              {
+                id: vidMsgId,
+                conversation_id: conversationId,
+                body: videoText,
+                from_me: true,
+                created_at: vidIso,
+                telefono_real: cleanPhone,
+              },
+              { onConflict: 'id', ignoreDuplicates: true }
+            );
+
+            await supabase
+              .from('bb_conversations')
+              .update({
+                last_message: `🎥 Video How-To enviado`,
+                updated_at: vidIso,
+                ...(pauseBot !== false ? { status: 'human' } : {}),
+              })
+              .eq('id', conversationId);
+
+            try {
+              await supabase.from('whatsapp_outbound_memory').upsert(
+                {
+                  message_id: vidMsgId,
+                  telefono: cleanPhone,
+                  texto: videoText,
+                  created_at: vidIso,
+                },
+                { onConflict: 'message_id', ignoreDuplicates: true }
+              );
+            } catch {}
+
+            followUpVideoMessage = {
+              id: vidMsgId,
+              body: videoText,
+              created_at: vidIso,
+            };
+          }
+        }
+      } catch (vidErr) {
+        console.error('Error enviando video how-to de seguimiento:', vidErr);
+      }
+    }
+
     return res.status(200).json({
       success: true,
       messageId: String(messageId),
       storedBody,
+      followUpVideoMessage,
       status: pauseBot !== false ? 'human' : undefined,
       instance: targetInstance,
       target: sendTarget,

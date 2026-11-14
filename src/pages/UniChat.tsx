@@ -8,6 +8,12 @@ import {
   compressImageFile,
 } from '@/lib/inventory';
 import {
+  fetchToddCatalogSettings,
+  getCachedToddCatalogSettings,
+  buildHowToVideoMessage,
+  type ToddCatalogSettings,
+} from '@/lib/toddSettings';
+import {
   evaluateCustomerRisk,
   addOrUpdateBlacklist,
   removeBlacklistEntry,
@@ -220,6 +226,7 @@ export function UniChatPage() {
   const [catalogVariants, setCatalogVariants] = useState<ProductVariant[]>([]);
   const [showCatalogPicker, setShowCatalogPicker] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState('');
+  const [toddSettings, setToddSettings] = useState<ToddCatalogSettings>(() => getCachedToddCatalogSettings());
 
   // Respuestas rápidas COD
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>(loadQuickReplies);
@@ -250,12 +257,13 @@ export function UniChatPage() {
     }, 5000);
   };
 
-  // Cargar catálogo activo una vez
+  // Cargar catálogo activo y configuración Bot Todd una vez
   useEffect(() => {
-    Promise.all([fetchStockItems(), fetchProductVariants()])
-      .then(([stockRes, vars]) => {
+    Promise.all([fetchStockItems(), fetchProductVariants(), fetchToddCatalogSettings()])
+      .then(([stockRes, vars, cfgRes]) => {
         setCatalogItems((stockRes.items || []).filter(i => i.activo !== false));
         setCatalogVariants((vars || []).filter(v => v.estado !== 'PAUSADO'));
+        setToddSettings(cfgRes.settings);
       })
       .catch(() => {});
   }, []);
@@ -663,6 +671,8 @@ export function UniChatPage() {
     mediaUrl?: string | null;
     mediaBase64?: string | null;
     fileName?: string;
+    productSku?: string;
+    sendVideoAfterImage?: boolean;
   }) => {
     if (!selectedConv) return;
     setIsSending(true);
@@ -680,6 +690,8 @@ export function UniChatPage() {
           mediaBase64: opts.mediaBase64 || undefined,
           mediaType: opts.mediaUrl || opts.mediaBase64 ? 'image' : undefined,
           fileName: opts.fileName || undefined,
+          productSku: opts.productSku || undefined,
+          sendVideoAfterImage: opts.sendVideoAfterImage,
         }),
       });
 
@@ -696,20 +708,34 @@ export function UniChatPage() {
       const optimisticId = String(data.messageId || `local-${Date.now()}`);
       const nowIso = new Date().toISOString();
       const bodyToAdd = data.storedBody || opts.text || '📷 [Imagen enviada]';
+      const followUp = data.followUpVideoMessage as
+        | { id: string; body: string; created_at: string }
+        | null
+        | undefined;
 
       setMessages(prev => {
-        if (prev.some(m => m.id === optimisticId)) return prev;
-        return [
-          ...prev,
-          {
+        const next = [...prev];
+        if (!next.some(m => m.id === optimisticId)) {
+          next.push({
             id: optimisticId,
             conversation_id: selectedConv.id,
             body: bodyToAdd,
             from_me: true,
             created_at: nowIso,
             telefono_real: selectedConv.contact_phone,
-          },
-        ];
+          });
+        }
+        if (followUp?.id && !next.some(m => m.id === followUp.id)) {
+          next.push({
+            id: followUp.id,
+            conversation_id: selectedConv.id,
+            body: followUp.body,
+            from_me: true,
+            created_at: followUp.created_at || nowIso,
+            telefono_real: selectedConv.contact_phone,
+          });
+        }
+        return next;
       });
       const inlineDataImage =
         opts.mediaBase64 ||
@@ -728,8 +754,8 @@ export function UniChatPage() {
       setLastMsgFromMeMap(prev => ({ ...prev, [selectedConv.id]: true }));
       const updatedConv: Conversation = {
         ...selectedConv,
-        last_message: opts.text || '📷 Imagen enviada',
-        updated_at: nowIso,
+        last_message: followUp ? '🎥 Video How-To enviado' : opts.text || '📷 Imagen enviada',
+        updated_at: followUp?.created_at || nowIso,
         status: 'human',
       };
       setSelectedConv(updatedConv);
@@ -776,10 +802,18 @@ export function UniChatPage() {
 
   const handleSendCatalogProduct = async (prod: StockItem, withImage: boolean) => {
     if (!selectedConv) return;
+    const skuUpper = prod.sku.trim().toUpperCase();
+    const allowBackorder =
+      toddSettings.allowBackorderGlobal || toddSettings.backorderSkus.includes(skuUpper);
+    const hideCounts = toddSettings.hideExactStockCounts;
+
     const prodVars = prod.template_id
       ? catalogVariants.filter(v => String(v.template_id) === String(prod.template_id))
       : [];
-    const formatted = formatVariantsForTodd(prodVars, prod.precio_venta);
+    const formatted = formatVariantsForTodd(prodVars, prod.precio_venta, {
+      allowBackorder,
+      hideExactCounts: hideCounts,
+    });
 
     const lines: string[] = [
       `*${prod.nombre}* — *$${Number(prod.precio_venta || 0).toFixed(2)}*`,
@@ -787,8 +821,11 @@ export function UniChatPage() {
     if (prod.todd_pitch) lines.push(prod.todd_pitch.trim());
     if (formatted.bulletLines.length > 0) {
       lines.push(`\n🎨 *Disponibilidad:*\n${formatted.bulletLines.map(b => `• ${b}`).join('\n')}`);
-    } else {
+    } else if (!hideCounts) {
       lines.push(`📦 Disponibles: ${prod.stock_disponible} uds`);
+    } else {
+      const avail = prod.stock_disponible > 0 || allowBackorder;
+      lines.push(avail ? '📦 Disponible para envío' : '⏳ Agotado temporalmente');
     }
     lines.push('\n¿Te gustaría reservarlo o tienes alguna duda? 😊');
 
@@ -803,6 +840,16 @@ export function UniChatPage() {
       text: lines.join('\n'),
       mediaUrl: resolvedMediaUrl,
       fileName: `${prod.sku}.jpg`,
+      productSku: withImage ? prod.sku : undefined,
+      sendVideoAfterImage: withImage,
+    });
+  };
+
+  const handleSendCatalogVideo = async (prodName: string, videoUrl: string) => {
+    if (!selectedConv || !videoUrl.trim()) return;
+    setShowCatalogPicker(false);
+    await sendPayloadToEvolution({
+      text: buildHowToVideoMessage(prodName, videoUrl),
     });
   };
 
@@ -1381,6 +1428,7 @@ export function UniChatPage() {
                       const pVars = prod.template_id
                         ? catalogVariants.filter(v => String(v.template_id) === String(prod.template_id))
                         : [];
+                      const videoUrl = toddSettings.productVideos[prod.sku.toUpperCase()] || '';
                       return (
                         <div
                           key={prod.sku}
@@ -1403,13 +1451,28 @@ export function UniChatPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
+                            {videoUrl && (
+                              <button
+                                type="button"
+                                disabled={isSending}
+                                onClick={() => handleSendCatalogVideo(prod.nombre, videoUrl)}
+                                className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/30 text-[10px] font-bold flex items-center gap-1 transition-colors"
+                                title="Enviar video How-To de YouTube"
+                              >
+                                <Video size={11} /> Video
+                              </button>
+                            )}
                             {prod.image_url && (
                               <button
                                 type="button"
                                 disabled={isSending}
                                 onClick={() => handleSendCatalogProduct(prod, true)}
                                 className="px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold"
-                                title="Enviar foto + ficha por WhatsApp"
+                                title={
+                                  videoUrl
+                                    ? 'Enviar foto + ficha (y video How-To automático)'
+                                    : 'Enviar foto + ficha por WhatsApp'
+                                }
                               >
                                 Foto+Info
                               </button>
@@ -1677,6 +1740,22 @@ export function UniChatPage() {
                       <span className="font-mono font-bold truncate">{whatsappState.last_sku}</span>
                     </div>
                   )}
+                  {whatsappState.last_sku &&
+                    toddSettings.productVideos[whatsappState.last_sku.toUpperCase()] && (
+                      <button
+                        type="button"
+                        disabled={isSending}
+                        onClick={() =>
+                          handleSendCatalogVideo(
+                            whatsappState.last_nombre || whatsappState.last_sku || 'Producto',
+                            toddSettings.productVideos[whatsappState.last_sku!.toUpperCase()]
+                          )
+                        }
+                        className="w-full py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/30 text-[10px] font-bold flex items-center justify-center gap-1 transition-colors"
+                      >
+                        <Video size={11} /> Enviar Video How-To
+                      </button>
+                    )}
                   {whatsappState.nombre_cliente && (
                     <div className="flex justify-between gap-2">
                       <span className="tx-mu">Nombre:</span>
