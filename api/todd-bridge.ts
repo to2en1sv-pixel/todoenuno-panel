@@ -621,8 +621,15 @@ export default async function handler(req: any, res: any) {
           if (parsedCfg?.productVideos && typeof parsedCfg.productVideos === 'object') {
             for (const [k, v] of Object.entries(parsedCfg.productVideos)) {
               const skuK = String(k || '').trim().toUpperCase();
-              const urlV = String(v || '').trim();
-              if (skuK && urlV) productVideos[skuK] = urlV;
+              const rawV = String(v || '').trim();
+              if (skuK && rawV) {
+                const ytM = rawV.match(/(?:youtu\.be\/|youtube\.com\/(?:shorts|embed|live)\/|[?&]v=)([A-Za-z0-9_-]{11})/i);
+                productVideos[skuK] = ytM?.[1]
+                  ? (/youtube\.com\/shorts\//i.test(rawV)
+                      ? `https://youtube.com/shorts/${ytM[1]}`
+                      : `https://youtu.be/${ytM[1]}`)
+                  : rawV;
+              }
             }
           }
           toddSettings = {

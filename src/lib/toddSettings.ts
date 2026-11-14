@@ -34,6 +34,17 @@ export function extractYouTubeVideoId(rawUrl?: string | null): string | null {
   return null;
 }
 
+export function cleanYouTubeUrl(rawUrl?: string | null): string {
+  const raw = String(rawUrl || '').trim();
+  if (!raw) return '';
+  const id = extractYouTubeVideoId(raw);
+  if (!id) return raw;
+  if (/youtube\.com\/shorts\//i.test(raw)) {
+    return `https://youtube.com/shorts/${id}`;
+  }
+  return `https://youtu.be/${id}`;
+}
+
 export function getYouTubeThumbnailUrl(rawUrl?: string | null): string | null {
   const id = extractYouTubeVideoId(rawUrl);
   return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
@@ -41,7 +52,8 @@ export function getYouTubeThumbnailUrl(rawUrl?: string | null): string | null {
 
 export function buildHowToVideoMessage(productName: string, videoUrl: string): string {
   const cleanName = String(productName || 'este producto').trim();
-  return `🎥 Mira cómo se usa *${cleanName}* paso a paso:\n${videoUrl.trim()}`;
+  const cleanLink = cleanYouTubeUrl(videoUrl);
+  return `🎥 Mira cómo se usa *${cleanName}* paso a paso:\n${cleanLink}`;
 }
 
 function normalizeSettings(raw: any): ToddCatalogSettings {
@@ -62,7 +74,7 @@ function normalizeSettings(raw: any): ToddCatalogSettings {
   if (raw.productVideos && typeof raw.productVideos === 'object') {
     for (const [k, v] of Object.entries(raw.productVideos)) {
       const skuKey = String(k || '').trim().toUpperCase();
-      const urlVal = String(v || '').trim();
+      const urlVal = cleanYouTubeUrl(String(v || ''));
       if (skuKey && urlVal) {
         productVideos[skuKey] = urlVal;
       }

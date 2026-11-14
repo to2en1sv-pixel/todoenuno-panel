@@ -47,6 +47,7 @@ import {
   saveToddCatalogSettings,
   getCachedToddCatalogSettings,
   extractYouTubeVideoId,
+  cleanYouTubeUrl,
   getYouTubeThumbnailUrl,
   buildHowToVideoMessage,
   type ToddCatalogSettings
@@ -778,7 +779,10 @@ export function CatalogoPage() {
     });
 
     const skuKey = selectedItem.sku.trim().toUpperCase();
-    const cleanVideo = editVideoUrl.trim();
+    const cleanVideo = cleanYouTubeUrl(editVideoUrl);
+    if (cleanVideo !== editVideoUrl) {
+      setEditVideoUrl(cleanVideo);
+    }
     const currentSavedVideo = toddSettings.productVideos[skuKey] || '';
     if (cleanVideo !== currentSavedVideo) {
       const nextVideos = { ...toddSettings.productVideos };
@@ -939,10 +943,11 @@ export function CatalogoPage() {
       });
     }
 
-    if (res.success && prodVideoUrl.trim()) {
+    const cleanNewVideo = cleanYouTubeUrl(prodVideoUrl);
+    if (res.success && cleanNewVideo) {
       const nextVideos = {
         ...toddSettings.productVideos,
-        [skuClean]: prodVideoUrl.trim()
+        [skuClean]: cleanNewVideo
       };
       const nextSettings: ToddCatalogSettings = { ...toddSettings, productVideos: nextVideos };
       setToddSettings(nextSettings);
@@ -1645,6 +1650,9 @@ export function CatalogoPage() {
                         placeholder="Ej. Mini Masajeador Cervical EMS"
                         className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs font-medium outline-none focus:border-[var(--ac)]"
                       />
+                      <span className="text-[10px] tx-mu mt-1 block">
+                        Todd y los mensajes de video usan este nombre tal cual con el cliente.
+                      </span>
                     </div>
                     <div>
                       <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Categoría</label>

@@ -143,7 +143,20 @@ export default async function handler(req: any, res: any) {
     sendVideoAfterImage = true,
   } = req.body || {};
 
-  const messageText = String(text || '').trim();
+  const cleanYouTubeShareUrl = (rawUrl: string) => {
+    const trimmed = String(rawUrl || '').trim();
+    if (!trimmed) return '';
+    const m = trimmed.match(/(?:youtu\.be\/|youtube\.com\/(?:shorts|embed|live)\/|[?&]v=)([A-Za-z0-9_-]{11})/i);
+    if (!m?.[1]) return trimmed;
+    if (/youtube\.com\/shorts\//i.test(trimmed)) return `https://youtube.com/shorts/${m[1]}`;
+    return `https://youtu.be/${m[1]}`;
+  };
+
+  const messageText = String(text || '')
+    .trim()
+    .replace(/https?:\/\/(?:www\.)?(?:youtu\.be\/|youtube\.com\/(?:shorts\/|watch\?[^\s]*))[^\s]*/gi, url =>
+      cleanYouTubeShareUrl(url)
+    );
   const hasExplicitMedia = Boolean(mediaUrl || mediaBase64);
 
   if (!conversationId || (!messageText && !hasExplicitMedia && !productSku)) {
@@ -234,7 +247,7 @@ export default async function handler(req: any, res: any) {
             const parsedCfg = JSON.parse(cfgRes.data.contenido);
             const vids = parsedCfg?.productVideos;
             if (vids && typeof vids === 'object' && vids[skuClean]) {
-              resolvedVideoUrl = String(vids[skuClean]).trim();
+              resolvedVideoUrl = cleanYouTubeShareUrl(String(vids[skuClean]));
             }
           }
         } catch {}
