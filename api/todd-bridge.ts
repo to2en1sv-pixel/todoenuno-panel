@@ -121,10 +121,11 @@ const historyText = (ctx.recentMessages || [])
 
 const st = ctx.state || {};
 const af = ctx.antifraud || {};
+const businessRules = String(ctx.businessRulesText || '').trim();
 
 const systemPrompt = \`Eres Todd, asistente comercial experto en ventas contra entrega (COD) en El Salvador para TODO EN UNO.
 Tu objetivo es HÍBRIDO:
-1) Responder dudas abiertas con amabilidad, brevedad y tono cercano salvadoreño (precios, envíos, colores, tallas, uso) usando ÚNICAMENTE la información real del CATÁLOGO ACTIVO.
+1) Responder dudas abiertas con amabilidad, brevedad y tono cercano salvadoreño (precios, envíos, colores, tallas, uso, horarios, días festivos) usando ÚNICAMENTE la información real del CATÁLOGO ACTIVO y las REGLAS OPERATIVAS DEL NEGOCIO.
 2) Guiar la conversación paso a paso hacia el cierre del pedido recopilando:
    - Producto y variante (color/talla si aplica)
    - Nombre completo
@@ -136,13 +137,16 @@ REGLAS CRÍTICAS:
 - PRIVACIDAD DE INVENTARIO: NUNCA digas al cliente cuántas unidades hay disponibles (prohibido decir "quedan 2", "solo tenemos 1", "hay 3 disponibles", etc.). Confirma únicamente si está disponible y qué colores o tallas hay.
 - VENTA SIN STOCK / BAJO PEDIDO: Si un producto o variante aparece marcado como "Disponible" (incluyendo venta sin stock / bajo pedido habilitada), véndelo y cierra el pedido con normalidad. NUNCA pauses el bot ("escalate_to_human": false) ni rechaces la venta por stock 0 cuando aparezca disponible.
 - Si un producto aparece marcado como "Agotado" o "Agotado temporalmente", indica amablemente que por el momento no está disponible y sugiere opciones similares del catálogo.
-- Envíos en El Salvador: San Salvador y área metropolitana mismo día o siguiente; departamentos 24-48h hábiles.
+- Si existe un AVISO TEMPORAL / DÍA FESTIVO ACTIVO en las reglas operativas, respétalo y comunícalo con prioridad cuando aplique a fechas de entrega o despacho.
 - Si el cliente pide ver fotos o pregunta por un producto por primera vez y TieneFoto = SI, pon "send_product_image": true y "product_sku" con el SKU exacto.
 - VIDEO HOW-TO (YOUTUBE): Si un producto tiene TieneVideo = SI, el video tutorial se envía automáticamente junto con la foto al activar "send_product_image": true. Además, si el cliente pregunta cómo se usa, cómo funciona, cómo se arma o pide video, compártele el enlace de YouTube directamente en "reply_text".
 - Si el cliente te da su número real de 8 dígitos en el chat (útil cuando escribe desde @lid), guárdalo en "customer_phone".
 - RIESGO ANTIFRAUDE DEL CLIENTE ACTUAL: Total pedidos=\${af.totalPedidos || 0}, Entregados=\${af.entregados || 0}, Cancelados=\${af.cancelados || 0}, ListaNegra=\${af.enListaNegra ? 'SI (' + (af.motivoListaNegra || 'Reportado') + ')' : 'NO'}.
   * Si ListaNegra=SI o Cancelados>=2: NO confirmes contra entrega directo; indica amablemente que para procesar su orden se requiere pago anticipado por transferencia o escala a humano ("escalate_to_human": true).
 - Solo pon "create_order_now": true cuando YA tengas confirmados TODOS estos datos: producto/SKU, nombre_cliente, direccion completa y metodo_pago.
+
+REGLAS OPERATIVAS, ENVÍOS Y HORARIOS DEL NEGOCIO:
+\${businessRules || '- Envíos en El Salvador: San Salvador y área metropolitana mismo día o siguiente; departamentos 24-48h hábiles.'}
 
 CATÁLOGO ACTIVO:
 \${catalogLines || 'Sin productos activos.'}
@@ -559,7 +563,7 @@ export default async function handler(req: any, res: any) {
         new Set([p8, p8 ? `503${p8}` : '', String(rawPhone || ''), String(conversationId || '')].filter(Boolean))
       );
 
-      const [convRes, stateRes, msgsRes, stockRes, varsRes, ordersRes, blRes, settingsRes] = await Promise.all([
+      const [convRes, stateRes, msgsRes, stockRes, varsRes, ordersRes, blRes, settingsRes, businessRes] = await Promise.all([
         conversationId
           ? supabase.from('bb_conversations').select('*').eq('id', conversationId).maybeSingle()
           : Promise.resolve({ data: null }),
@@ -606,6 +610,11 @@ export default async function handler(req: any, res: any) {
           .select('contenido')
           .eq('titulo', '__SYSTEM_TODD_CATALOG_SETTINGS_V1__')
           .maybeSingle(),
+        supabase
+          .from('panel_docs')
+          .select('contenido')
+          .eq('titulo', '__SYSTEM_TODD_BUSINESS_SETTINGS_V1__')
+          .maybeSingle(),
       ]);
 
       let toddSettings = {
@@ -642,6 +651,132 @@ export default async function handler(req: any, res: any) {
           };
         }
       } catch {}
+
+      let businessSettings = {
+        deliverySanSalvador: 'Mismo día o siguiente día hábil',
+        deliveryDepartments: '24 a 48 horas hábiles',
+        cutoffTimeNote: 'Pedidos confirmados antes de las 2:00 p. m. salen a ruta el mismo día (lunes a sábado).',
+        shippingCostNote: 'Envío disponible a todo El Salvador (confirmar cobertura exacta según municipio).',
+        humanSupportHours: 'Lunes a sábado de 8:00 a. m. a 6:00 p. m.',
+        couriers: [
+          {
+            id: 'courier-local',
+            name: 'Motorista propio',
+            zones: 'San Salvador, Santa Tecla, Antiguo Cuscatlán, Soyapango y AMSS',
+            active: true,
+          },
+          {
+            id: 'courier-depto',
+            name: 'Courier departamental / Encomienda',
+            zones: 'Santa Ana, San Miguel, Sonsonate, La Libertad, Usulután y resto del país',
+            active: true,
+          },
+        ],
+        holidayModeEnabled: false,
+        holidayStartDate: '',
+        holidayEndDate: '',
+        holidayMessage: '',
+        paymentMethodsNote: 'Contra entrega en efectivo al recibir o transferencia bancaria.',
+        bankTransferInfo: '',
+        warrantyNote: '7 días de garantía por defectos de fábrica.',
+        extraRules: '',
+      };
+
+      try {
+        if (businessRes?.data?.contenido) {
+          const b = JSON.parse(businessRes.data.contenido);
+          if (b && typeof b === 'object') {
+            businessSettings = {
+              deliverySanSalvador: String(b.deliverySanSalvador ?? businessSettings.deliverySanSalvador).trim(),
+              deliveryDepartments: String(b.deliveryDepartments ?? businessSettings.deliveryDepartments).trim(),
+              cutoffTimeNote: String(b.cutoffTimeNote ?? businessSettings.cutoffTimeNote).trim(),
+              shippingCostNote: String(b.shippingCostNote ?? businessSettings.shippingCostNote).trim(),
+              humanSupportHours: String(b.humanSupportHours ?? businessSettings.humanSupportHours).trim(),
+              couriers: Array.isArray(b.couriers)
+                ? b.couriers
+                    .map((c: any, idx: number) => ({
+                      id: String(c?.id || `courier-${idx + 1}`),
+                      name: String(c?.name || '').trim(),
+                      zones: String(c?.zones || '').trim(),
+                      active: c?.active !== false,
+                    }))
+                    .filter((c: any) => c.name.length > 0)
+                : businessSettings.couriers,
+              holidayModeEnabled: Boolean(b.holidayModeEnabled),
+              holidayStartDate: String(b.holidayStartDate || '').trim().slice(0, 10),
+              holidayEndDate: String(b.holidayEndDate || '').trim().slice(0, 10),
+              holidayMessage: String(b.holidayMessage || '').trim(),
+              paymentMethodsNote: String(b.paymentMethodsNote ?? businessSettings.paymentMethodsNote).trim(),
+              bankTransferInfo: String(b.bankTransferInfo || '').trim(),
+              warrantyNote: String(b.warrantyNote ?? businessSettings.warrantyNote).trim(),
+              extraRules: String(b.extraRules || '').trim(),
+            };
+          }
+        }
+      } catch {}
+
+      let svTodayIso = '';
+      try {
+        svTodayIso = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/El_Salvador',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(new Date());
+      } catch {
+        svTodayIso = new Date().toISOString().slice(0, 10);
+      }
+
+      const isHolidayActive =
+        businessSettings.holidayModeEnabled &&
+        businessSettings.holidayMessage.length > 0 &&
+        (!businessSettings.holidayStartDate || svTodayIso >= businessSettings.holidayStartDate) &&
+        (!businessSettings.holidayEndDate || svTodayIso <= businessSettings.holidayEndDate);
+
+      const businessRuleLines: string[] = [];
+      if (isHolidayActive) {
+        const range =
+          businessSettings.holidayStartDate || businessSettings.holidayEndDate
+            ? ` (vigente ${businessSettings.holidayStartDate || '...'} al ${businessSettings.holidayEndDate || '...'})`
+            : '';
+        businessRuleLines.push(`- AVISO TEMPORAL / DÍA FESTIVO ACTIVO${range}: ${businessSettings.holidayMessage}`);
+      }
+      if (businessSettings.deliverySanSalvador) {
+        businessRuleLines.push(`- Tiempos en San Salvador / AMSS: ${businessSettings.deliverySanSalvador}`);
+      }
+      if (businessSettings.deliveryDepartments) {
+        businessRuleLines.push(`- Tiempos en Departamentos: ${businessSettings.deliveryDepartments}`);
+      }
+      if (businessSettings.cutoffTimeNote) {
+        businessRuleLines.push(`- Hora de corte / despachos: ${businessSettings.cutoffTimeNote}`);
+      }
+      if (businessSettings.shippingCostNote) {
+        businessRuleLines.push(`- Costo / cobertura de envío: ${businessSettings.shippingCostNote}`);
+      }
+      const activeCouriersList = businessSettings.couriers.filter(c => c.active && c.name);
+      if (activeCouriersList.length > 0) {
+        businessRuleLines.push(
+          `- Empresas de envío activas: ${activeCouriersList
+            .map(c => (c.zones ? `${c.name} (${c.zones})` : c.name))
+            .join(' | ')}`
+        );
+      }
+      if (businessSettings.humanSupportHours) {
+        businessRuleLines.push(`- Horario de atención humana: ${businessSettings.humanSupportHours}`);
+      }
+      if (businessSettings.paymentMethodsNote) {
+        businessRuleLines.push(`- Métodos de pago: ${businessSettings.paymentMethodsNote}`);
+      }
+      if (businessSettings.bankTransferInfo) {
+        businessRuleLines.push(`- Datos para transferencia: ${businessSettings.bankTransferInfo}`);
+      }
+      if (businessSettings.warrantyNote) {
+        businessRuleLines.push(`- Garantía y cambios: ${businessSettings.warrantyNote}`);
+      }
+      if (businessSettings.extraRules) {
+        businessRuleLines.push(`- Reglas adicionales del negocio: ${businessSettings.extraRules}`);
+      }
+      const businessRulesText = businessRuleLines.join('\n');
 
       const hideExact = toddSettings.hideExactStockCounts !== false;
       const allowGlobal = toddSettings.allowBackorderGlobal;
@@ -740,6 +875,8 @@ export default async function handler(req: any, res: any) {
         shouldReply: convStatus !== 'human',
         canonicalPhone,
         toddSettings,
+        businessSettings,
+        businessRulesText,
         conversation: conversation
           ? {
               id: conversation.id,

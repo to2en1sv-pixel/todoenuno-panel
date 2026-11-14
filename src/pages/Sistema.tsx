@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useProductos } from '@/hooks/useCatalog';
 import { supabase } from '@/lib/supabase';
 import { EventStreamViewer } from '@/components/events/EventStreamViewer';
+import { SistemaToddConfig } from '@/components/SistemaToddConfig';
 import {
   DEFAULT_ORDER_WA_TEMPLATES,
   WA_TEMPLATE_VARIABLES,
@@ -56,10 +57,11 @@ type TableHealth = {
   error?: string;
 };
 
-type SistemaTab = 'plantillas' | 'stream' | 'diagnostico' | 'architecture';
+type SistemaTab = 'plantillas' | 'todd' | 'stream' | 'diagnostico' | 'architecture';
 
 function resolveTabParam(raw: string | null): SistemaTab {
   if (raw === 'plantillas') return 'plantillas';
+  if (raw === 'todd' || raw === 'bot') return 'todd';
   if (raw === 'diagnostico' || raw === 'crons') return 'diagnostico';
   if (raw === 'architecture') return 'architecture';
   if (raw === 'stream') return 'stream';
@@ -359,6 +361,17 @@ export function SistemaPage() {
           >
             <MessageSquare size={14} style={{ color: activeTab === 'plantillas' ? 'var(--ac)' : undefined }} />
             Plantillas WhatsApp
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabChange('todd')}
+            className={`flex-1 lg:flex-none px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'todd' ? 'bg-cd bd' : 'tx-mu hover:text-[var(--tx)]'
+            }`}
+          >
+            <Bot size={14} style={{ color: activeTab === 'todd' ? 'var(--ac)' : undefined }} />
+            Bot Todd
           </button>
 
           <button
@@ -714,6 +727,11 @@ export function SistemaPage() {
           </div>
         </div>
       )}
+
+      {/* ================================================================== */}
+      {/* PESTAÑA 1B: REGLAS OPERATIVAS DE BOT TODD                          */}
+      {/* ================================================================== */}
+      {activeTab === 'todd' && <SistemaToddConfig />}
 
       {/* ================================================================== */}
       {/* PESTAÑA 2: SALUD DEL SISTEMA, TABLAS & CRONS                       */}
