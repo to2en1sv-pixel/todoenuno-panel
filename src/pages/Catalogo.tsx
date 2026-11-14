@@ -22,7 +22,9 @@ import {
   ChevronRight,
   RefreshCw,
   Database,
-  ExternalLink
+  ExternalLink,
+  EyeOff,
+  PackageCheck
 } from 'lucide-react';
 import {
   fetchStockItems,
@@ -36,8 +38,15 @@ import {
   updateProductVariant,
   deleteProductVariant,
   syncVariantsToMasterAndTodd,
-  formatVariantsForTodd
+  formatVariantsForTodd,
+  sanitizeToddInstructionsForPrivacy
 } from '@/lib/inventory';
+import {
+  fetchToddCatalogSettings,
+  saveToddCatalogSettings,
+  getCachedToddCatalogSettings,
+  type ToddCatalogSettings
+} from '@/lib/toddSettings';
 import { ProductImg } from '@/components/inventory/ProductImg';
 import { Sprint10SqlModal } from '@/components/inventory/Sprint10SqlModal';
 import type { StockItem, ProductVariant } from '@/types/inventory';
@@ -156,9 +165,11 @@ export function CatalogoPage() {
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [showUrlInput, setShowUrlInput] = useState(false);
 
-  // Simulador de Todd Bot
+  // Simulador de Todd Bot y Reglas Globales de Stock / Privacidad
   const [simRespuesta, setSimRespuesta] = useState('');
   const [isSimulating, setIsSimulating] = useState(false);
+  const [toddSettings, setToddSettings] = useState<ToddCatalogSettings>(() => getCachedToddCatalogSettings());
+  const [savingToddSettings, setSavingToddSettings] = useState(false);
 
   // Formulario Nuevo Producto
   const [prodNombre, setProdNombre] = useState('');
@@ -212,6 +223,9 @@ export function CatalogoPage() {
 
   useEffect(() => {
     loadCatalogData();
+    fetchToddCatalogSettings().then(res => {
+      setToddSettings(res.settings);
+    });
   }, []);
 
   // UNIFICAR CATÁLOGO VISUAL: inventory_stock + public.productos sin duplicados
@@ -443,10 +457,76 @@ export function CatalogoPage() {
     [productVariants]
   );
 
-  const toddVariantsPreview = useMemo(
-    () => formatVariantsForTodd(productVariants, parseFloat(editPrecio || '0') || selectedItem?.precio_venta || 0),
-    [productVariants, editPrecio, selectedItem?.precio_venta]
+  const backorderSkuSet = useMemo(
+    () => new Set(toddSettings.backorderSkus.map(s => s.toUpperCase())),
+    [toddSettings.backorderSkus]
   );
+
+  const isSelectedBackorderEnabled = useMemo(() => {
+    if (!selectedItem) return false;
+    return toddSettings.allowBackorderGlobal || backorderSkuSet.has(selectedItem.sku.toUpperCase());
+  }, [selectedItem, toddSettings.allowBackorderGlobal, backorderSkuSet]);
+
+  const toddVariantsPreview = useMemo(
+    () =>
+      formatVariantsForTodd(
+        productVariants,
+        parseFloat(editPrecio || '0') || selectedItem?.precio_venta || 0,
+        {
+          allowBackorder: isSelectedBackorderEnabled,
+          hideExactCounts: toddSettings.hideExactStockCounts
+        }
+      ),
+    [productVariants, editPrecio, selectedItem?.precio_venta, isSelectedBackorderEnabled, toddSettings.hideExactStockCounts]
+  );
+
+  const persistToddSettings = async (next: ToddCatalogSettings, feedbackMsg: string) => {
+    setToddSettings(next);
+    setSavingToddSettings(true);
+    const res = await saveToddCatalogSettings(next);
+    setSavingToddSettings(false);
+    if (res.source === 'supabase') {
+      showToast('ok', feedbackMsg);
+    } else {
+      showToast('ok', `${feedbackMsg} (guardado local; verifica conexión si no sincroniza)`);
+    }
+  };
+
+  const handleToggleGlobalBackorder = async () => {
+    const nextVal = !toddSettings.allowBackorderGlobal;
+    await persistToddSettings(
+      { ...toddSettings, allowBackorderGlobal: nextVal },
+      nextVal
+        ? 'Venta sin stock GLOBAL activada: Todd no pausará ni rechazará productos en 0 uds.'
+        : 'Venta sin stock GLOBAL desactivada (se respetará stock físico salvo productos bajo pedido).'
+    );
+  };
+
+  const handleToggleHideExactStockCounts = async () => {
+    const nextVal = !toddSettings.hideExactStockCounts;
+    await persistToddSettings(
+      { ...toddSettings, hideExactStockCounts: nextVal },
+      nextVal
+        ? 'Privacidad activada: Bot Todd nunca revelará cuántas unidades disponibles quedan.'
+        : 'Privacidad desactivada: Bot Todd podrá mencionar cantidades exactas si aplica.'
+    );
+  };
+
+  const handleToggleSkuBackorder = async (sku: string) => {
+    const skuClean = sku.trim().toUpperCase();
+    if (!skuClean) return;
+    const exists = backorderSkuSet.has(skuClean);
+    const nextSkus = exists
+      ? toddSettings.backorderSkus.filter(s => s.toUpperCase() !== skuClean)
+      : [...toddSettings.backorderSkus, skuClean];
+
+    await persistToddSettings(
+      { ...toddSettings, backorderSkus: nextSkus },
+      exists
+        ? `Venta sin stock desactivada para ${skuClean}.`
+        : `Venta sin stock (bajo pedido) activada para ${skuClean}: Todd seguirá vendiéndolo aunque esté en 0.`
+    );
+  };
 
   const refreshAfterVariantChange = async (masterSku: string) => {
     const [, freshStock] = await Promise.all([variantes.refetch(), fetchStockItems(), productos.refetch()]);
@@ -616,10 +696,12 @@ export function CatalogoPage() {
       productName: editNombre.trim() || selectedItem.nombre,
       basePrice: parseFloat(editPrecio || '0') || selectedItem.precio_venta,
       syncMasterStock: syncMasterWithVariants,
-      syncToddDetails: true
+      syncToddDetails: true,
+      allowBackorder: isSelectedBackorderEnabled,
+      hideExactCounts: toddSettings.hideExactStockCounts
     });
     setIsSavingVariant(false);
-    showToast('ok', 'Colores, tallas y stock sincronizados con Bot Todd y Bodega.');
+    showToast('ok', 'Colores, tallas y disponibilidad sincronizados con Bot Todd y Bodega.');
     await refreshAfterVariantChange(selectedItem.sku);
   };
 
@@ -736,22 +818,33 @@ export function CatalogoPage() {
     if (!selectedItem) return;
     setIsSimulating(true);
 
+    const hideCounts = toddSettings.hideExactStockCounts;
+    const allowBackorder = isSelectedBackorderEnabled;
     const pitch = editToddPitch || 'Es un producto de alta calidad disponible para entrega inmediata.';
-    const reglas = editToddInstrucciones ? `\n(Regla del bot: ${editToddInstrucciones})` : '';
+    const rawInstr = hideCounts ? sanitizeToddInstructionsForPrivacy(editToddInstrucciones) : editToddInstrucciones;
+    const reglas = rawInstr ? `\n(Regla del bot: ${rawInstr})` : '';
     const precio = editPrecio ? `$${parseFloat(editPrecio).toFixed(2)}` : '$25.00';
 
-    const disponiblesVars = productVariants.filter(v => v.estado !== 'PAUSADO' && v.stock > 0);
+    const disponiblesVars = productVariants.filter(
+      v => v.estado !== 'PAUSADO' && (v.stock > 0 || allowBackorder)
+    );
     const variantesTxt = disponiblesVars.length > 0
-      ? `\n\n🎨 *Colores / Tallas disponibles:*\n` +
+      ? `\n\n🎨 *Opciones disponibles:*\n` +
         disponiblesVars
           .map(v => {
             const label = [v.color, v.talla && v.talla !== 'Única' ? `Talla ${v.talla}` : ''].filter(Boolean).join(' · ');
-            return `• ${label}: ${v.stock} disp.`;
+            return hideCounts ? `• ${label}: Disponible` : `• ${label}: ${v.stock} disp.`;
           })
           .join('\n')
       : '';
 
     const totalUds = disponiblesVars.length > 0 ? totalVariantsStock : selectedItem.stock_disponible;
+    const isProductSellable = totalUds > 0 || allowBackorder;
+    const availabilityLine = !isProductSellable
+      ? '⏳ *Estado:* Agotado temporalmente (te aviso cuando ingrese).'
+      : hideCounts
+        ? '📦 *Disponibilidad:* Disponible para envío en 24-48 horas.'
+        : `📦 *Disponibilidad total:* Tenemos ${totalUds} uds listas para envío en 24-48 horas.`;
 
     setTimeout(() => {
       setSimRespuesta(
@@ -759,7 +852,7 @@ export function CatalogoPage() {
           `${pitch}\n\n` +
           `💰 *Precio especial:* ${precio} USD con pago contra entrega en todo El Salvador 🇸🇻.` +
           `${variantesTxt}\n` +
-          `📦 *Disponibilidad total:* Tenemos ${totalUds} uds listas para envío en 24-48 horas.${reglas}\n\n` +
+          `${availabilityLine}${reglas}\n\n` +
           `¿Qué color o talla te gustaría pedir y a qué dirección te lo enviamos? 📲`
       );
       setIsSimulating(false);
@@ -1090,6 +1183,70 @@ export function CatalogoPage() {
         </div>
       </div>
 
+      {/* Controles Globales de Bot Todd (Venta sin Stock y Privacidad de Unidades) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 bg-cd p-3.5 rounded-2xl border border-[var(--bd)]">
+        <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-sf border border-[var(--bd)]">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <div className="p-2 rounded-lg bg-purple-500/15 text-purple-500 shrink-0 mt-0.5">
+              <PackageCheck size={16} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-[var(--tx)]">Vender productos sin stock (Global)</span>
+                {!toddSettings.allowBackorderGlobal && toddSettings.backorderSkus.length > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/25">
+                    {toddSettings.backorderSkus.length} por producto
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] tx-mu mt-0.5 leading-snug">
+                Permite que Todd siga vendiendo y cerrando pedidos aunque el producto o variante esté en 0 uds, sin pausar el bot.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={savingToddSettings}
+            onClick={handleToggleGlobalBackorder}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-colors border ${
+              toddSettings.allowBackorderGlobal
+                ? 'bg-purple-600 text-white border-purple-500 shadow-sm'
+                : 'bg-cd border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
+            }`}
+          >
+            {toddSettings.allowBackorderGlobal ? '✓ Activo Global' : 'Solo por SKU'}
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-sf border border-[var(--bd)]">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <div className="p-2 rounded-lg bg-emerald-500/15 text-emerald-500 shrink-0 mt-0.5">
+              <EyeOff size={16} />
+            </div>
+            <div className="min-w-0">
+              <span className="text-xs font-bold text-[var(--tx)] block">
+                Ocultar unidades disponibles al cliente
+              </span>
+              <p className="text-[11px] tx-mu mt-0.5 leading-snug">
+                Todd confirma disponibilidad, colores y tallas, pero nunca revela cuántas unidades exactas quedan en bodega.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={savingToddSettings}
+            onClick={handleToggleHideExactStockCounts}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-colors border ${
+              toddSettings.hideExactStockCounts
+                ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                : 'bg-cd border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
+            }`}
+          >
+            {toddSettings.hideExactStockCounts ? '✓ Oculto' : 'Visible'}
+          </button>
+        </div>
+      </div>
+
       {/* GRID VISUAL DEL CATÁLOGO */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         {loadingNative && filteredCatalog.length === 0 && (
@@ -1144,14 +1301,26 @@ export function CatalogoPage() {
                     </span>
                   </div>
 
-                  {/* Badge de Todd Bot */}
-                  {hasToddPitch && (
-                    <div className="absolute bottom-2 left-2" title="Entrenado para Bot Todd (WhatsApp)">
-                      <span className="p-1 rounded-md bg-purple-600 text-white text-[10px] font-bold shadow flex items-center gap-0.5">
+                  {/* Badge de Todd Bot y Venta Bajo Pedido */}
+                  <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-1 pointer-events-none">
+                    {hasToddPitch ? (
+                      <span
+                        className="p-1 rounded-md bg-purple-600 text-white text-[10px] font-bold shadow flex items-center gap-0.5"
+                        title="Entrenado para Bot Todd (WhatsApp)"
+                      >
                         <Bot size={11} />
                       </span>
-                    </div>
-                  )}
+                    ) : <span />}
+                    {item.stock_disponible <= 0 &&
+                      (toddSettings.allowBackorderGlobal || backorderSkuSet.has(item.sku.toUpperCase())) && (
+                        <span
+                          className="px-1.5 py-0.5 rounded-md bg-purple-600/95 text-white text-[9px] font-bold shadow border border-purple-400/50"
+                          title="Bot Todd puede vender este producto aunque esté en 0 uds"
+                        >
+                          Bajo pedido
+                        </span>
+                      )}
+                  </div>
                 </div>
 
                 <div className="mt-3">
@@ -1499,25 +1668,32 @@ export function CatalogoPage() {
                         Sin variantes aún. Agrega colores o tallas en la pestaña <strong>Variantes</strong> para que Todd indique opciones y stock exacto.
                       </p>
                     ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {productVariants.map(v => (
-                          <span
-                            key={v.variante_id}
-                            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-semibold ${
-                              v.stock > 0
-                                ? 'bg-cd border-[var(--bd)] text-[var(--tx)]'
-                                : 'bg-rose-500/5 border-rose-500/20 text-rose-500'
-                            }`}
-                          >
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap gap-1.5">
+                          {productVariants.map(v => (
                             <span
-                              className="w-2.5 h-2.5 rounded-full border border-black/20 shrink-0"
-                              style={{ backgroundColor: getColorHex(v.color) }}
-                            />
-                            {v.color}
-                            {v.talla && v.talla !== 'Única' ? ` · ${v.talla}` : ''}:{' '}
-                            <strong className="font-mono">{v.stock}</strong>
-                          </span>
-                        ))}
+                              key={v.variante_id}
+                              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-semibold ${
+                                v.stock > 0 || isSelectedBackorderEnabled
+                                  ? 'bg-cd border-[var(--bd)] text-[var(--tx)]'
+                                  : 'bg-rose-500/5 border-rose-500/20 text-rose-500'
+                              }`}
+                            >
+                              <span
+                                className="w-2.5 h-2.5 rounded-full border border-black/20 shrink-0"
+                                style={{ backgroundColor: getColorHex(v.color) }}
+                              />
+                              {v.color}
+                              {v.talla && v.talla !== 'Única' ? ` · ${v.talla}` : ''}:{' '}
+                              <strong className="font-mono">{v.stock}</strong>
+                            </span>
+                          ))}
+                        </div>
+                        {toddSettings.hideExactStockCounts && (
+                          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                            Privacidad activa: al cliente solo se le dirá &quot;Disponible&quot;, nunca las cantidades exactas.
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1535,6 +1711,37 @@ export function CatalogoPage() {
                       }`}
                     >
                       {editActivoTodd ? '✓ Habilitado' : '✕ Deshabilitado'}
+                    </button>
+                  </div>
+
+                  <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-center justify-between gap-3">
+                    <div>
+                      <span className="text-xs font-bold text-[var(--tx)] block">
+                        Vender sin stock (Bajo pedido)
+                      </span>
+                      <span className="text-[10px] tx-mu block">
+                        {toddSettings.allowBackorderGlobal
+                          ? 'Activo automáticamente por la regla Global del catálogo.'
+                          : 'Todd venderá este producto aunque tenga 0 uds sin pausar el chat.'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={savingToddSettings}
+                      onClick={() => handleToggleSkuBackorder(selectedItem.sku)}
+                      className={`px-3 py-1 rounded-full text-xs font-bold transition-colors shrink-0 ${
+                        backorderSkuSet.has(selectedItem.sku.toUpperCase())
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : toddSettings.allowBackorderGlobal
+                          ? 'bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/30'
+                          : 'bg-cd border border-[var(--bd)] tx-mu'
+                      }`}
+                    >
+                      {backorderSkuSet.has(selectedItem.sku.toUpperCase())
+                        ? '✓ Bajo pedido'
+                        : toddSettings.allowBackorderGlobal
+                        ? '✓ Global'
+                        : 'Solo con stock'}
                     </button>
                   </div>
 

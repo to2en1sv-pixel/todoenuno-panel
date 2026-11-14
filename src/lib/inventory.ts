@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { emitOsEvent } from '@/lib/osEvents';
 import { addManualTransaction } from '@/lib/finance';
 import { resolveCatalogSku, getInventoryCutoffDate, isOrderBeforeCutoff } from '@/lib/catalogAliases';
+import { getCachedToddCatalogSettings } from '@/lib/toddSettings';
 import type { 
   StockItem, 
   KardexMovement, 
@@ -1639,9 +1640,17 @@ export function stripVariantToddBlock(text: string | null | undefined): string {
 /**
  * Genera el resumen legible de colores, tallas, precios y stock para Bot Todd y palabras clave.
  */
+export function sanitizeToddInstructionsForPrivacy(raw?: string | null): string {
+  if (!raw) return '';
+  return raw
+    .replace(/:\s*\d+\s*uds\b/gi, ': Disponible')
+    .replace(/\b\d+\s*uds\b/gi, 'Disponible');
+}
+
 export function formatVariantsForTodd(
   variants: ProductVariant[],
-  basePrice = 0
+  basePrice = 0,
+  options?: { allowBackorder?: boolean; hideExactCounts?: boolean }
 ): {
   summaryBlock: string;
   bulletLines: string[];
@@ -1650,6 +1659,8 @@ export function formatVariantsForTodd(
 } {
   const activeVars = variants.filter(v => v.estado !== 'PAUSADO');
   const totalStock = activeVars.reduce((acc, v) => acc + Math.max(Number(v.stock) || 0, 0), 0);
+  const hideCounts = options?.hideExactCounts !== false;
+  const allowBackorder = Boolean(options?.allowBackorder);
 
   if (activeVars.length === 0) {
     return { summaryBlock: '', bulletLines: [], keywordsExtra: [], totalStock: 0 };
@@ -1668,7 +1679,9 @@ export function formatVariantsForTodd(
     const qty = Math.max(Number(v.stock) || 0, 0);
     const price = Number(v.precio) > 0 ? Number(v.precio) : basePrice;
     const priceTag = price > 0 ? ` ($${price.toFixed(2)})` : '';
-    return qty > 0 ? `${label}: ${qty} uds${priceTag}` : `${label}: AGOTADO`;
+    const isAvailable = qty > 0 || allowBackorder;
+    if (!isAvailable) return `${label}: Agotado`;
+    return hideCounts ? `${label}: Disponible${priceTag}` : `${label}: ${qty} uds${priceTag}`;
   });
 
   const summaryBlock = `${TODD_VARIANTS_MARKER} ${bulletLines.join(' | ')}`;
@@ -1808,6 +1821,8 @@ export async function syncVariantsToMasterAndTodd(params: {
   basePrice?: number;
   syncMasterStock?: boolean;
   syncToddDetails?: boolean;
+  allowBackorder?: boolean;
+  hideExactCounts?: boolean;
 }): Promise<{ variants: ProductVariant[]; totalStock: number }> {
   const masterSkuClean = normalizeSku(params.masterSku);
   const variants = await fetchProductVariants(params.templateId);
@@ -1863,9 +1878,15 @@ export async function syncVariantsToMasterAndTodd(params: {
       const baseInstr = stripVariantToddBlock(
         stockRow?.todd_instrucciones ?? localCfg.todd_instrucciones ?? ''
       );
+      const toddCfg = getCachedToddCatalogSettings();
+      const allowBackorder =
+        params.allowBackorder ??
+        (toddCfg.allowBackorderGlobal || toddCfg.backorderSkus.includes(masterSkuClean));
+      const hideExactCounts = params.hideExactCounts ?? toddCfg.hideExactStockCounts;
       const formatted = formatVariantsForTodd(
         variants,
-        params.basePrice ?? Number(stockRow?.precio_venta || 0)
+        params.basePrice ?? Number(stockRow?.precio_venta || 0),
+        { allowBackorder, hideExactCounts }
       );
 
       const nextInstrucciones = formatted.summaryBlock

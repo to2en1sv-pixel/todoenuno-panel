@@ -90,11 +90,22 @@ return valid;`;
 
   const promptCode = `const incoming = $('2. Normalizar Entrada').first().json;
 const ctx = $('3. Cargar Contexto Todd (Panel)').first().json;
+const hideCounts = ctx.toddSettings?.hideExactStockCounts !== false;
 
 const catalogLines = (ctx.catalog || []).map((p, idx) => {
   const vars = Array.isArray(p.variantes) && p.variantes.length > 0
-    ? p.variantes.map(v => \`\${v.color}\${v.talla && v.talla !== 'Única' ? ' Talla ' + v.talla : ''}: \${v.stock} uds ($\${Number(v.precio || p.precio).toFixed(2)})\`).join(' | ')
-    : \`Stock general: \${p.stockDisponible} uds\`;
+    ? p.variantes.map(v => {
+        const label = \`\${v.color}\${v.talla && v.talla !== 'Única' ? ' Talla ' + v.talla : ''}\`;
+        const stLabel = v.disponible === false
+          ? 'Agotado'
+          : (hideCounts ? 'Disponible' : \`\${v.stock} uds\`);
+        return \`\${label}: \${stLabel} ($\${Number(v.precio || p.precio).toFixed(2)})\`;
+      }).join(' | ')
+    : (p.disponible === false
+        ? 'Agotado temporalmente'
+        : (hideCounts
+            ? (p.bajoPedido ? 'Disponible (venta sin stock / bajo pedido habilitada)' : 'Disponible')
+            : \`Stock general: \${p.stockDisponible} uds\`));
   return [
     \`\${idx + 1}. SKU: \${p.sku} | Nombre: \${p.nombre} | Precio: $\${Number(p.precio || 0).toFixed(2)} | TieneFoto: \${p.tieneFoto ? 'SI' : 'NO'}\`,
     \`   Disponibilidad: \${vars}\`,
@@ -122,6 +133,9 @@ Tu objetivo es HÍBRIDO:
 
 REGLAS CRÍTICAS:
 - NUNCA inventes productos, precios, colores ni stock fuera del catálogo.
+- PRIVACIDAD DE INVENTARIO: NUNCA digas al cliente cuántas unidades hay disponibles (prohibido decir "quedan 2", "solo tenemos 1", "hay 3 disponibles", etc.). Confirma únicamente si está disponible y qué colores o tallas hay.
+- VENTA SIN STOCK / BAJO PEDIDO: Si un producto o variante aparece marcado como "Disponible" (incluyendo venta sin stock / bajo pedido habilitada), véndelo y cierra el pedido con normalidad. NUNCA pauses el bot ("escalate_to_human": false) ni rechaces la venta por stock 0 cuando aparezca disponible.
+- Si un producto aparece marcado como "Agotado" o "Agotado temporalmente", indica amablemente que por el momento no está disponible y sugiere opciones similares del catálogo.
 - Envíos en El Salvador: San Salvador y área metropolitana mismo día o siguiente; departamentos 24-48h hábiles.
 - Si el cliente pide ver fotos o pregunta por un producto por primera vez y TieneFoto = SI, pon "send_product_image": true y "product_sku" con el SKU exacto.
 - Si el cliente te da su número real de 8 dígitos en el chat (útil cuando escribe desde @lid), guárdalo en "customer_phone".
@@ -544,7 +558,7 @@ export default async function handler(req: any, res: any) {
         new Set([p8, p8 ? `503${p8}` : '', String(rawPhone || ''), String(conversationId || '')].filter(Boolean))
       );
 
-      const [convRes, stateRes, msgsRes, stockRes, varsRes, ordersRes, blRes] = await Promise.all([
+      const [convRes, stateRes, msgsRes, stockRes, varsRes, ordersRes, blRes, settingsRes] = await Promise.all([
         conversationId
           ? supabase.from('bb_conversations').select('*').eq('id', conversationId).maybeSingle()
           : Promise.resolve({ data: null }),
@@ -586,7 +600,42 @@ export default async function handler(req: any, res: any) {
               .ilike('telefono', `%${p8}%`)
               .limit(1)
           : Promise.resolve({ data: [] }),
+        supabase
+          .from('panel_docs')
+          .select('contenido')
+          .eq('titulo', '__SYSTEM_TODD_CATALOG_SETTINGS_V1__')
+          .maybeSingle(),
       ]);
+
+      let toddSettings = {
+        allowBackorderGlobal: false,
+        backorderSkus: [] as string[],
+        hideExactStockCounts: true,
+      };
+      try {
+        if (settingsRes?.data?.contenido) {
+          const parsedCfg = JSON.parse(settingsRes.data.contenido);
+          toddSettings = {
+            allowBackorderGlobal: Boolean(parsedCfg.allowBackorderGlobal),
+            backorderSkus: Array.isArray(parsedCfg.backorderSkus)
+              ? parsedCfg.backorderSkus.map((s: any) => String(s || '').trim().toUpperCase()).filter(Boolean)
+              : [],
+            hideExactStockCounts: parsedCfg.hideExactStockCounts !== false,
+          };
+        }
+      } catch {}
+
+      const hideExact = toddSettings.hideExactStockCounts !== false;
+      const allowGlobal = toddSettings.allowBackorderGlobal;
+      const backorderSkuSet = new Set(toddSettings.backorderSkus);
+
+      const scrubStockNumbers = (txt?: string | null) => {
+        if (!txt) return '';
+        if (!hideExact) return txt;
+        return txt
+          .replace(/:\s*\d+\s*uds\b/gi, ': Disponible')
+          .replace(/\b\d+\s*uds\b/gi, 'Disponible');
+      };
 
       const conversation = convRes.data || null;
       const convStatus = conversation?.status ? String(conversation.status) : 'bot';
@@ -597,27 +646,58 @@ export default async function handler(req: any, res: any) {
       const catalog = (stockRes.data || [])
         .filter((item: any) => item.activo !== false && item.activo_todd !== false)
         .map((item: any) => {
+          const skuUpper = String(item.sku || '').trim().toUpperCase();
+          const allowBackorder = allowGlobal || backorderSkuSet.has(skuUpper);
+          const rawStock = Number(item.stock_disponible || 0);
+
           const itemVars = item.template_id
             ? activeVariants
                 .filter((v: any) => String(v.template_id) === String(item.template_id))
-                .map((v: any) => ({
-                  sku: v.sku,
-                  color: v.color,
-                  talla: v.talla,
-                  stock: Number(v.stock || 0),
-                  precio: Number(v.precio || item.precio_venta || 0),
-                }))
+                .map((v: any) => {
+                  const varRealStock = Number(v.stock || 0);
+                  const varDisponible = varRealStock > 0 || allowBackorder;
+                  return {
+                    sku: v.sku,
+                    color: v.color,
+                    talla: v.talla,
+                    disponible: varDisponible,
+                    stock: hideExact ? (varDisponible ? 'Disponible' : 'Agotado') : varRealStock,
+                    precio: Number(v.precio || item.precio_venta || 0),
+                  };
+                })
             : [];
+
+          const hasAvailableVar = itemVars.some((v: any) => v.disponible);
+          const prodDisponible = rawStock > 0 || hasAvailableVar || allowBackorder;
+          const isBackorderActive = allowBackorder && rawStock <= 0;
+
+          const baseInstr = scrubStockNumbers(item.todd_instrucciones);
+          const extraDirectives: string[] = [];
+          if (hideExact) {
+            extraDirectives.push('NUNCA digas al cliente cuántas unidades disponibles hay.');
+          }
+          if (isBackorderActive) {
+            extraDirectives.push('VENTA SIN STOCK HABILITADA: disponible bajo pedido, toma la orden sin pausar ni escalar.');
+          }
+          const combinedInstr = [baseInstr, ...extraDirectives].filter(Boolean).join(' | ');
 
           return {
             sku: item.sku,
             nombre: item.nombre,
             precio: Number(item.precio_venta || 0),
-            stockDisponible: Number(item.stock_disponible || 0),
+            disponible: prodDisponible,
+            bajoPedido: isBackorderActive,
+            stockDisponible: hideExact
+              ? prodDisponible
+                ? isBackorderActive
+                  ? 'Disponible (venta sin stock permitida — NO pausar)'
+                  : 'Disponible (NO revelar cantidad)'
+                : 'Agotado temporalmente'
+              : rawStock,
             tieneFoto: Boolean(item.image_url),
             categoria: item.categoria || null,
             pitch: item.todd_pitch || null,
-            instrucciones: item.todd_instrucciones || null,
+            instrucciones: combinedInstr || null,
             keywords: item.todd_keywords || null,
             variantes: itemVars,
           };
@@ -632,6 +712,7 @@ export default async function handler(req: any, res: any) {
         ok: true,
         shouldReply: convStatus !== 'human',
         canonicalPhone,
+        toddSettings,
         conversation: conversation
           ? {
               id: conversation.id,
