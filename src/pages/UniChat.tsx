@@ -20,6 +20,7 @@ import {
   cleanPhone,
 } from '@/lib/blacklist';
 import PedidoModal from '@/components/PedidoModal';
+import { UniChatStats } from '@/components/UniChatStats';
 import type { StockItem, ProductVariant } from '@/types/inventory';
 import {
   Send,
@@ -53,6 +54,7 @@ import {
   Eye,
   UserX,
   Package,
+  BarChart3,
 } from 'lucide-react';
 
 type Conversation = {
@@ -200,6 +202,7 @@ export function UniChatPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  const [subView, setSubView] = useState<'chats' | 'stats'>('chats');
   const [search, setSearch] = useState('');
   const [modeFilter, setModeFilter] = useState<'all' | 'unread' | 'bot' | 'human'>('all');
   const [hideLegacy, setHideLegacy] = useState(true);
@@ -1028,6 +1031,26 @@ export function UniChatPage() {
       )}
 
       <div className="flex flex-col lg:flex-row flex-1 min-h-0 min-w-0 w-full bg-cd border-0 lg:border lg:border-[var(--bd)] rounded-none lg:rounded-2xl overflow-hidden shadow-sm">
+        {subView === 'stats' ? (
+          <UniChatStats
+            conversations={conversations}
+            allOrders={allOrders}
+            lastMsgFromMeMap={lastMsgFromMeMap}
+            hideLegacy={hideLegacy}
+            legacyCount={legacyCount}
+            onToggleHideLegacy={() => setHideLegacy(v => !v)}
+            onBackToChats={filter => {
+              if (filter) {
+                setModeFilter(filter);
+                setSelectedConv(null);
+                setMobileShowContext(false);
+              }
+              setSubView('chats');
+            }}
+            onRefreshAll={() => loadConversations(true)}
+          />
+        ) : (
+          <>
         {/* 1. COLUMNA IZQUIERDA: BANDEJA INTELIGENTE */}
         <div
           className={`w-full lg:w-[265px] xl:w-[300px] shrink-0 lg:border-r border-[var(--bd)] flex-col min-h-0 ${
@@ -1035,15 +1058,30 @@ export function UniChatPage() {
           }`}
         >
           <div className="p-3 sm:p-3.5 border-b border-[var(--bd)] bg-sf space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <MessageSquare size={17} className="text-emerald-500" />
-                <h2 className="font-black text-sm tracking-tight">UniChat</h2>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                  Evolution 2.3
-                </span>
+            <div className="flex items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <MessageSquare size={16} className="text-emerald-500 shrink-0" />
+                <h2 className="font-black text-sm tracking-tight whitespace-nowrap">UniChat</h2>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center p-0.5 rounded-lg bg-cd border border-[var(--bd)]">
+                  <button
+                    type="button"
+                    onClick={() => setSubView('chats')}
+                    className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[var(--tx)] text-[var(--cd)] whitespace-nowrap shrink-0"
+                  >
+                    Chats
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubView('stats')}
+                    title="Ver estadísticas de conversaciones y Bot Todd"
+                    className="px-2 py-0.5 rounded-md text-[10px] font-bold tx-mu hover:text-[var(--tx)] flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
+                  >
+                    <BarChart3 size={11} />
+                    <span>Stats</span>
+                  </button>
+                </div>
                 {legacyCount > 0 && (
                   <button
                     type="button"
@@ -1946,6 +1984,8 @@ export function UniChatPage() {
               )}
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
 
