@@ -918,7 +918,7 @@ export function UniChatPage() {
   }, [selectedConv, whatsappState, selectedPhone8, detectedAdTag]);
 
   return (
-    <div className="flex flex-col gap-2 lg:gap-3 -mx-4 -mt-6 -mb-4 lg:mx-0 lg:mt-0 lg:mb-0 h-[calc(100dvh-56px)] lg:h-[calc(100dvh-48px)] min-h-[480px] lg:min-h-[520px] w-auto lg:w-full min-w-0">
+    <div className="flex flex-col gap-2 lg:gap-3 -mx-4 -mt-6 -mb-20 lg:mx-0 lg:mt-0 lg:mb-0 h-[calc(100dvh-116px-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-48px)] min-h-[420px] lg:min-h-[520px] w-auto lg:w-full min-w-0">
       {/* Notificación inline */}
       {banner && (
         <div

@@ -1,49 +1,93 @@
 import { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { 
-  MessageSquare, 
-  Wallet, 
-  Menu, 
-  X, 
-  Moon, 
-  Sun, 
-  Store, 
-  FileText, 
+import {
+  LayoutDashboard,
+  MessageSquare,
+  Wallet,
+  Menu,
+  X,
+  Moon,
+  Sun,
+  Store,
+  FileText,
   ClipboardList,
-  TrendingUp, // Rentabilidad
-  PieChart,   // Analítica
-  Megaphone,  // Pricing & Promo Studio
-  Inbox,      // <-- NUEVO ICONO PARA SOCIAL INBOX
-  Activity,   // <-- OS Event Stream (Sprint 1)
+  TrendingUp,
+  PieChart,
+  Megaphone,
+  Inbox,
+  Activity,
   Server,
   Tag,
   Boxes,
-  Zap
+  Zap,
+  ListChecks,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { PWAInstallButton } from '@/components/pwa/PWAComponents';
 
-const links = [
-  { to: '/', label: 'Hoy' },
+type NavItem = {
+  to: string;
+  matchPaths?: string[];
+  label: string;
+  icon: typeof LayoutDashboard;
+};
+
+type NavGroup = {
+  title: string;
+  items: NavItem[];
+};
+
+const navGroups: NavGroup[] = [
+  {
+    title: 'Operación',
+    items: [
+      { to: '/', label: 'Hoy', icon: LayoutDashboard },
+      { to: '/unichat', label: 'UniChat', icon: MessageSquare },
+      { to: '/pedidos', label: 'Pedidos', icon: ClipboardList },
+      { to: '/social-inbox', label: 'Social Inbox', icon: Inbox },
+      { to: '/cola', label: 'Cola', icon: ListChecks },
+    ],
+  },
+  {
+    title: 'Producto & Bodega',
+    items: [
+      { to: '/catalogo', label: 'Catálogo Visual', icon: Tag },
+      { to: '/inventario', label: 'Inventario & Kárdex', icon: Boxes },
+      { to: '/proveedores', label: 'Proveedores', icon: Store },
+    ],
+  },
+  {
+    title: 'Finanzas & Ventas',
+    items: [
+      { to: '/finanzas', matchPaths: ['/finanzas', '/pagos'], label: 'Finanzas & Budget', icon: Wallet },
+      { to: '/rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
+      { to: '/analitica', label: 'Analítica', icon: PieChart },
+      { to: '/ltv', label: 'Fidelización & LTV', icon: Zap },
+      { to: '/marketing', label: 'Pricing & Promo', icon: Megaphone },
+    ],
+  },
+  {
+    title: 'Sistema',
+    items: [
+      { to: '/event-stream', matchPaths: ['/event-stream', '/os-brain'], label: 'OS Brain & Events', icon: Activity },
+      { to: '/sistema', label: 'Sistema', icon: Server },
+      { to: '/docs', label: 'Docs & Roadmap', icon: FileText },
+    ],
+  },
+];
+
+const mobileQuickTabs = [
+  { to: '/', label: 'Hoy', icon: LayoutDashboard },
+  { to: '/unichat', label: 'UniChat', icon: MessageSquare },
   { to: '/pedidos', label: 'Pedidos', icon: ClipboardList },
-  { to: '/event-stream', label: 'OS Brain & Events', icon: Activity, isNew: true },
-  { to: '/finanzas', label: 'Finanzas & Budget', icon: Wallet },
-  { to: '/rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
-  { to: '/analitica', label: 'Analítica', icon: PieChart },
-  { to: '/ltv', label: 'Fidelización & LTV', icon: Zap },
-  { to: '/marketing', label: 'Pricing & Promo', icon: Megaphone },
-  { to: '/unichat', label: 'UniChat', icon: MessageSquare }, 
-  { to: '/social-inbox', label: 'Social Inbox', icon: Inbox },
-  { to: '/catalogo', label: 'Catálogo Visual', icon: Tag }, 
-  { to: '/inventario', label: 'Inventario & Kárdex', icon: Boxes }, 
-  { to: '/cola', label: 'Cola' }, 
-  { to: '/proveedores', label: 'Proveedores', icon: Store },
-  { to: '/docs', label: 'Docs & Roadmap', icon: FileText }, 
-  { to: '/sistema', label: 'Sistema', icon: Server }
+  { to: '/catalogo', label: 'Catálogo', icon: Tag },
 ];
 
 export function Layout() {
   const { pathname } = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === 'true');
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
 
   useEffect(() => {
@@ -51,74 +95,194 @@ export function Layout() {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    localStorage.setItem('sidebar_collapsed', String(isCollapsed));
+  }, [isCollapsed]);
+
   const toggleTheme = () => setTheme(theme === 'light' ? 'dark' : 'light');
-  
+
+  const isRouteActive = (item: NavItem) => {
+    if (item.matchPaths) return item.matchPaths.includes(pathname);
+    return pathname === item.to;
+  };
+
+  const isMobileExtraActive = !mobileQuickTabs.some(t => t.to === pathname);
+
   return (
     <div className="flex h-full bg-[var(--bg)] transition-colors duration-300">
-      
       {/* Header para Móvil */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-cd border-b border-[var(--bd)] flex items-center justify-between px-4 z-50">
-        <div className="font-bold">TODOENUNO OS</div>
+      <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-cd/95 backdrop-blur-md border-b border-[var(--bd)] flex items-center justify-between px-4 z-50">
+        <Link to="/" className="font-black text-sm tracking-tight text-[var(--tx)]">
+          TODOENUNO OS
+        </Link>
         <div className="flex items-center gap-2">
           <PWAInstallButton compact />
-          <button onClick={toggleTheme} className="p-2 bg-sf rounded-lg">
-            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="p-2 bg-sf rounded-lg text-[var(--tx)]"
+            aria-label="Cambiar tema"
+          >
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
-          <button onClick={() => setIsMobileOpen(!isMobileOpen)} className="p-2 bg-sf rounded-lg">
-            {isMobileOpen ? <X size={20} /> : <Menu size={20} />}
+          <button
+            type="button"
+            onClick={() => setIsMobileOpen(!isMobileOpen)}
+            className="p-2 bg-sf rounded-lg text-[var(--tx)]"
+            aria-label="Abrir menú"
+          >
+            {isMobileOpen ? <X size={18} /> : <Menu size={18} />}
           </button>
         </div>
       </div>
 
       {/* Menú Lateral (Sidebar) */}
-      <aside className={`
-        fixed lg:static top-14 lg:top-0 left-0 bottom-0 z-40
-        w-[220px] shrink-0 bg-cd border-r border-[var(--bd)] p-4 flex flex-col gap-1.5
-        transition-transform duration-300 ease-in-out overflow-y-auto
-        ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-      `}>
-        <div className="flex items-center justify-between mb-4 px-1">
-          <div className="font-bold text-sm tracking-tight hidden lg:block">TODOENUNO OS</div>
-          <button onClick={toggleTheme} className="hidden lg:flex p-2 bg-sf rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
-            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
+      <aside
+        className={`
+          fixed lg:static top-14 lg:top-0 left-0 bottom-0 z-40
+          w-[248px] ${isCollapsed ? 'lg:w-[68px]' : 'lg:w-[228px]'}
+          shrink-0 bg-cd border-r border-[var(--bd)] flex flex-col
+          transition-all duration-200 ease-in-out overflow-y-auto overflow-x-hidden
+          ${isCollapsed ? 'p-3 lg:px-2 lg:py-3.5' : 'p-3.5'}
+          ${isMobileOpen ? 'translate-x-0 pb-20 lg:pb-3.5' : '-translate-x-full lg:translate-x-0'}
+        `}
+      >
+        {/* Cabecera Desktop */}
+        <div
+          className={`hidden lg:flex items-center mb-3 ${
+            isCollapsed ? 'flex-col gap-2' : 'justify-between px-1'
+          }`}
+        >
+          {!isCollapsed && (
+            <Link to="/" className="font-black text-sm tracking-tight text-[var(--tx)] truncate">
+              TODOENUNO OS
+            </Link>
+          )}
+
+          <div className={`flex items-center gap-1 ${isCollapsed ? 'flex-col' : ''}`}>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-1.5 bg-sf rounded-lg text-[var(--tx)] hover:opacity-80 transition-opacity"
+              title={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+            >
+              {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsCollapsed(c => !c)}
+              className="p-1.5 bg-sf rounded-lg tx-mu hover:text-[var(--tx)] transition-colors"
+              title={isCollapsed ? 'Expandir menú lateral' : 'Colapsar menú a íconos'}
+            >
+              {isCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+            </button>
+          </div>
         </div>
 
-        {links.map(l => (
-          <Link 
-            key={l.to} 
-            to={l.to} 
-            onClick={() => setIsMobileOpen(false)}
-            className="p-2 rounded-lg text-sm flex items-center justify-between transition-colors" 
-            style={{ 
-              background: pathname === l.to ? 'var(--tx)' : 'transparent', 
-              color: pathname === l.to ? 'var(--cd)' : 'var(--mu)' 
-            }}
-          >
-            <div className="flex items-center gap-2">
-              {l.icon && <l.icon size={16} />}
-              <span>{l.label}</span>
-            </div>
-            {l.isNew && (
-              <span className="text-[9px] font-black px-1.5 py-0.2 rounded-full bg-emerald-500 text-white animate-pulse">
-                LIVE
-              </span>
-            )}
-          </Link>
-        ))}
+        {/* Navegación Agrupada */}
+        <nav className="flex-1 flex flex-col gap-3">
+          {navGroups.map((group, gIdx) => (
+            <div key={group.title} className="flex flex-col gap-1">
+              {isCollapsed ? (
+                gIdx > 0 && <div className="hidden lg:block h-px bg-[var(--bd)] mx-1.5 my-0.5" />
+              ) : null}
 
-        <div className="mt-auto pt-3 border-t border-[var(--bd)]">
-          <PWAInstallButton />
+              <div
+                className={`px-2 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider tx-mu ${
+                  isCollapsed ? 'lg:hidden' : ''
+                }`}
+              >
+                {group.title}
+              </div>
+
+              {group.items.map(item => {
+                const active = isRouteActive(item);
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    onClick={() => setIsMobileOpen(false)}
+                    title={isCollapsed ? item.label : undefined}
+                    className={`rounded-xl text-[13px] flex items-center transition-colors ${
+                      isCollapsed
+                        ? 'px-2.5 py-2 lg:justify-center lg:px-0 lg:py-2.5 gap-2.5 lg:gap-0'
+                        : 'px-2.5 py-2 gap-2.5'
+                    } ${active ? 'font-bold shadow-sm' : 'font-medium hover:bg-sf'}`}
+                    style={{
+                      background: active ? 'var(--tx)' : undefined,
+                      color: active ? 'var(--cd)' : 'var(--mu)',
+                    }}
+                  >
+                    <Icon size={16} className="shrink-0" />
+                    <span className={`truncate ${isCollapsed ? 'lg:hidden' : ''}`}>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+
+        <div className={`mt-4 pt-3 border-t border-[var(--bd)] flex ${isCollapsed ? 'lg:justify-center' : ''}`}>
+          <PWAInstallButton iconOnly={isCollapsed} />
         </div>
       </aside>
 
       {isMobileOpen && (
-        <div className="fixed inset-0 bg-black/50 z-30 lg:hidden top-14" onClick={() => setIsMobileOpen(false)} />
+        <div
+          className="fixed inset-0 bg-black/50 z-30 lg:hidden top-14"
+          onClick={() => setIsMobileOpen(false)}
+        />
       )}
 
-      <main className="flex-1 min-w-0 overflow-y-auto p-4 lg:p-6 pt-20 lg:pt-6 w-full text-[var(--tx)]">
+      {/* Contenido Principal */}
+      <main className="flex-1 min-w-0 overflow-y-auto p-4 lg:p-6 pt-20 pb-20 lg:pt-6 lg:pb-6 w-full text-[var(--tx)]">
         <Outlet />
       </main>
+
+      {/* Barra Inferior Rápida para Móvil / PWA */}
+      <nav
+        aria-label="Navegación rápida móvil"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-cd/95 backdrop-blur-md border-t border-[var(--bd)] pb-[env(safe-area-inset-bottom)]"
+      >
+        <div className="grid grid-cols-5 h-[60px]">
+          {mobileQuickTabs.map(tab => {
+            const active = pathname === tab.to;
+            const Icon = tab.icon;
+            return (
+              <Link
+                key={tab.to}
+                to={tab.to}
+                onClick={() => setIsMobileOpen(false)}
+                className={`flex flex-col items-center justify-center gap-0.5 text-[10px] transition-colors relative ${
+                  active ? 'text-[var(--ac)] font-bold' : 'tx-mu hover:text-[var(--tx)] font-medium'
+                }`}
+              >
+                {active && (
+                  <span className="absolute top-0 w-7 h-0.5 rounded-full bg-[var(--ac)]" />
+                )}
+                <Icon size={18} />
+                <span className="truncate max-w-full px-1">{tab.label}</span>
+              </Link>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setIsMobileOpen(prev => !prev)}
+            className={`flex flex-col items-center justify-center gap-0.5 text-[10px] transition-colors relative ${
+              isMobileOpen || isMobileExtraActive
+                ? 'text-[var(--ac)] font-bold'
+                : 'tx-mu hover:text-[var(--tx)] font-medium'
+            }`}
+          >
+            {(isMobileOpen || isMobileExtraActive) && (
+              <span className="absolute top-0 w-7 h-0.5 rounded-full bg-[var(--ac)]" />
+            )}
+            <Menu size={18} />
+            <span>Más</span>
+          </button>
+        </div>
+      </nav>
     </div>
   );
 }

@@ -2,7 +2,13 @@ import { useState } from 'react';
 import { Download, Share, Smartphone, WifiOff, X } from 'lucide-react';
 import { useOnlineStatus, usePWAInstall } from '@/hooks/usePWAInstall';
 
-export function PWAInstallButton({ compact = false }: { compact?: boolean }) {
+export function PWAInstallButton({
+  compact = false,
+  iconOnly = false,
+}: {
+  compact?: boolean;
+  iconOnly?: boolean;
+}) {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
 
@@ -15,15 +21,18 @@ export function PWAInstallButton({ compact = false }: { compact?: boolean }) {
       <button
         type="button"
         onClick={() => void install()}
+        title="Instalar App"
         className={
-          compact
+          iconOnly
+            ? 'inline-flex items-center justify-center p-2.5 rounded-xl text-xs font-semibold cursor-pointer shrink-0'
+            : compact
             ? 'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0'
             : 'w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition-opacity hover:opacity-90 cursor-pointer whitespace-nowrap'
         }
         style={{ background: 'var(--ac)', color: '#ffffff' }}
       >
         <Download size={14} />
-        <span>Instalar App</span>
+        {!iconOnly && <span>Instalar App</span>}
       </button>
     );
   }
@@ -34,14 +43,17 @@ export function PWAInstallButton({ compact = false }: { compact?: boolean }) {
         <button
           type="button"
           onClick={() => setShowIOSGuide(true)}
+          title="Instalar en iPhone"
           className={
-            compact
+            iconOnly
+              ? 'inline-flex items-center justify-center p-2.5 rounded-xl bg-sf bd text-xs font-medium cursor-pointer shrink-0'
+              : compact
               ? 'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sf bd text-xs font-medium cursor-pointer whitespace-nowrap shrink-0'
               : 'w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-sf bd text-xs font-medium hover:border-[var(--ac)] transition-colors cursor-pointer whitespace-nowrap'
           }
         >
           <Smartphone size={14} style={{ color: 'var(--ac)' }} />
-          <span>Instalar en iPhone</span>
+          {!iconOnly && <span>Instalar en iPhone</span>}
         </button>
 
         {showIOSGuide && (
@@ -111,7 +123,7 @@ export function OfflineIndicator() {
 
   return (
     <div
-      className="fixed bottom-4 left-4 right-4 sm:right-auto z-50 flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-semibold shadow-lg"
+      className="fixed bottom-20 lg:bottom-4 left-4 right-4 sm:right-auto z-50 flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-semibold shadow-lg"
       style={{ background: 'var(--ac)', color: '#ffffff' }}
       role="status"
       aria-live="polite"
