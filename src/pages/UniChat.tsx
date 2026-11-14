@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import {
   fetchStockItems,
@@ -194,6 +194,7 @@ function detectMediaType(body: string): 'image' | 'audio' | 'video' | null {
 }
 
 export function UniChatPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -369,6 +370,58 @@ export function UniChatPage() {
       supabase.removeChannel(channel);
     };
   }, [loadConversations]);
+
+  // Abrir conversación directa desde tarjeta de notificación (?chat=<id>)
+  const targetChatParam = searchParams.get('chat');
+  useEffect(() => {
+    if (!targetChatParam || loading) return;
+
+    let cancelled = false;
+
+    const clearChatParam = () => {
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          next.delete('chat');
+          return next;
+        },
+        { replace: true }
+      );
+    };
+
+    const existing = conversations.find(c => c.id === targetChatParam);
+    if (existing) {
+      setSubView('chats');
+      if (isLegacyConversation(existing)) setHideLegacy(false);
+      setSelectedConv(existing);
+      clearChatParam();
+      return;
+    }
+
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('bb_conversations')
+          .select('*')
+          .eq('id', targetChatParam)
+          .maybeSingle();
+        if (cancelled) return;
+        if (data) {
+          const conv = data as Conversation;
+          setConversations(prev => (prev.some(c => c.id === conv.id) ? prev : [conv, ...prev]));
+          setSubView('chats');
+          if (isLegacyConversation(conv)) setHideLegacy(false);
+          setSelectedConv(conv);
+        }
+      } finally {
+        if (!cancelled) clearChatParam();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [targetChatParam, loading, conversations, setSearchParams]);
 
   // Cargar mensajes + estado de Bot Todd del chat activo
   const loadMessagesFor = useCallback(async (conv: Conversation) => {

@@ -25,6 +25,11 @@ import {
   PanelLeftOpen,
 } from 'lucide-react';
 import { PWAInstallButton } from '@/components/pwa/PWAComponents';
+import {
+  ChatNotificationProvider,
+  NotificationSettingsButton,
+  useChatNotifications,
+} from '@/components/notifications/ChatNotificationCenter';
 
 type NavItem = {
   to: string;
@@ -85,7 +90,16 @@ const mobileQuickTabs = [
 ];
 
 export function Layout() {
+  return (
+    <ChatNotificationProvider>
+      <LayoutShell />
+    </ChatNotificationProvider>
+  );
+}
+
+function LayoutShell() {
   const { pathname } = useLocation();
+  const { unreadCount } = useChatNotifications();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === 'true');
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
@@ -117,6 +131,7 @@ export function Layout() {
         </Link>
         <div className="flex items-center gap-2">
           <PWAInstallButton compact />
+          <NotificationSettingsButton compact />
           <button
             type="button"
             onClick={toggleTheme}
@@ -160,6 +175,7 @@ export function Layout() {
           )}
 
           <div className={`flex items-center gap-1 ${isCollapsed ? 'flex-col' : ''}`}>
+            <NotificationSettingsButton />
             <button
               type="button"
               onClick={toggleTheme}
@@ -198,13 +214,14 @@ export function Layout() {
               {group.items.map(item => {
                 const active = isRouteActive(item);
                 const Icon = item.icon;
+                const badgeCount = item.to === '/unichat' ? unreadCount : 0;
                 return (
                   <Link
                     key={item.to}
                     to={item.to}
                     onClick={() => setIsMobileOpen(false)}
                     title={isCollapsed ? item.label : undefined}
-                    className={`rounded-xl text-[13px] flex items-center transition-colors ${
+                    className={`relative rounded-xl text-[13px] flex items-center transition-colors ${
                       isCollapsed
                         ? 'px-2.5 py-2 lg:justify-center lg:px-0 lg:py-2.5 gap-2.5 lg:gap-0'
                         : 'px-2.5 py-2 gap-2.5'
@@ -215,7 +232,20 @@ export function Layout() {
                     }}
                   >
                     <Icon size={16} className="shrink-0" />
-                    <span className={`truncate ${isCollapsed ? 'lg:hidden' : ''}`}>{item.label}</span>
+                    <span className={`truncate flex-1 ${isCollapsed ? 'lg:hidden' : ''}`}>{item.label}</span>
+                    {badgeCount > 0 && (
+                      <span
+                        className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-extrabold flex items-center justify-center leading-none shrink-0 ${
+                          isCollapsed ? 'lg:absolute lg:top-1 lg:right-1 lg:min-w-[15px] lg:h-[15px] lg:text-[9px]' : ''
+                        }`}
+                        style={{
+                          background: 'var(--ac)',
+                          color: '#ffffff',
+                        }}
+                      >
+                        {badgeCount > 99 ? '99+' : badgeCount}
+                      </span>
+                    )}
                   </Link>
                 );
               })}
@@ -249,6 +279,7 @@ export function Layout() {
           {mobileQuickTabs.map(tab => {
             const active = pathname === tab.to;
             const Icon = tab.icon;
+            const badgeCount = tab.to === '/unichat' ? unreadCount : 0;
             return (
               <Link
                 key={tab.to}
@@ -261,7 +292,17 @@ export function Layout() {
                 {active && (
                   <span className="absolute top-0 w-7 h-0.5 rounded-full bg-[var(--ac)]" />
                 )}
-                <Icon size={18} />
+                <span className="relative">
+                  <Icon size={18} />
+                  {badgeCount > 0 && (
+                    <span
+                      className="absolute -top-1.5 -right-2.5 min-w-[15px] h-[15px] px-1 rounded-full text-[9px] font-extrabold flex items-center justify-center leading-none"
+                      style={{ background: 'var(--ac)', color: '#ffffff' }}
+                    >
+                      {badgeCount > 99 ? '99+' : badgeCount}
+                    </span>
+                  )}
+                </span>
                 <span className="truncate max-w-full px-1">{tab.label}</span>
               </Link>
             );
