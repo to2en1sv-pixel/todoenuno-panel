@@ -247,6 +247,11 @@ export function UniChatPage() {
   // Modal de Pedido pre-llenado directo desde el chat
   const [showOrderModal, setShowOrderModal] = useState(false);
 
+  // Confirmación de borrado de chat individual
+  const [chatToDelete, setChatToDelete] = useState<Conversation | null>(null);
+  const [clearToddOnDelete, setClearToddOnDelete] = useState(true);
+  const [isDeletingChat, setIsDeletingChat] = useState(false);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -628,6 +633,90 @@ export function UniChatPage() {
     } else {
       setWhatsappState(prev => (prev ? { ...prev, paso_actual: 'inicio', last_sku: null, last_nombre: null } : null));
       showBanner('ok', 'Estado de Bot Todd reiniciado a "inicio" para este cliente.');
+    }
+  };
+
+  // Eliminar conversación individual (hilo + mensajes + opcional estado Todd)
+  const handleConfirmDeleteChat = async () => {
+    if (!chatToDelete || isDeletingChat) return;
+    const target = chatToDelete;
+    setIsDeletingChat(true);
+
+    try {
+      let deletedViaApi = false;
+      try {
+        const res = await fetch('/api/delete-conversation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            conversationId: target.id,
+            contactPhone: target.contact_phone || target.id,
+            clearToddState: clearToddOnDelete,
+          }),
+        });
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.details || data.error || 'Error eliminando conversación');
+          deletedViaApi = true;
+        }
+      } catch (apiErr: any) {
+        if (
+          apiErr?.message &&
+          !apiErr.message.includes('JSON') &&
+          !apiErr.message.includes('Failed to fetch')
+        ) {
+          throw apiErr;
+        }
+      }
+
+      if (!deletedViaApi) {
+        const { error: msgErr } = await supabase
+          .from('bb_messages')
+          .delete()
+          .eq('conversation_id', target.id);
+        if (msgErr) throw msgErr;
+
+        const { error: convErr } = await supabase
+          .from('bb_conversations')
+          .delete()
+          .eq('id', target.id);
+        if (convErr) throw convErr;
+
+        if (clearToddOnDelete) {
+          const p8 = cleanDigits8(target.contact_phone || target.id);
+          const rawId = target.id.split('@')[0];
+          const targets = Array.from(
+            new Set([target.id, rawId, p8, p8 ? `503${p8}` : ''].filter(Boolean))
+          );
+          if (targets.length > 0) {
+            await supabase.from('whatsapp_state').delete().in('telefono', targets);
+          }
+        }
+      }
+
+      setConversations(prev => prev.filter(c => c.id !== target.id));
+      setLastMsgFromMeMap(prev => {
+        if (!(target.id in prev)) return prev;
+        const copy = { ...prev };
+        delete copy[target.id];
+        return copy;
+      });
+      if (selectedConv?.id === target.id) {
+        setSelectedConv(null);
+        setMessages([]);
+        setWhatsappState(null);
+        setMobileShowContext(false);
+        setEditingContact(false);
+      }
+
+      const label = target.contact_name || formatPhoneDisplay(target);
+      setChatToDelete(null);
+      showBanner('ok', `Chat de "${label}" eliminado correctamente.`);
+    } catch (error: any) {
+      showBanner('err', `No se pudo eliminar el chat: ${error?.message || 'Error desconocido'}`);
+    } finally {
+      setIsDeletingChat(false);
     }
   };
 
@@ -1070,7 +1159,7 @@ export function UniChatPage() {
                   <div
                     key={conv.id}
                     onClick={() => setSelectedConv(conv)}
-                    className={`p-3 border-b border-[var(--bd)] cursor-pointer hover:bg-sf/70 transition-colors ${
+                    className={`group p-3 border-b border-[var(--bd)] cursor-pointer hover:bg-sf/70 transition-colors ${
                       selectedConv?.id === conv.id ? 'bg-sf border-l-4 border-l-[var(--ac)]' : ''
                     }`}
                   >
@@ -1118,8 +1207,23 @@ export function UniChatPage() {
                         )}
                       </div>
                     </div>
-                    <div className={`text-[11px] truncate ${needsReply ? 'font-semibold text-[var(--tx)]' : 'tx-mu'}`}>
-                      {conv.last_message || 'Sin mensajes'}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className={`text-[11px] truncate min-w-0 ${needsReply ? 'font-semibold text-[var(--tx)]' : 'tx-mu'}`}>
+                        {conv.last_message || 'Sin mensajes'}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setClearToddOnDelete(true);
+                          setChatToDelete(conv);
+                        }}
+                        title="Eliminar este chat"
+                        aria-label="Eliminar este chat"
+                        className="p-1 rounded-md text-rose-500/70 hover:text-rose-500 hover:bg-rose-500/10 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition-opacity shrink-0"
+                      >
+                        <Trash2 size={12} />
+                      </button>
                     </div>
                   </div>
                 );
@@ -1281,6 +1385,20 @@ export function UniChatPage() {
                     className="hidden lg:flex p-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd tx-mu hover:text-[var(--tx)] transition-colors"
                   >
                     {showContextPanel ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+                  </button>
+
+                  {/* Botón Eliminar Chat */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClearToddOnDelete(true);
+                      setChatToDelete(selectedConv);
+                    }}
+                    title="Eliminar esta conversación"
+                    aria-label="Eliminar esta conversación"
+                    className="p-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:bg-rose-500/10 hover:border-rose-500/30 tx-mu hover:text-rose-500 transition-colors"
+                  >
+                    <Trash2 size={15} />
                   </button>
                 </div>
               </div>
@@ -1942,6 +2060,92 @@ export function UniChatPage() {
           pedidosExistentes={allOrders}
           initialValues={orderInitialValues}
         />
+      )}
+
+      {/* MODAL CONFIRMAR ELIMINACIÓN DE CHAT INDIVIDUAL */}
+      {chatToDelete && (
+        <div
+          className="fixed inset-0 z-[95] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => !isDeletingChat && setChatToDelete(null)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl bg-cd border border-[var(--bd)] p-5 space-y-4 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-500/10 border border-rose-500/25 flex items-center justify-center text-rose-500 shrink-0">
+                  <Trash2 size={17} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-[var(--tx)]">Eliminar conversación</h3>
+                  <p className="text-[11px] tx-mu">Esta acción no se puede deshacer</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isDeletingChat}
+                onClick={() => setChatToDelete(null)}
+                className="p-1 rounded-lg hover:bg-sf tx-mu disabled:opacity-50"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-xl bg-sf border border-[var(--bd)] space-y-1">
+              <div className="text-xs font-bold text-[var(--tx)] truncate">
+                {chatToDelete.contact_name || formatPhoneDisplay(chatToDelete)}
+              </div>
+              <div className="text-[11px] font-mono tx-mu truncate">
+                {formatPhoneDisplay(chatToDelete)}
+              </div>
+              {chatToDelete.last_message && (
+                <div className="text-[11px] tx-mu truncate pt-1 border-t border-[var(--bd)]">
+                  Último mensaje: {chatToDelete.last_message}
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs tx-mu leading-relaxed">
+              Se eliminará el chat y todo su historial de mensajes de UniChat.{' '}
+              <strong className="text-[var(--tx)]">Los pedidos ya guardados en Pedidos se conservarán</strong>. Si el cliente vuelve a escribir por WhatsApp, se creará un chat nuevo.
+            </p>
+
+            <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-sf border border-[var(--bd)] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={clearToddOnDelete}
+                onChange={e => setClearToddOnDelete(e.target.checked)}
+                disabled={isDeletingChat}
+                className="mt-0.5 accent-rose-600 rounded"
+              />
+              <span className="text-[11px] leading-snug">
+                <strong className="block text-[var(--tx)]">Reiniciar también la memoria de Bot Todd</strong>
+                <span className="tx-mu">Limpia el flujo anterior para que Todd lo atienda desde cero si vuelve a escribir.</span>
+              </span>
+            </label>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={isDeletingChat}
+                onClick={() => setChatToDelete(null)}
+                className="px-3.5 py-2 rounded-xl border border-[var(--bd)] bg-sf hover:bg-cd text-xs font-bold disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingChat}
+                onClick={handleConfirmDeleteChat}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60"
+              >
+                {isDeletingChat ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                {isDeletingChat ? 'Eliminando...' : 'Eliminar chat'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
