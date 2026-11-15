@@ -1,5 +1,5 @@
 {
-  "name": "Brief Matutino TODOENUNO v2",
+  "name": "Briefs Diarios TODOENUNO v2 (8AM + 5PM)",
   "nodes": [
     {
       "parameters": {
@@ -12,28 +12,28 @@
           ]
         }
       },
-      "id": "brief-v2-schedule",
-      "name": "Todos los días 8AM",
+      "id": "brief-v2-schedule-am",
+      "name": "Mañana 8:00 AM",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
       "position": [
         200,
-        300
+        200
       ]
     },
     {
       "parameters": {
         "method": "GET",
-        "url": "https://todoenuno-panel.vercel.app/api/morning-brief",
+        "url": "https://todoenuno-panel.vercel.app/api/morning-brief?type=morning",
         "options": {}
       },
-      "id": "brief-v2-fetch",
-      "name": "Obtener Brief del Panel",
+      "id": "brief-v2-fetch-am",
+      "name": "Brief Operativo (8AM)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
         460,
-        300
+        200
       ]
     },
     {
@@ -45,34 +45,109 @@
         "jsonBody": "={{ JSON.stringify({ chat_id: 9087238722, text: $json.mensaje, parse_mode: 'HTML', disable_web_page_preview: true }) }}",
         "options": {}
       },
-      "id": "brief-v2-telegram",
-      "name": "Enviar Brief Telegram",
+      "id": "brief-v2-telegram-am",
+      "name": "Enviar Telegram (8AM)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
         720,
-        300
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 17 * * *"
+            }
+          ]
+        }
+      },
+      "id": "brief-v2-schedule-pm",
+      "name": "Tarde 5:00 PM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        200,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://todoenuno-panel.vercel.app/api/morning-brief?type=evening",
+        "options": {}
+      },
+      "id": "brief-v2-fetch-pm",
+      "name": "Brief Rentabilidad e Inventario (5PM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/botREEMPLAZAR_CON_TU_TELEGRAM_BOT_TOKEN/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: 9087238722, text: $json.mensaje, parse_mode: 'HTML', disable_web_page_preview: true }) }}",
+        "options": {}
+      },
+      "id": "brief-v2-telegram-pm",
+      "name": "Enviar Telegram (5PM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        720,
+        420
       ]
     }
   ],
   "pinData": {},
   "connections": {
-    "Todos los días 8AM": {
+    "Mañana 8:00 AM": {
       "main": [
         [
           {
-            "node": "Obtener Brief del Panel",
+            "node": "Brief Operativo (8AM)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Obtener Brief del Panel": {
+    "Brief Operativo (8AM)": {
       "main": [
         [
           {
-            "node": "Enviar Brief Telegram",
+            "node": "Enviar Telegram (8AM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tarde 5:00 PM": {
+      "main": [
+        [
+          {
+            "node": "Brief Rentabilidad e Inventario (5PM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brief Rentabilidad e Inventario (5PM)": {
+      "main": [
+        [
+          {
+            "node": "Enviar Telegram (5PM)",
             "type": "main",
             "index": 0
           }
