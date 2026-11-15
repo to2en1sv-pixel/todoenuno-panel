@@ -28,6 +28,12 @@ import {
   Copy,
   Check,
   ClipboardList,
+  Lock,
+  LogOut,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Clock,
 } from "lucide-react";
 import { compressImageFile, syncOrderInventoryOnStatusChange } from "@/lib/inventory";
 import { hydrateCutoffsFromOsEvents } from "@/lib/catalogAliases";
@@ -37,9 +43,27 @@ import {
   getCachedOrderWhatsappTemplates,
   renderWhatsappTemplate,
 } from "@/lib/whatsappTemplates";
-import { useCouriers } from "@/lib/couriers";
+import {
+  useCouriers,
+  fetchDriverAccessConfig,
+  getCachedDriverAccessConfig,
+  getDriverSession,
+  setDriverSession,
+  clearDriverSession,
+  type DriverAccessConfig,
+  type DriverPortalSession,
+} from "@/lib/couriers";
+import { uploadOrderDataUrlToBucket, saveOrderEvidence } from "@/lib/orderStorage";
 
 const DRIVER_COURIER_STORAGE_KEY = "todoenuno_driver_courier_v1";
+
+const DRIVER_TIME_PRESETS: Array<{ label: string; value: string }> = [
+  { label: "Ya estoy afuera", value: "menos de 2 minutos (¡ya estoy afuera!)" },
+  { label: "15 min", value: "15 minutos" },
+  { label: "30 min", value: "30 minutos" },
+  { label: "1 hora", value: "1 hora" },
+  { label: "2 horas", value: "2 horas" },
+];
 
 type RutaTab = "en_ruta" | "por_empacar" | "entregados_hoy" | "novedades";
 type CobroTipo = "efectivo" | "transferencia";
@@ -140,9 +164,21 @@ const MOTIVOS_BOLETINAR_DEFAULT = new Set([
 export function ConfirmarEntregaPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { activeNames: courierOptions } = useCouriers();
+  const { couriers, activeNames: courierOptions } = useCouriers();
 
   const todaySv = useMemo(() => getElSalvadorDateKey(), []);
+
+  // Seguridad PIN del Portal Repartidor
+  const [driverAccess, setDriverAccess] = useState<DriverAccessConfig>(() =>
+    getCachedDriverAccessConfig()
+  );
+  const [driverSession, setDriverSessionState] = useState<DriverPortalSession | null>(() =>
+    getDriverSession()
+  );
+  const [loginTarget, setLoginTarget] = useState<string>("auto");
+  const [pinInput, setPinInput] = useState("");
+  const [showPin, setShowPin] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
 
   // Estados de carga
   const [cargando, setCargando] = useState(true);
@@ -164,11 +200,18 @@ export function ConfirmarEntregaPage() {
       const tpl = templates.find((t) => t.id === "repartidor_llegando");
       if (tpl?.mensaje) setDriverTemplate(tpl.mensaje);
     });
+    fetchDriverAccessConfig().then((cfg) => {
+      setDriverAccess(cfg);
+    });
   }, []);
 
   // Vista de Hoja de Ruta vs Entrega Individual
   const [modoRuta, setModoRuta] = useState(!id);
   const [courierSeleccionado, setCourierSeleccionado] = useState<string>(() => {
+    const sess = getDriverSession();
+    if (sess?.role === "courier" && sess.courierName) {
+      return sess.courierName;
+    }
     try {
       return localStorage.getItem(DRIVER_COURIER_STORAGE_KEY) || "Todos los Couriers";
     } catch {
@@ -177,6 +220,13 @@ export function ConfirmarEntregaPage() {
   });
   const [rutaTab, setRutaTab] = useState<RutaTab>("en_ruta");
   const [busquedaRuta, setBusquedaRuta] = useState("");
+  const [tiempoEstimado, setTiempoEstimado] = useState<string>("30 minutos");
+
+  useEffect(() => {
+    if (driverSession?.role === "courier" && driverSession.courierName) {
+      setCourierSeleccionado(driverSession.courierName);
+    }
+  }, [driverSession]);
 
   // Notificaciones Evolution en 1 clic
   const [sendingWaId, setSendingWaId] = useState<string | null>(null);
@@ -219,10 +269,98 @@ export function ConfirmarEntregaPage() {
   };
 
   const handleCourierChange = (value: string) => {
+    if (driverSession?.role === "courier" && driverSession.courierName) {
+      setCourierSeleccionado(driverSession.courierName);
+      return;
+    }
     setCourierSeleccionado(value);
     try {
       localStorage.setItem(DRIVER_COURIER_STORAGE_KEY, value);
     } catch {}
+  };
+
+  const handlePinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanPin = pinInput.replace(/\D/g, "");
+    if (cleanPin.length < 4) {
+      setPinError("Ingresa un PIN válido (4 a 6 dígitos).");
+      return;
+    }
+
+    // 1. Verificar PIN Maestro Admin
+    if (cleanPin === driverAccess.adminPin) {
+      const sess: DriverPortalSession = {
+        role: "admin",
+        loggedInAt: Date.now(),
+      };
+      setDriverSession(sess);
+      setDriverSessionState(sess);
+      setPinError(null);
+      setPinInput("");
+      return;
+    }
+
+    // 2. Verificar PIN por courier específico o detección automática
+    if (loginTarget === "admin") {
+      setPinError("PIN Maestro incorrecto.");
+      return;
+    }
+
+    if (loginTarget !== "auto") {
+      const targetCourier = couriers.find((c) => c.id === loginTarget);
+      if (!targetCourier) {
+        setPinError("Courier no encontrado.");
+        return;
+      }
+      if (!targetCourier.pin) {
+        setPinError(
+          `El courier "${targetCourier.nombre}" aún no tiene PIN asignado en Sistema → Couriers & Envíos.`
+        );
+        return;
+      }
+      if (targetCourier.pin !== cleanPin) {
+        setPinError(`PIN incorrecto para ${targetCourier.nombre}.`);
+        return;
+      }
+      const sess: DriverPortalSession = {
+        role: "courier",
+        courierId: targetCourier.id,
+        courierName: targetCourier.nombre,
+        loggedInAt: Date.now(),
+      };
+      setDriverSession(sess);
+      setDriverSessionState(sess);
+      setCourierSeleccionado(targetCourier.nombre);
+      setPinError(null);
+      setPinInput("");
+      return;
+    }
+
+    // Detección automática por PIN de courier activo
+    const matched = couriers.find((c) => c.activo !== false && c.pin && c.pin === cleanPin);
+    if (matched) {
+      const sess: DriverPortalSession = {
+        role: "courier",
+        courierId: matched.id,
+        courierName: matched.nombre,
+        loggedInAt: Date.now(),
+      };
+      setDriverSession(sess);
+      setDriverSessionState(sess);
+      setCourierSeleccionado(matched.nombre);
+      setPinError(null);
+      setPinInput("");
+      return;
+    }
+
+    setPinError("PIN no reconocido. Selecciona tu nombre o verifica con administración.");
+  };
+
+  const handleLockPortal = () => {
+    clearDriverSession();
+    setDriverSessionState(null);
+    setPinInput("");
+    setPinError(null);
   };
 
   const resetDeliveryFormState = (targetOrder?: any) => {
@@ -364,7 +502,9 @@ export function ConfirmarEntregaPage() {
     }
 
     const waPhone = formatSvWaPhone(targetOrder.telefono);
-    const text = renderWhatsappTemplate(driverTemplate, targetOrder);
+    const text = renderWhatsappTemplate(driverTemplate, targetOrder, {
+      tiempo: tiempoEstimado,
+    });
     setSendingWaId(targetOrder.id);
 
     try {
@@ -454,6 +594,42 @@ export function ConfirmarEntregaPage() {
         });
       } catch (invErr) {
         console.warn("Error sincronizando inventario en entrega móvil:", invErr);
+      }
+
+      // Guardar foto de entrega y/o firma en Supabase Storage (orders-evidence)
+      try {
+        const firmaDataUrl =
+          hayFirma && canvasRef.current ? canvasRef.current.toDataURL("image/png") : null;
+        if (fotoEntrega || firmaDataUrl) {
+          const [fotoUp, firmaUp] = await Promise.all([
+            fotoEntrega
+              ? uploadOrderDataUrlToBucket({
+                  orderId: pedido.id,
+                  kind: "entrega",
+                  dataUrl: fotoEntrega,
+                  fileName: `entrega-${String(pedido.id).slice(0, 8)}.jpg`,
+                })
+              : Promise.resolve(null),
+            firmaDataUrl
+              ? uploadOrderDataUrlToBucket({
+                  orderId: pedido.id,
+                  kind: "firma",
+                  dataUrl: firmaDataUrl,
+                  fileName: `firma-${String(pedido.id).slice(0, 8)}.png`,
+                })
+              : Promise.resolve(null),
+          ]);
+
+          await saveOrderEvidence(pedido.id, {
+            ...(fotoUp?.ok && fotoUp.publicUrl ? { entregaUrl: fotoUp.publicUrl } : {}),
+            ...(firmaUp?.ok && firmaUp.publicUrl ? { firmaUrl: firmaUp.publicUrl } : {}),
+            deliveredAt: new Date().toISOString(),
+            deliveredBy:
+              driverSession?.courierName || pedido.courier || "Motorista Móvil",
+          });
+        }
+      } catch (evErr) {
+        console.warn("No se pudo guardar evidencia en orders-evidence:", evErr);
       }
 
       // Envío opcional de comprobante fotográfico por WhatsApp (Evolution API)
@@ -789,7 +965,9 @@ export function ConfirmarEntregaPage() {
   const direccionCodificada = encodeURIComponent(`${pedido?.direccion || ""}, El Salvador`);
   const urlWaze = `https://waze.com/ul?q=${direccionCodificada}`;
   const urlMaps = `https://www.google.com/maps/search/?api=1&query=${direccionCodificada}`;
-  const mensajeWa = renderWhatsappTemplate(driverTemplate, pedido);
+  const mensajeWa = renderWhatsappTemplate(driverTemplate, pedido, {
+    tiempo: tiempoEstimado,
+  });
   const urlWa = telefonoWaPedido ? `https://wa.me/${telefonoWaPedido}?text=${encodeURIComponent(mensajeWa)}` : undefined;
 
   if (cargando) {
@@ -802,9 +980,109 @@ export function ConfirmarEntregaPage() {
   }
 
   /* ========================================================================= */
+  /* PANTALLA DE BLOQUEO POR PIN (si requirePin está activo en Sistema)        */
+  /* ========================================================================= */
+  if (driverAccess.requirePin && !driverSession) {
+    const couriersConPin = couriers.filter((c) => c.activo !== false);
+
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-4 sm:p-6">
+        <form
+          onSubmit={handlePinSubmit}
+          className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5"
+        >
+          <div className="text-center space-y-2">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400">
+              <KeyRound size={26} />
+            </div>
+            <h1 className="text-lg font-black uppercase tracking-tight">Portal Repartidores</h1>
+            <p className="text-xs text-slate-400 leading-snug">
+              {id
+                ? "Ingresa tu PIN de motorista o PIN Maestro para confirmar la entrega del QR escaneado."
+                : "Ingresa tu PIN asignado para ver tu hoja de ruta y cobros del día."}
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                ¿Quién ingresa?
+              </label>
+              <select
+                value={loginTarget}
+                onChange={(e) => {
+                  setLoginTarget(e.target.value);
+                  setPinError(null);
+                }}
+                className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-xs font-bold outline-none text-white focus:border-emerald-500"
+              >
+                <option value="auto">Detectar automáticamente por PIN</option>
+                <option value="admin">Supervisor / Admin (Ver todos)</option>
+                {couriersConPin.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nombre} {c.pin ? "" : "(Sin PIN aún)"}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                PIN Numérico (4 a 6 dígitos)
+              </label>
+              <div className="relative">
+                <input
+                  type={showPin ? "text" : "password"}
+                  inputMode="numeric"
+                  maxLength={6}
+                  autoFocus
+                  value={pinInput}
+                  onChange={(e) => {
+                    setPinInput(e.target.value.replace(/\D/g, ""));
+                    setPinError(null);
+                  }}
+                  placeholder="••••"
+                  className="w-full p-3 pr-10 rounded-xl border border-slate-800 bg-slate-950 text-center text-xl tracking-[0.45em] font-mono font-black outline-none text-white focus:border-emerald-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPin((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                  tabIndex={-1}
+                >
+                  {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            {pinError && (
+              <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs font-semibold text-center">
+                {pinError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 transition-all"
+            >
+              <Lock size={15} /> Desbloquear Ruta
+            </button>
+          </div>
+
+          <p className="text-[10px] text-slate-500 text-center leading-snug pt-2 border-t border-slate-800">
+            Los PIN se configuran en <strong className="text-slate-300">Sistema → Couriers & Envíos</strong>.
+          </p>
+        </form>
+      </div>
+    );
+  }
+
+  /* ========================================================================= */
   /* VISTA 1: MI HOJA DE RUTA DE HOY                                           */
   /* ========================================================================= */
   if (modoRuta) {
+    const isCourierLocked = driverSession?.role === "courier" && Boolean(driverSession.courierName);
+
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col p-4 sm:p-6 max-w-lg mx-auto">
         {/* Cabecera */}
@@ -837,6 +1115,17 @@ export function ConfirmarEntregaPage() {
             >
               <RotateCcw size={15} />
             </button>
+
+            {driverAccess.requirePin && (
+              <button
+                type="button"
+                onClick={handleLockPortal}
+                className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-rose-500/20 hover:border-rose-500/40 text-slate-300 hover:text-rose-300"
+                title="Cerrar sesión / Cambiar PIN"
+              >
+                <LogOut size={15} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -861,21 +1150,41 @@ export function ConfirmarEntregaPage() {
         {/* Selector de Courier + Buscador */}
         <div className="mt-4 grid grid-cols-1 gap-2.5">
           <div>
-            <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-              Motorista / Courier:
-            </label>
-            <select
-              value={courierSeleccionado}
-              onChange={(e) => handleCourierChange(e.target.value)}
-              className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-900 text-xs font-bold outline-none text-white focus:border-emerald-500"
-            >
-              <option value="Todos los Couriers">Todos los Motoristas</option>
-              {selectCourierOptions.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[10px] uppercase font-bold text-slate-400">
+                Motorista / Courier:
+              </label>
+              {isCourierLocked && (
+                <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
+                  <Lock size={10} /> Sesión exclusiva
+                </span>
+              )}
+            </div>
+            {isCourierLocked ? (
+              <div className="w-full p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs font-bold text-emerald-200 flex items-center justify-between">
+                <span>{driverSession?.courierName}</span>
+                <button
+                  type="button"
+                  onClick={handleLockPortal}
+                  className="text-[10px] underline text-emerald-300 hover:text-white"
+                >
+                  Cambiar usuario
+                </button>
+              </div>
+            ) : (
+              <select
+                value={courierSeleccionado}
+                onChange={(e) => handleCourierChange(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-900 text-xs font-bold outline-none text-white focus:border-emerald-500"
+              >
+                <option value="Todos los Couriers">Todos los Motoristas</option>
+                {selectCourierOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="relative">
@@ -971,13 +1280,15 @@ export function ConfirmarEntregaPage() {
                 ? `Entregados Hoy (${listaTabActiva.length})`
                 : `Con Novedad (${listaTabActiva.length})`}
             </h2>
-            <button
-              type="button"
-              onClick={() => navigate("/pedidos")}
-              className="text-[11px] text-emerald-400 font-bold hover:underline"
-            >
-              Ir a Pedidos OS →
-            </button>
+            {!isCourierLocked && (
+              <button
+                type="button"
+                onClick={() => navigate("/pedidos")}
+                className="text-[11px] text-emerald-400 font-bold hover:underline"
+              >
+                Ir a Pedidos OS →
+              </button>
+            )}
           </div>
 
           {listaTabActiva.length === 0 ? (
@@ -1568,9 +1879,42 @@ export function ConfirmarEntregaPage() {
               </a>
             </div>
 
-            {/* BOTONES DE COMUNICACIÓN: LLAMADA, AVISO EVOLUTION Y WA MANUAL */}
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
+            {/* SELECTOR RÁPIDO DE TIEMPO + COMUNICACIÓN */}
+            <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                  <Clock size={12} className="text-emerald-400" /> Tiempo estimado de llegada:
+                </span>
+                <span className="text-[10px] font-bold text-emerald-400">
+                  {DRIVER_TIME_PRESETS.find((t) => t.value === tiempoEstimado)?.label || tiempoEstimado}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {DRIVER_TIME_PRESETS.map((preset) => {
+                  const active = tiempoEstimado === preset.value;
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => setTiempoEstimado(preset.value)}
+                      className={`px-2.5 py-2 rounded-xl text-[11px] font-bold border transition-all flex-1 min-w-[72px] text-center ${
+                        active
+                          ? "bg-emerald-600 border-emerald-500 text-white shadow"
+                          : "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700"
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <p className="text-[11px] text-slate-400 bg-slate-900/80 border border-slate-800 rounded-xl p-2.5 leading-snug italic">
+                “{mensajeWa}”
+              </p>
+
+              <div className="grid grid-cols-2 gap-2 pt-0.5">
                 {telHrefPedido ? (
                   <a
                     href={telHrefPedido}
@@ -1602,7 +1946,7 @@ export function ConfirmarEntregaPage() {
                     ) : (
                       <Send size={15} />
                     )}
-                    {yaAvisado ? "Llegada Avisada" : "Avisar Llegada"}
+                    {yaAvisado ? "Volver a Avisar" : "Avisar Llegada"}
                   </button>
                 ) : (
                   <div className="py-3 px-3 rounded-2xl bg-slate-800/50 text-slate-500 font-bold text-xs text-center border border-slate-800">
@@ -1616,9 +1960,9 @@ export function ConfirmarEntregaPage() {
                   href={urlWa}
                   target="_blank"
                   rel="noreferrer"
-                  className="w-full py-2 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 font-semibold text-[11px] flex items-center justify-center gap-1.5 border border-slate-800 transition-colors"
+                  className="w-full py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold text-[11px] flex items-center justify-center gap-1.5 border border-slate-800 transition-colors"
                 >
-                  <MessageCircle size={13} className="text-emerald-400" /> Abrir chat en app de WhatsApp (manual)
+                  <MessageCircle size={13} className="text-emerald-400" /> Abrir en mi WhatsApp (manual)
                 </a>
               )}
             </div>
