@@ -8,6 +8,7 @@ import {
   Clock,
   Copy,
   Edit3,
+  ExternalLink,
   Film,
   Image as ImageIcon,
   Layers,
@@ -32,6 +33,7 @@ import {
   DEFAULT_DIST_CONFIG,
   fetchContentVault,
   fetchSocialDistConfig,
+  resolvePagesForCategory,
   saveContentVault,
   saveSocialDistConfig,
   uploadMediaToVault,
@@ -41,6 +43,7 @@ import {
   type ContentTargets,
   type ContentVaultItem,
   type MetaConnectedPage,
+  type PageNicheProfile,
   type SocialDistConfig,
 } from '@/lib/contentVault';
 
@@ -79,9 +82,10 @@ export function BodegaContenidoView({
   const [savingConfig, setSavingConfig] = useState(false);
 
   const [banner, setBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
-  const [copiedCron, setCopiedCron] = useState(false);
+  const [copiedCron, setCopiedCron] = useState<string | null>(null);
 
   // Filtros de la bodega
+  const [pageFilter, setPageFilter] = useState<string>('all');
   const [pilarFilter, setPilarFilter] = useState<'all' | ContentPilar>('all');
   const [originFilter, setOriginFilter] = useState<'all' | ContentOrigin>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | ContentStatus>('all');
@@ -104,9 +108,10 @@ export function BodegaContenidoView({
   const [formMediaUrl, setFormMediaUrl] = useState('');
   const [formEvergreen, setFormEvergreen] = useState(true);
   const [formStatus, setFormStatus] = useState<ContentStatus>('listo');
+  const [formTargetPageIds, setFormTargetPageIds] = useState<string[]>([]);
   const [formTargets, setFormTargets] = useState<ContentTargets>({
     facebook: true,
-    instagram: true,
+    instagram: false,
     youtube: false,
     tiktok: false,
   });
@@ -122,6 +127,8 @@ export function BodegaContenidoView({
   const [catalogSearch, setCatalogSearch] = useState('');
   const [selectedCatalogSkus, setSelectedCatalogSkus] = useState<Set<string>>(new Set());
   const [catalogPilar, setCatalogPilar] = useState<ContentPilar>('producto');
+  const [catalogTargetPageIds, setCatalogTargetPageIds] = useState<string[]>([]);
+  const [catalogAutoByCategory, setCatalogAutoByCategory] = useState(true);
 
   const notify = useCallback((type: 'ok' | 'err', text: string) => {
     setBanner({ type, text });
@@ -192,6 +199,52 @@ export function BodegaContenidoView({
     );
   }, [metaPages, config.defaultPageId]);
 
+  const pageMap = useMemo(() => {
+    const m = new Map<string, MetaConnectedPage>();
+    for (const p of metaPages) m.set(p.page_id, p);
+    return m;
+  }, [metaPages]);
+
+  const inventoryCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of stockItems) {
+      const cat = String(s.categoria || '').trim();
+      if (cat) set.add(cat);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [stockItems]);
+
+  const updatePageProfile = (pageId: string, patch: Partial<PageNicheProfile>) => {
+    setConfig((prev) => {
+      const current = prev.pageProfiles?.[pageId] || {
+        pageId,
+        enabled: true,
+        niche: '',
+        tone: '',
+        ctaKeyword: 'INFO',
+        autoCategories: [],
+      };
+      return {
+        ...prev,
+        pageProfiles: {
+          ...(prev.pageProfiles || {}),
+          [pageId]: { ...current, ...patch, pageId },
+        },
+      };
+    });
+  };
+
+  const getItemAssignedPageIds = useCallback(
+    (it: ContentVaultItem): string[] => {
+      if (Array.isArray(it.targetPageIds) && it.targetPageIds.length > 0) {
+        return it.targetPageIds;
+      }
+      const fallback = config.defaultPageId || activeMetaPage?.page_id;
+      return fallback ? [fallback] : [];
+    },
+    [config.defaultPageId, activeMetaPage]
+  );
+
   const metrics = useMemo(() => {
     const todayStr = new Date().toDateString();
     let readyCount = 0;
@@ -199,6 +252,7 @@ export function BodegaContenidoView({
     let publishedToday = 0;
     let pausedStockCount = 0;
     let evergreenCount = 0;
+    const readyByPage: Record<string, number> = {};
 
     for (const it of items) {
       const st = it.sku ? stockBySku.get(normalizeSku(it.sku)) : undefined;
@@ -206,7 +260,12 @@ export function BodegaContenidoView({
 
       if (it.status === 'listo' || it.status === 'programado') {
         if (isOut) pausedStockCount++;
-        else readyCount++;
+        else {
+          readyCount++;
+          for (const pid of getItemAssignedPageIds(it)) {
+            readyByPage[pid] = (readyByPage[pid] || 0) + 1;
+          }
+        }
       } else if (it.status === 'pausado_stock') {
         pausedStockCount++;
       } else if (it.status === 'publicado') {
@@ -225,12 +284,17 @@ export function BodegaContenidoView({
       publishedToday,
       pausedStockCount,
       evergreenCount,
+      readyByPage,
     };
-  }, [items, stockBySku, config.autoSkipOutOfStock]);
+  }, [items, stockBySku, config.autoSkipOutOfStock, getItemAssignedPageIds]);
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items.filter((it) => {
+      if (pageFilter !== 'all') {
+        const assigned = getItemAssignedPageIds(it);
+        if (!assigned.includes(pageFilter)) return false;
+      }
       if (pilarFilter !== 'all' && it.pilar !== pilarFilter) return false;
       if (originFilter !== 'all' && it.origen !== originFilter) return false;
       if (statusFilter !== 'all' && it.status !== statusFilter) return false;
@@ -242,7 +306,7 @@ export function BodegaContenidoView({
       }
       return true;
     });
-  }, [items, pilarFilter, originFilter, statusFilter, search]);
+  }, [items, pageFilter, pilarFilter, originFilter, statusFilter, search, getItemAssignedPageIds]);
 
   const resetForm = () => {
     setEditingItemId(null);
@@ -254,6 +318,11 @@ export function BodegaContenidoView({
     setUploadFeedback(null);
     setFormEvergreen(true);
     setFormStatus('listo');
+    const defaultPid =
+      pageFilter !== 'all'
+        ? pageFilter
+        : config.defaultPageId || activeMetaPage?.page_id || metaPages[0]?.page_id || '';
+    setFormTargetPageIds(defaultPid ? [defaultPid] : []);
     setFormTargets({ ...config.defaultTargets });
     setFormCopyFb('');
     setFormCopyIg('');
@@ -271,6 +340,11 @@ export function BodegaContenidoView({
     setUploadFeedback(null);
     setFormEvergreen(it.evergreen);
     setFormStatus(it.status);
+    setFormTargetPageIds(
+      Array.isArray(it.targetPageIds) && it.targetPageIds.length > 0
+        ? it.targetPageIds
+        : getItemAssignedPageIds(it)
+    );
     setFormTargets({ ...it.targets });
     setFormCopyFb(it.copies?.fb || '');
     setFormCopyIg(it.copies?.ig || '');
@@ -320,6 +394,8 @@ export function BodegaContenidoView({
           sku: formSku || null,
           precio: stockInfo?.precio_venta || null,
           mediaType: formMediaType,
+          pageIds: formTargetPageIds,
+          pageId: formTargetPageIds[0] || config.defaultPageId || activeMetaPage?.page_id,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -329,7 +405,7 @@ export function BodegaContenidoView({
         setFormCopyFb(data.copies.fb || '');
         setFormCopyIg(data.copies.ig || '');
         setFormCopyShort(data.copies.short || '');
-        notify('ok', 'Copys optimizados para Facebook, Instagram y Shorts generados.');
+        notify('ok', 'Copys adaptados al nicho de tu página generados.');
       }
     } finally {
       setGeneratingAi(false);
@@ -344,6 +420,7 @@ export function BodegaContenidoView({
     }
     setSavingItem(true);
     const nowIso = new Date().toISOString();
+    const cleanedPageIds = formTargetPageIds.filter(Boolean);
 
     let nextItems: ContentVaultItem[];
     if (editingItemId) {
@@ -358,6 +435,7 @@ export function BodegaContenidoView({
               mediaUrl: formMediaUrl.trim(),
               evergreen: formEvergreen,
               status: formStatus,
+              targetPageIds: cleanedPageIds,
               targets: { ...formTargets },
               copies: {
                 fb: formCopyFb.trim(),
@@ -380,6 +458,7 @@ export function BodegaContenidoView({
         evergreen: formEvergreen,
         cooldownDays: 45,
         status: formStatus,
+        targetPageIds: cleanedPageIds,
         targets: { ...formTargets },
         copies: {
           fb: formCopyFb.trim(),
@@ -411,26 +490,44 @@ export function BodegaContenidoView({
 
     setSavingItem(true);
     const nowIso = new Date().toISOString();
-    const created: ContentVaultItem[] = chosen.map((c, idx) => ({
-      id: `cv-${Date.now() + idx}-${Math.random().toString(36).slice(2, 5)}`,
-      origen: 'catalogo',
-      pilar: catalogPilar,
-      titulo: c.nombre,
-      sku: c.sku,
-      mediaType: 'imagen',
-      mediaUrl: c.image_url || '',
-      evergreen: true,
-      cooldownDays: 45,
-      status: 'listo',
-      targets: { ...config.defaultTargets },
-      copies: {
-        fb: `🔥 ¡Disponible! *${c.nombre}* ${c.precio_venta ? `por solo $${Number(c.precio_venta).toFixed(2)}` : ''}\n🚚 Envíos rápidos contra entrega en todo El Salvador.\n💬 Comenta INFO o escríbenos por WhatsApp para pedir el tuyo.`,
-        ig: `✨ ${c.nombre} ${c.precio_venta ? `($${Number(c.precio_venta).toFixed(2)})` : ''} — Pago contra entrega en todo El Salvador 🇸🇻\nEscríbenos por DM o WhatsApp.\n#todoenunosv #elsalvador #comprasv #contraentregasv`,
-        short: `${c.nombre} disponible contra entrega #Shorts`,
-      },
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    }));
+    const created: ContentVaultItem[] = chosen.map((c, idx) => {
+      const matchedPages = catalogAutoByCategory
+        ? resolvePagesForCategory(c.categoria, config)
+        : [];
+      const fallbackPages =
+        catalogTargetPageIds.length > 0
+          ? catalogTargetPageIds
+          : config.defaultPageId
+            ? [config.defaultPageId]
+            : activeMetaPage?.page_id
+              ? [activeMetaPage.page_id]
+              : [];
+      const assignedPages = matchedPages.length > 0 ? matchedPages : fallbackPages;
+      const primaryProf = assignedPages[0] ? config.pageProfiles?.[assignedPages[0]] : undefined;
+      const ctaKw = primaryProf?.ctaKeyword || 'INFO';
+
+      return {
+        id: `cv-${Date.now() + idx}-${Math.random().toString(36).slice(2, 5)}`,
+        origen: 'catalogo',
+        pilar: catalogPilar,
+        titulo: c.nombre,
+        sku: c.sku,
+        mediaType: 'imagen',
+        mediaUrl: c.image_url || '',
+        evergreen: true,
+        cooldownDays: 45,
+        status: 'listo',
+        targetPageIds: assignedPages,
+        targets: { ...config.defaultTargets },
+        copies: {
+          fb: `🔥 ¡Disponible! ${c.nombre} ${c.precio_venta ? `por solo $${Number(c.precio_venta).toFixed(2)}` : ''}\n🚚 Envíos rápidos contra entrega en todo El Salvador.\n💬 Comenta ${ctaKw} o escríbenos por Inbox/WhatsApp para pedir el tuyo.`,
+          ig: `✨ ${c.nombre} ${c.precio_venta ? `($${Number(c.precio_venta).toFixed(2)})` : ''} — Pago contra entrega en todo El Salvador 🇸🇻\nEscríbenos por DM o WhatsApp.\n#todoenunosv #elsalvador #comprasv #contraentregasv`,
+          short: `${c.nombre} disponible contra entrega #Shorts`,
+        },
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+    });
 
     const nextItems = [...created, ...items];
     await saveContentVault(nextItems);
@@ -487,14 +584,18 @@ export function BodegaContenidoView({
   const handlePublishItem = async (it: ContentVaultItem) => {
     setPublishingId(it.id);
     try {
+      const targetPids =
+        pageFilter !== 'all'
+          ? [pageFilter]
+          : getItemAssignedPageIds(it);
+
       const res = await fetch('/api/content-distribute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'publish',
           item: it,
-          pageId: config.defaultPageId || activeMetaPage?.page_id,
-          igUserId: config.igAccountIdOverride || activeMetaPage?.instagram_business_account?.id,
+          pageIds: targetPids,
           targets: it.targets,
         }),
       });
@@ -514,11 +615,18 @@ export function BodegaContenidoView({
         return;
       }
 
-      const refreshed = await fetchContentVault();
+      const [refreshed, freshCfg] = await Promise.all([
+        fetchContentVault(),
+        fetchSocialDistConfig(),
+      ]);
       setItems(refreshed);
+      setConfig(freshCfg);
       if (onSyncLegacyQueue) await onSyncLegacyQueue();
 
-      const fbTag = data?.results?.fb?.ok ? 'Facebook ✓' : data?.results?.fb ? 'Facebook ✗' : '';
+      const okPages = Object.values((data?.results?.fbByPage || {}) as Record<string, any>)
+        .filter((r) => r?.ok)
+        .map((r) => r.pageName);
+      const fbTag = okPages.length > 0 ? `Facebook (${okPages.join(', ')}) ✓` : data?.results?.fb?.ok ? 'Facebook ✓' : '';
       const igTag = data?.results?.ig?.ok ? 'Instagram ✓' : data?.results?.ig ? 'Instagram ✗' : '';
       notify('ok', `Publicado: ${[fbTag, igTag].filter(Boolean).join(' · ')}`);
     } catch (err: any) {
@@ -531,18 +639,27 @@ export function BodegaContenidoView({
   const handleRunNextCron = async () => {
     setRunningNext(true);
     try {
-      const res = await fetch('/api/content-distribute?action=run_next', {
+      const qs = pageFilter !== 'all' ? `&pageId=${encodeURIComponent(pageFilter)}` : '';
+      const res = await fetch(`/api/content-distribute?action=run_next${qs}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'run_next' }),
+        body: JSON.stringify({
+          action: 'run_next',
+          ...(pageFilter !== 'all' ? { pageId: pageFilter } : {}),
+        }),
       });
       const data = await res.json().catch(() => ({}));
-      const refreshed = await fetchContentVault();
+      const [refreshed, freshCfg] = await Promise.all([
+        fetchContentVault(),
+        fetchSocialDistConfig(),
+      ]);
       setItems(refreshed);
+      setConfig(freshCfg);
       if (data?.published === false) {
         notify('err', data.reason || 'No hay piezas listas con stock.');
       } else if (res.ok && data?.ok) {
-        notify('ok', `Publicado automático "${data?.item?.titulo || 'pieza'}" correctamente.`);
+        const pName = data?.results?.fb?.pageName ? ` en ${data.results.fb.pageName}` : '';
+        notify('ok', `Publicado automático "${data?.item?.titulo || 'pieza'}"${pName}.`);
       } else {
         notify('err', data?.error || 'Error ejecutando siguiente publicación.');
       }
@@ -572,7 +689,7 @@ export function BodegaContenidoView({
     await saveSocialDistConfig(config);
     setSavingConfig(false);
     setShowConfigPanel(false);
-    notify('ok', 'Configuración de Distribuidora guardada.');
+    notify('ok', 'Configuración Multi-Nicho de tus páginas guardada.');
   };
 
   const cronEndpointUrl =
@@ -580,41 +697,72 @@ export function BodegaContenidoView({
       ? `${window.location.origin}/api/content-distribute?action=run_next`
       : 'https://todoenuno-panel.vercel.app/api/content-distribute?action=run_next';
 
+  const copyUrl = (key: string, text: string) => {
+    navigator.clipboard?.writeText(text);
+    setCopiedCron(key);
+    setTimeout(() => setCopiedCron((prev) => (prev === key ? null : prev)), 2000);
+  };
+
   return (
     <div className="space-y-5">
-      {/* BANNER META DUAL (FACEBOOK + INSTAGRAM BUSINESS) */}
+      {/* BANNER MULTI-NICHO (4 PÁGINAS DE FACEBOOK EN FB_PAGES) */}
       <section className="bg-cd bd rounded-2xl p-4 sm:p-5 space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-1">
+          <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
-                <Film size={12} /> Bodega de Contenido + Distribuidora Meta (Fase 1)
+                <Film size={12} /> Distribuidora Multi-Nicho ({metaPages.filter((p) => p.has_token).length} Páginas FB)
               </span>
-              {activeMetaPage?.has_token ? (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                  <CheckCircle2 size={12} /> FB: {activeMetaPage.page_name}
-                </span>
-              ) : (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-500/10 text-blue-600 border border-blue-500/20">
+                Solo Facebook activo · Rotación {config.cronStrategy === 'round_robin' ? 'Round-Robin' : 'Página principal'}
+              </span>
+            </div>
+
+            {/* Selector rápido por Página / Nicho */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setPageFilter('all')}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${
+                  pageFilter === 'all'
+                    ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)]'
+                    : 'bg-sf border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
+                }`}
+              >
+                Todas las páginas ({metrics.readyCount} listos)
+              </button>
+              {metaPages.length === 0 ? (
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20">
-                  <AlertTriangle size={12} /> Sin página conectada en fb_pages
-                </span>
-              )}
-              {activeMetaPage?.instagram_business_account || config.igAccountIdOverride ? (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-pink-500/10 text-pink-600 border border-pink-500/20">
-                  <CheckCircle2 size={12} /> IG:{' '}
-                  {activeMetaPage?.instagram_business_account?.username
-                    ? `@${activeMetaPage.instagram_business_account.username}`
-                    : `ID ${config.igAccountIdOverride}`}
+                  <AlertTriangle size={12} /> Sin páginas en fb_pages
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-sf bd tx-mu">
-                  IG Business no detectado aún
-                </span>
+                metaPages.map((p) => {
+                  const prof = config.pageProfiles?.[p.page_id];
+                  const disabled = prof?.enabled === false;
+                  const readyN = metrics.readyByPage[p.page_id] || 0;
+                  const selected = pageFilter === p.page_id;
+                  return (
+                    <button
+                      key={p.page_id}
+                      type="button"
+                      onClick={() => setPageFilter(selected ? 'all' : p.page_id)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${
+                        selected
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : disabled
+                            ? 'bg-sf border-[var(--bd)] tx-mu opacity-55'
+                            : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/25 hover:border-blue-500'
+                      }`}
+                    >
+                      <CheckCircle2 size={11} />
+                      <span>{p.page_name}</span>
+                      {prof?.niche && <span className="opacity-75">· {prof.niche}</span>}
+                      <span className="mono opacity-80">({readyN})</span>
+                    </button>
+                  );
+                })
               )}
             </div>
-            <p className="text-xs tx-mu">
-              Sube videos o imágenes de marca/testimonios/ofertas y combínalos con tu catálogo. Protegido contra SKUs agotados (stock = 0).
-            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -623,7 +771,7 @@ export function BodegaContenidoView({
               onClick={() => setShowConfigPanel((v) => !v)}
               className="px-3 py-2 rounded-xl bg-sf bd text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-85 cursor-pointer"
             >
-              <Settings2 size={14} /> Canales y Cron
+              <Settings2 size={14} /> Configurar 4 Nichos & Cron
             </button>
 
             <button
@@ -631,10 +779,12 @@ export function BodegaContenidoView({
               onClick={handleRunNextCron}
               disabled={runningNext || metrics.readyCount === 0}
               className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-              title="Publica la siguiente pieza lista con stock disponible en tus redes activas"
+              title="Publica la siguiente pieza lista con stock disponible (respeta el filtro de página si está activo o rota por Round-Robin)"
             >
               {runningNext ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-              Publicar Siguiente Ahora
+              {pageFilter !== 'all'
+                ? `Publicar Siguiente (${pageMap.get(pageFilter)?.page_name || 'Página'})`
+                : 'Publicar Siguiente (Rotación)'}
             </button>
 
             <button
@@ -652,122 +802,233 @@ export function BodegaContenidoView({
           </div>
         </div>
 
-        {/* PANEL DESPLEGABLE DE CANALES META & CRON */}
+        {/* PANEL DESPLEGABLE MULTI-NICHO (4 PÁGINAS DE FB + CRON) */}
         {showConfigPanel && (
-          <div className="pt-4 border-t border-[var(--bd)] grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <label className="text-[11px] font-bold uppercase tx-mu block">
-                Facebook Page (Token en fb_pages)
-              </label>
-              <div className="flex gap-2">
+          <div className="pt-4 border-t border-[var(--bd)] space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold uppercase tx-mu block">
+                  Estrategia del Cron Automático
+                </label>
                 <select
-                  value={config.defaultPageId || activeMetaPage?.page_id || ''}
-                  onChange={(e) => setConfig((prev) => ({ ...prev, defaultPageId: e.target.value }))}
-                  className="flex-1 px-3 py-2 rounded-xl bg-sf bd text-xs font-semibold outline-none"
+                  value={config.cronStrategy}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      cronStrategy: e.target.value as 'round_robin' | 'default_only',
+                    }))
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-sf bd text-xs font-semibold outline-none"
                 >
-                  {metaPages.length === 0 && <option value="">Sin páginas en fb_pages</option>}
-                  {metaPages.map((p) => (
-                    <option key={p.page_id} value={p.page_id}>
-                      {p.page_name} {p.instagram_business_account ? `(+ IG @${p.instagram_business_account.username || p.instagram_business_account.id})` : ''}
-                    </option>
-                  ))}
+                  <option value="round_robin">🔄 Round-Robin (rotar entre las páginas activas)</option>
+                  <option value="default_only">📌 Solo página principal por defecto</option>
                 </select>
-                <button
-                  type="button"
-                  onClick={loadMetaAccounts}
-                  disabled={checkingMeta}
-                  className="px-3 py-2 rounded-xl bg-sf bd text-xs font-bold"
-                  title="Re-verificar páginas e Instagram vinculado"
-                >
-                  <RefreshCw size={13} className={checkingMeta ? 'animate-spin' : ''} />
-                </button>
+                <div className="flex gap-2">
+                  <select
+                    value={config.defaultPageId || activeMetaPage?.page_id || ''}
+                    onChange={(e) => setConfig((prev) => ({ ...prev, defaultPageId: e.target.value }))}
+                    className="flex-1 px-3 py-2 rounded-xl bg-sf bd text-xs outline-none"
+                  >
+                    {metaPages.length === 0 && <option value="">Sin páginas en fb_pages</option>}
+                    {metaPages.map((p) => (
+                      <option key={p.page_id} value={p.page_id}>
+                        Respaldo: {p.page_name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={loadMetaAccounts}
+                    disabled={checkingMeta}
+                    className="px-3 py-2 rounded-xl bg-sf bd text-xs font-bold cursor-pointer"
+                    title="Recargar páginas desde fb_pages"
+                  >
+                    <RefreshCw size={13} className={checkingMeta ? 'animate-spin' : ''} />
+                  </button>
+                </div>
               </div>
-              <input
-                value={config.igAccountIdOverride}
-                onChange={(e) => setConfig((prev) => ({ ...prev, igAccountIdOverride: e.target.value }))}
-                placeholder="IG Business ID manual (opcional si ya lo auto-detectó)"
-                className="w-full px-3 py-2 rounded-xl bg-sf bd text-xs outline-none"
-              />
-            </div>
 
-            <div className="space-y-2">
-              <label className="text-[11px] font-bold uppercase tx-mu block">
-                Reglas de Seguridad & Destinos por Defecto
-              </label>
-              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-sf bd text-xs cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={config.autoSkipOutOfStock}
-                  onChange={(e) => setConfig((prev) => ({ ...prev, autoSkipOutOfStock: e.target.checked }))}
-                  className="rounded"
-                />
-                <span className="font-semibold">Saltar automáticamente productos con Stock = 0</span>
-              </label>
-              <div className="flex flex-wrap gap-2 text-xs">
-                <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sf bd cursor-pointer">
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold uppercase tx-mu block">
+                  Seguridad & Canales por Defecto
+                </label>
+                <label className="flex items-center gap-2 p-2.5 rounded-xl bg-sf bd text-xs cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={config.defaultTargets.facebook}
-                    onChange={(e) =>
-                      setConfig((p) => ({
-                        ...p,
-                        defaultTargets: { ...p.defaultTargets, facebook: e.target.checked },
-                      }))
-                    }
+                    checked={config.autoSkipOutOfStock}
+                    onChange={(e) => setConfig((prev) => ({ ...prev, autoSkipOutOfStock: e.target.checked }))}
+                    className="rounded"
                   />
-                  <span>Facebook Page</span>
+                  <span className="font-semibold">Saltar automáticamente productos con Stock = 0</span>
                 </label>
-                <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sf bd cursor-pointer">
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sf bd cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={config.defaultTargets.facebook}
+                      onChange={(e) =>
+                        setConfig((p) => ({
+                          ...p,
+                          defaultTargets: { ...p.defaultTargets, facebook: e.target.checked },
+                        }))
+                      }
+                    />
+                    <span>Facebook Pages ✓</span>
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sf bd cursor-pointer opacity-75">
+                    <input
+                      type="checkbox"
+                      checked={config.defaultTargets.instagram}
+                      onChange={(e) =>
+                        setConfig((p) => ({
+                          ...p,
+                          defaultTargets: { ...p.defaultTargets, instagram: e.target.checked },
+                        }))
+                      }
+                    />
+                    <span>Instagram (requiere permiso)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold uppercase tx-mu block">
+                  Endpoint Global (Round-Robin en n8n / Cron)
+                </label>
+                <div className="flex items-center gap-2">
                   <input
-                    type="checkbox"
-                    checked={config.defaultTargets.instagram}
-                    onChange={(e) =>
-                      setConfig((p) => ({
-                        ...p,
-                        defaultTargets: { ...p.defaultTargets, instagram: e.target.checked },
-                      }))
-                    }
+                    readOnly
+                    value={cronEndpointUrl}
+                    className="flex-1 px-3 py-2 rounded-xl bg-sf bd text-[11px] font-mono outline-none"
                   />
-                  <span>Instagram Reels/Feed</span>
-                </label>
-                <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sf bd opacity-55">
-                  YT Shorts &amp; TikTok (Fase 2-3)
-                </span>
+                  <button
+                    type="button"
+                    onClick={() => copyUrl('global', cronEndpointUrl)}
+                    className="px-3 py-2 rounded-xl bg-sf bd text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    {copiedCron === 'global' ? <Check size={13} /> : <Copy size={13} />}
+                  </button>
+                </div>
+                <p className="text-[11px] tx-mu">
+                  También puedes usar <code className="mono">&amp;pageId=ID</code> debajo si quieres un horario separado por nicho.
+                </p>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-[11px] font-bold uppercase tx-mu block">
-                Endpoint para tu Cron / n8n (Auto-Publicador)
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  readOnly
-                  value={cronEndpointUrl}
-                  className="flex-1 px-3 py-2 rounded-xl bg-sf bd text-[11px] font-mono outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(cronEndpointUrl);
-                    setCopiedCron(true);
-                    setTimeout(() => setCopiedCron(false), 2000);
-                  }}
-                  className="px-3 py-2 rounded-xl bg-sf bd text-xs font-bold inline-flex items-center gap-1"
-                >
-                  {copiedCron ? <Check size={13} /> : <Copy size={13} />}
-                </button>
+            {/* TARJETAS DE PERFIL POR CADA PÁGINA EN FB_PAGES */}
+            {metaPages.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-black uppercase tx-mu">
+                    Perfiles por Página / Nicho ({metaPages.length} páginas conectadas en fb_pages)
+                  </span>
+                  {inventoryCategories.length > 0 && (
+                    <span className="text-[11px] tx-mu">
+                      Categorías detectadas en inventario: {inventoryCategories.join(', ')}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {metaPages.map((p) => {
+                    const prof = config.pageProfiles?.[p.page_id] || {
+                      pageId: p.page_id,
+                      enabled: true,
+                      niche: '',
+                      tone: '',
+                      ctaKeyword: 'INFO',
+                      autoCategories: [],
+                    };
+                    const pageCronUrl = `${cronEndpointUrl}&pageId=${encodeURIComponent(p.page_id)}`;
+                    return (
+                      <div key={p.page_id} className="p-3.5 rounded-xl bg-sf bd space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-xs font-black truncate">{p.page_name}</div>
+                            <div className="text-[10px] font-mono tx-mu">
+                              ID: {p.page_id}
+                              {prof.lastPublishedAt
+                                ? ` · Último post: ${new Date(prof.lastPublishedAt).toLocaleDateString()}`
+                                : ' · Sin posts desde Bodega'}
+                            </div>
+                          </div>
+                          <label className="inline-flex items-center gap-1.5 text-[11px] font-bold cursor-pointer shrink-0">
+                            <input
+                              type="checkbox"
+                              checked={prof.enabled !== false}
+                              onChange={(e) => updatePageProfile(p.page_id, { enabled: e.target.checked })}
+                            />
+                            <span>Activa</span>
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <input
+                            value={prof.niche || ''}
+                            onChange={(e) => updatePageProfile(p.page_id, { niche: e.target.value })}
+                            placeholder="Nicho (ej. Hogar)"
+                            className="px-2.5 py-1.5 rounded-lg bg-cd bd text-xs outline-none"
+                          />
+                          <input
+                            value={prof.ctaKeyword || ''}
+                            onChange={(e) => updatePageProfile(p.page_id, { ctaKeyword: e.target.value })}
+                            placeholder="Palabra clave (ej. INFO)"
+                            className="px-2.5 py-1.5 rounded-lg bg-cd bd text-xs outline-none"
+                          />
+                          <input
+                            value={(prof.autoCategories || []).join(', ')}
+                            onChange={(e) =>
+                              updatePageProfile(p.page_id, {
+                                autoCategories: e.target.value
+                                  .split(',')
+                                  .map((s) => s.trim())
+                                  .filter(Boolean),
+                              })
+                            }
+                            placeholder="Categorías auto (ej. Cocina, Baño)"
+                            className="px-2.5 py-1.5 rounded-lg bg-cd bd text-xs outline-none"
+                          />
+                        </div>
+
+                        <input
+                          value={prof.tone || ''}
+                          onChange={(e) => updatePageProfile(p.page_id, { tone: e.target.value })}
+                          placeholder="Tono para IA (ej. Práctico, cercano, enfocado en ahorro para el hogar)"
+                          className="w-full px-2.5 py-1.5 rounded-lg bg-cd bd text-xs outline-none"
+                        />
+
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            readOnly
+                            value={pageCronUrl}
+                            className="flex-1 px-2 py-1 rounded-lg bg-cd bd text-[10px] font-mono tx-mu outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => copyUrl(p.page_id, pageCronUrl)}
+                            className="px-2.5 py-1 rounded-lg bg-cd bd text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                            title="Copiar URL de Cron exclusiva para esta página"
+                          >
+                            {copiedCron === p.page_id ? <Check size={11} /> : <Copy size={11} />}
+                            Cron
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="flex justify-end pt-1">
-                <button
-                  type="button"
-                  onClick={handleSaveConfig}
-                  disabled={savingConfig}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold"
-                >
-                  {savingConfig ? 'Guardando...' : 'Guardar Configuración'}
-                </button>
-              </div>
+            )}
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleSaveConfig}
+                disabled={savingConfig}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer"
+              >
+                {savingConfig ? 'Guardando...' : 'Guardar Configuración Multi-Nicho'}
+              </button>
             </div>
           </div>
         )}
@@ -1011,6 +1272,20 @@ export function BodegaContenidoView({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      {getItemAssignedPageIds(it).map((pid) => {
+                        const pg = pageMap.get(pid);
+                        const prof = config.pageProfiles?.[pid];
+                        return (
+                          <span
+                            key={pid}
+                            className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 border border-blue-500/20 font-bold text-[10px]"
+                          >
+                            📘 {pg?.page_name || pid}
+                            {prof?.niche ? ` (${prof.niche})` : ''}
+                          </span>
+                        );
+                      })}
+
                       {it.sku ? (
                         <span
                           className={`px-2 py-0.5 rounded-md font-mono font-bold border ${
@@ -1025,18 +1300,15 @@ export function BodegaContenidoView({
                         <span className="px-2 py-0.5 rounded-md bg-sf bd tx-mu">Contenido general / Marca</span>
                       )}
 
-                      {it.targets.facebook && (
-                        <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 font-bold text-[10px]">
-                          FB {it.publishResults?.fb_post_id ? '✓' : ''}
-                        </span>
-                      )}
-                      {it.targets.instagram && (
-                        <span className="px-1.5 py-0.5 rounded bg-pink-500/10 text-pink-600 font-bold text-[10px]">
-                          IG {it.publishResults?.ig_media_id ? '✓' : ''}
-                        </span>
-                      )}
-                      {(it.targets.youtube || it.copies?.short) && (
-                        <span className="px-1.5 py-0.5 rounded bg-sf bd tx-mu text-[10px]">YT/TT listo</span>
+                      {it.publishResults?.fb_post_id && (
+                        <a
+                          href={`https://facebook.com/${it.publishResults.fb_post_id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 font-bold text-[10px] hover:underline"
+                        >
+                          <ExternalLink size={10} /> Ver post
+                        </a>
                       )}
                     </div>
 
@@ -1091,7 +1363,11 @@ export function BodegaContenidoView({
                     className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white text-xs font-black inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     {busy ? <Loader2 size={13} className="animate-spin" /> : <Play size={12} />}
-                    {busy ? 'Publicando...' : 'Publicar FB/IG'}
+                    {busy
+                      ? 'Publicando...'
+                      : it.targets?.instagram
+                        ? 'Publicar FB/IG'
+                        : 'Publicar en FB'}
                   </button>
                 </div>
               </article>
@@ -1241,8 +1517,14 @@ export function BodegaContenidoView({
                         const val = e.target.value;
                         setFormSku(val);
                         const match = stockBySku.get(normalizeSku(val));
-                        if (match && !formMediaUrl && match.image_url) {
-                          setFormMediaUrl(match.image_url);
+                        if (match) {
+                          if (!formMediaUrl && match.image_url) {
+                            setFormMediaUrl(match.image_url);
+                          }
+                          const autoPages = resolvePagesForCategory(match.categoria, config);
+                          if (autoPages.length > 0) {
+                            setFormTargetPageIds(autoPages);
+                          }
                         }
                       }}
                       className="w-full px-3 py-2 rounded-xl bg-sf bd text-xs outline-none"
@@ -1270,6 +1552,48 @@ export function BodegaContenidoView({
                   </div>
                 </div>
 
+                {/* Selector de Página(s) de Facebook / Nicho */}
+                {metaPages.length > 0 && (
+                  <div className="p-3 rounded-xl bg-sf bd space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold uppercase tx-mu">
+                        Página(s) de Facebook destino (Nicho)
+                      </span>
+                      <span className="text-[10px] tx-mu">Puedes elegir 1 nicho o varias páginas</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {metaPages.map((pg) => {
+                        const checked = formTargetPageIds.includes(pg.page_id);
+                        const prof = config.pageProfiles?.[pg.page_id];
+                        return (
+                          <label
+                            key={pg.page_id}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-colors ${
+                              checked
+                                ? 'bg-blue-600/15 border-blue-500 text-blue-600 font-bold'
+                                : 'bg-cd border-[var(--bd)] tx-mu'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setFormTargetPageIds((prev) =>
+                                  prev.includes(pg.page_id)
+                                    ? prev.filter((id) => id !== pg.page_id)
+                                    : [...prev, pg.page_id]
+                                );
+                              }}
+                            />
+                            <span>{pg.page_name}</span>
+                            {prof?.niche && <span className="text-[10px] opacity-80">({prof.niche})</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap gap-2 text-xs">
                     <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sf bd cursor-pointer">
@@ -1280,13 +1604,13 @@ export function BodegaContenidoView({
                       />
                       <span>Facebook</span>
                     </label>
-                    <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sf bd cursor-pointer">
+                    <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sf bd cursor-pointer opacity-75">
                       <input
                         type="checkbox"
                         checked={formTargets.instagram}
                         onChange={(e) => setFormTargets((t) => ({ ...t, instagram: e.target.checked }))}
                       />
-                      <span>Instagram</span>
+                      <span>Instagram (si tiene permiso)</span>
                     </label>
                     <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sf bd cursor-pointer">
                       <input
@@ -1312,7 +1636,7 @@ export function BodegaContenidoView({
                 <div className="space-y-2.5 pt-2 border-t border-[var(--bd)]">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-black uppercase tx-mu">
-                      Copys por Red Social
+                      Copy de Publicación
                     </span>
                     <button
                       type="button"
@@ -1321,7 +1645,7 @@ export function BodegaContenidoView({
                       className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
                     >
                       {generatingAi ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                      {generatingAi ? 'Generando...' : 'Generar Copys IA (FB + IG + Short)'}
+                      {generatingAi ? 'Generando...' : 'Generar Copy IA del Nicho'}
                     </button>
                   </div>
 
@@ -1336,19 +1660,21 @@ export function BodegaContenidoView({
                     />
                   </div>
 
-                  <div>
-                    <label className="text-[10px] font-bold tx-mu block mb-1">Caption Instagram (Reels / Feed)</label>
-                    <textarea
-                      rows={3}
-                      value={formCopyIg}
-                      onChange={(e) => setFormCopyIg(e.target.value)}
-                      placeholder="Gancho + hashtags locales..."
-                      className="w-full p-2.5 rounded-xl bg-sf bd text-xs outline-none"
-                    />
-                  </div>
+                  {formTargets.instagram && (
+                    <div>
+                      <label className="text-[10px] font-bold tx-mu block mb-1">Caption Instagram (Reels / Feed)</label>
+                      <textarea
+                        rows={3}
+                        value={formCopyIg}
+                        onChange={(e) => setFormCopyIg(e.target.value)}
+                        placeholder="Gancho + hashtags locales..."
+                        className="w-full p-2.5 rounded-xl bg-sf bd text-xs outline-none"
+                      />
+                    </div>
+                  )}
 
                   <div>
-                    <label className="text-[10px] font-bold tx-mu block mb-1">Título corto YouTube Shorts / TikTok</label>
+                    <label className="text-[10px] font-bold tx-mu block mb-1">Título corto YouTube Shorts / TikTok (opcional)</label>
                     <input
                       value={formCopyShort}
                       onChange={(e) => setFormCopyShort(e.target.value)}
@@ -1395,7 +1721,51 @@ export function BodegaContenidoView({
                   </select>
                 </div>
 
-                <div className="max-h-72 overflow-y-auto divide-y divide-[var(--bd)] border border-[var(--bd)] rounded-xl">
+                {metaPages.length > 0 && (
+                  <div className="p-3 rounded-xl bg-sf bd space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold uppercase tx-mu">Página de destino</span>
+                      <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={catalogAutoByCategory}
+                          onChange={(e) => setCatalogAutoByCategory(e.target.checked)}
+                        />
+                        <span>Auto-asignar según categoría configurada</span>
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 text-xs">
+                      {metaPages.map((pg) => {
+                        const checked = catalogTargetPageIds.includes(pg.page_id);
+                        return (
+                          <label
+                            key={pg.page_id}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer ${
+                              checked
+                                ? 'bg-blue-600/15 border-blue-500 text-blue-600 font-bold'
+                                : 'bg-cd border-[var(--bd)] tx-mu'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() =>
+                                setCatalogTargetPageIds((prev) =>
+                                  prev.includes(pg.page_id)
+                                    ? prev.filter((id) => id !== pg.page_id)
+                                    : [...prev, pg.page_id]
+                                )
+                              }
+                            />
+                            <span>{pg.page_name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="max-h-64 overflow-y-auto divide-y divide-[var(--bd)] border border-[var(--bd)] rounded-xl">
                   {validCatalog.map((c) => {
                     const checked = selectedCatalogSkus.has(c.sku);
                     const disabled = c.stock_disponible <= 0;

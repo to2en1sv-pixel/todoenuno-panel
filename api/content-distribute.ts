@@ -404,15 +404,33 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({ ok: true, path, publicUrl: pub.publicUrl });
     }
 
-    /* 4. GENERADOR DE COPYS OMNICANAL (FB + IG + SHORTS/TIKTOK) */
+    /* 4. GENERADOR DE COPYS OMNICANAL (CON NICHO Y TONO POR PÁGINA) */
     if (action === 'generate_copy') {
       if (req.method !== 'POST') return res.status(405).json({ error: 'POST required' });
       if (!process.env.OPENAI_API_KEY) {
         return res.status(500).json({ error: 'Falta OPENAI_API_KEY en Vercel' });
       }
 
-      const { titulo, pilar, sku, precio, mediaType, contexto } = req.body || {};
-      const prompt = `Eres estratega de contenido y ventas contra entrega (COD) en El Salvador para la tienda TODOENUNO (to2en1.app).
+      const { titulo, pilar, sku, precio, mediaType, contexto, pageId, pageIds } = req.body || {};
+      const targetPid = String(pageId || (Array.isArray(pageIds) ? pageIds[0] : '') || '').trim();
+
+      let nicheContext = '';
+      if (targetPid) {
+        const [cfgDoc, pageRow] = await Promise.all([
+          readDocJson<any>(supabase, DIST_CONFIG_DOC_TITLE, {}),
+          supabase.from('fb_pages').select('page_id,page_name').eq('page_id', targetPid).maybeSingle(),
+        ]);
+        const prof = cfgDoc.data?.pageProfiles?.[targetPid];
+        const pageName = pageRow?.data?.page_name || prof?.niche || targetPid;
+        if (pageName || prof) {
+          nicheContext = `\n- Página / Marca de Facebook destino: "${pageName}"` +
+            (prof?.niche ? `\n- Nicho de la página: "${prof.niche}"` : '') +
+            (prof?.tone ? `\n- Tono de comunicación de esta marca: "${prof.tone}"` : '') +
+            (prof?.ctaKeyword ? `\n- Palabra clave / CTA sugerida en comentarios: "${prof.ctaKeyword}"` : '');
+        }
+      }
+
+      const prompt = `Eres estratega de contenido y ventas contra entrega (COD) en El Salvador.
 Genera 3 versiones listas para publicar para esta pieza de contenido:
 
 - Título / Tema: "${titulo || 'Pieza de marca TODOENUNO'}"
@@ -420,12 +438,12 @@ Genera 3 versiones listas para publicar para esta pieza de contenido:
 - Media: "${mediaType || 'imagen'}"
 - SKU / Producto vinculado: "${sku || 'Contenido general / Marca'}"
 - Precio referencial: ${precio ? `$${Number(precio).toFixed(2)}` : 'No especificado (contenido general)'}
-- Contexto adicional: "${contexto || 'Envíos rápidos contra entrega a todo El Salvador'}"
+- Contexto adicional: "${contexto || 'Envíos rápidos contra entrega a todo El Salvador'}"${nicheContext}
 
 Devuelve EXCLUSIVAMENTE un JSON válido con esta estructura exacta (sin markdown):
 {
-  "fb": "Copy persuasivo para Facebook Page (2-4 líneas, emojis moderados, CTA claro pidiendo comentar INFO o escribir por WhatsApp/Inbox)",
-  "ig": "Caption optimizado para Instagram/Reels (primera línea gancho fuerte, cuerpo breve, CTA y 6 hashtags relevantes de El Salvador)",
+  "fb": "Copy persuasivo adaptado al nicho y tono de la Página de Facebook (2-4 líneas, emojis moderados, CTA claro pidiendo comentar la palabra clave o escribir por Inbox/WhatsApp)",
+  "ig": "Caption optimizado para Instagram/Reels (primera línea gancho fuerte, cuerpo breve, CTA y 6 hashtags del nicho en El Salvador)",
   "short": "Título gancho ultra corto menor a 90 caracteres con #Shorts para YouTube Shorts y TikTok"
 }`;
 
@@ -463,7 +481,7 @@ Devuelve EXCLUSIVAMENTE un JSON válido con esta estructura exacta (sin markdown
       });
     }
 
-    /* 5. PUBLICAR PIEZA ESPECÍFICA O SIGUIENTE EN COLA (RUN_NEXT) */
+    /* 5. PUBLICAR PIEZA ESPECÍFICA O SIGUIENTE EN COLA (MULTI-PÁGINA / ROUND-ROBIN) */
     if (action === 'publish' || action === 'run_next') {
       const [vaultDoc, cfgDoc, pages] = await Promise.all([
         readDocJson<any[]>(supabase, VAULT_DOC_TITLE, []),
@@ -473,38 +491,98 @@ Devuelve EXCLUSIVAMENTE un JSON válido con esta estructura exacta (sin markdown
 
       const vaultItems = Array.isArray(vaultDoc.data) ? vaultDoc.data : [];
       const cfg = cfgDoc.data || {};
+      const pageProfiles: Record<string, any> =
+        cfg.pageProfiles && typeof cfg.pageProfiles === 'object' ? { ...cfg.pageProfiles } : {};
+
+      const allPagesWithToken = pages.filter((p: any) => p.access_token);
+      if (allPagesWithToken.length === 0) {
+        return res.status(400).json({
+          error: 'No se encontró ninguna página de Facebook con access_token en fb_pages.',
+        });
+      }
+
+      const enabledPages = allPagesWithToken.filter(
+        (p: any) => pageProfiles[p.page_id]?.enabled !== false
+      );
+      const activePages = enabledPages.length > 0 ? enabledPages : allPagesWithToken;
+
       const requestedItem = req.body?.item;
       const requestedId = String(req.body?.itemId || requestedItem?.id || '').trim();
-
       let targetItem: any = requestedItem || vaultItems.find((x: any) => x.id === requestedId);
 
-      // Si es run_next (cron / automático), elegimos la primera pieza apta con stock > 0
+      const explicitPageId = String(req.query?.pageId || req.body?.pageId || '').trim();
+      let targetPagesToPublish: any[] = [];
+
+      const itemBelongsToPage = (item: any, pageId: string) => {
+        const assigned: string[] = Array.isArray(item.targetPageIds)
+          ? item.targetPageIds.filter(Boolean)
+          : [];
+        if (assigned.length > 0) return assigned.includes(pageId);
+        const fallbackPid = String(cfg.defaultPageId || activePages[0]?.page_id || '');
+        return !fallbackPid || fallbackPid === pageId;
+      };
+
+      // Si es run_next (cron / automático), elegimos por ?pageId= o Round-Robin por página menos reciente
       if (action === 'run_next' && !targetItem) {
-        const candidates = vaultItems.filter(
+        let candidatePages = activePages;
+        if (explicitPageId) {
+          candidatePages = allPagesWithToken.filter((p: any) => p.page_id === explicitPageId);
+          if (candidatePages.length === 0) {
+            return res.status(404).json({
+              error: `La página ${explicitPageId} no existe o no tiene access_token en fb_pages.`,
+            });
+          }
+        } else if (cfg.cronStrategy === 'default_only' && cfg.defaultPageId) {
+          const def = activePages.find((p: any) => p.page_id === cfg.defaultPageId);
+          if (def) candidatePages = [def];
+        } else {
+          // Round-Robin: primero las páginas que llevan más tiempo sin publicar
+          candidatePages = [...activePages].sort((a: any, b: any) => {
+            const ta = pageProfiles[a.page_id]?.lastPublishedAt
+              ? new Date(pageProfiles[a.page_id].lastPublishedAt).getTime()
+              : 0;
+            const tb = pageProfiles[b.page_id]?.lastPublishedAt
+              ? new Date(pageProfiles[b.page_id].lastPublishedAt).getTime()
+              : 0;
+            return ta - tb;
+          });
+        }
+
+        const readyCandidates = vaultItems.filter(
           (x: any) => x.status === 'programado' || x.status === 'listo'
         );
 
-        for (const cand of candidates) {
-          if (cand.sku && cfg.autoSkipOutOfStock !== false) {
-            const st = await checkSkuHasStock(supabase, cand.sku);
-            if (!st.ok) {
-              cand.status = 'pausado_stock';
-              cand.updatedAt = new Date().toISOString();
-              continue;
+        let chosenPage: any = null;
+        for (const p of candidatePages) {
+          for (const cand of readyCandidates) {
+            if (!itemBelongsToPage(cand, p.page_id)) continue;
+            if (cand.sku && cfg.autoSkipOutOfStock !== false) {
+              const st = await checkSkuHasStock(supabase, cand.sku);
+              if (!st.ok) {
+                cand.status = 'pausado_stock';
+                cand.updatedAt = new Date().toISOString();
+                continue;
+              }
             }
+            targetItem = cand;
+            chosenPage = p;
+            break;
           }
-          targetItem = cand;
-          break;
+          if (targetItem && chosenPage) break;
         }
 
-        if (!targetItem) {
+        if (!targetItem || !chosenPage) {
           await writeDocJson(supabase, VAULT_DOC_TITLE, vaultItems, vaultDoc.id);
           return res.status(200).json({
             ok: true,
             published: false,
-            reason: 'No hay piezas listas/programadas con stock disponible en este momento.',
+            reason: explicitPageId
+              ? `No hay piezas listas con stock disponible para la página seleccionada.`
+              : 'No hay piezas listas/programadas con stock disponible en ninguna página activa.',
           });
         }
+
+        targetPagesToPublish = [chosenPage];
       }
 
       if (!targetItem) {
@@ -530,14 +608,29 @@ Devuelve EXCLUSIVAMENTE un JSON válido con esta estructura exacta (sin markdown
         }
       }
 
-      const selectedPageId = String(req.body?.pageId || cfg.defaultPageId || '').trim();
-      const page =
-        pages.find((p: any) => p.page_id === selectedPageId && p.access_token) ||
-        pages.find((p: any) => p.access_token);
+      // Determinar páginas destino si fue publicación manual (action === 'publish')
+      if (targetPagesToPublish.length === 0) {
+        if (explicitPageId) {
+          const match = allPagesWithToken.find((p: any) => p.page_id === explicitPageId);
+          if (match) targetPagesToPublish = [match];
+        } else if (Array.isArray(req.body?.pageIds) && req.body.pageIds.length > 0) {
+          targetPagesToPublish = allPagesWithToken.filter((p: any) =>
+            req.body.pageIds.includes(p.page_id)
+          );
+        } else if (Array.isArray(targetItem.targetPageIds) && targetItem.targetPageIds.length > 0) {
+          targetPagesToPublish = allPagesWithToken.filter((p: any) =>
+            targetItem.targetPageIds.includes(p.page_id)
+          );
+        } else {
+          const fallback =
+            activePages.find((p: any) => p.page_id === cfg.defaultPageId) || activePages[0];
+          if (fallback) targetPagesToPublish = [fallback];
+        }
+      }
 
-      if (!page) {
+      if (targetPagesToPublish.length === 0) {
         return res.status(400).json({
-          error: 'No se encontró ninguna página de Facebook con access_token en fb_pages.',
+          error: 'Ninguna de las páginas seleccionadas tiene token válido en fb_pages.',
         });
       }
 
@@ -551,51 +644,86 @@ Devuelve EXCLUSIVAMENTE un JSON válido con esta estructura exacta (sin markdown
 
       const mediaType: 'imagen' | 'video' = targetItem.mediaType === 'video' ? 'video' : 'imagen';
       const mediaUrl = String(targetItem.videoEditadoUrl || targetItem.mediaUrl || '').trim();
-      const fbCaption = String(targetItem.copies?.fb || targetItem.titulo || 'Disponible en TODOENUNO').trim();
+      const fbCaption = String(targetItem.copies?.fb || targetItem.titulo || 'Disponible en tienda').trim();
       const igCaption = String(targetItem.copies?.ig || fbCaption).trim();
 
-      const results: {
-        fb?: { ok: boolean; postId?: string; error?: string };
-        ig?: { ok: boolean; mediaId?: string; error?: string };
-      } = {};
+      const nowIso = new Date().toISOString();
+      const fbByPage: Record<string, { ok: boolean; pageName: string; postId?: string; error?: string }> = {};
+      let firstFbSuccess: { ok: boolean; postId?: string; pageId: string; pageName: string } | null = null;
+      let igResult: { ok: boolean; mediaId?: string; error?: string } | undefined;
+      const errorsList: string[] = [];
 
-      if (wantFb) {
-        results.fb = await publishToFacebook({
-          pageId: page.page_id,
-          accessToken: page.access_token,
-          caption: fbCaption,
-          mediaType,
-          mediaUrl,
-        });
-      }
-
-      if (wantIg) {
-        const igUserId = String(
-          req.body?.igUserId || cfg.igAccountIdOverride || page.instagram_business_account?.id || ''
-        ).trim();
-
-        if (!igUserId) {
-          results.ig = {
-            ok: false,
-            error: 'Esta Facebook Page no tiene una cuenta de Instagram Business vinculada (o falta ID manual).',
-          };
-        } else {
-          results.ig = await publishToInstagram({
-            igUserId,
+      for (const page of targetPagesToPublish) {
+        if (wantFb) {
+          const fbRes = await publishToFacebook({
+            pageId: page.page_id,
             accessToken: page.access_token,
-            caption: igCaption,
+            caption: fbCaption,
             mediaType,
             mediaUrl,
           });
+          fbByPage[page.page_id] = {
+            ok: fbRes.ok,
+            pageName: page.page_name,
+            postId: fbRes.postId,
+            error: fbRes.error,
+          };
+          if (fbRes.ok) {
+            if (!firstFbSuccess) {
+              firstFbSuccess = {
+                ok: true,
+                postId: fbRes.postId,
+                pageId: page.page_id,
+                pageName: page.page_name,
+              };
+            }
+            pageProfiles[page.page_id] = {
+              pageId: page.page_id,
+              enabled: true,
+              niche: '',
+              tone: '',
+              ...(pageProfiles[page.page_id] || {}),
+              lastPublishedAt: nowIso,
+            };
+          } else if (fbRes.error) {
+            errorsList.push(`FB (${page.page_name}): ${fbRes.error}`);
+          }
+        }
+
+        if (wantIg && !igResult?.ok) {
+          const igUserId = String(
+            req.body?.igUserId || cfg.igAccountIdOverride || page.instagram_business_account?.id || ''
+          ).trim();
+          if (!igUserId) {
+            igResult = {
+              ok: false,
+              error: `La página "${page.page_name}" no tiene Instagram Business vinculado.`,
+            };
+            errorsList.push(`IG: ${igResult.error}`);
+          } else {
+            igResult = await publishToInstagram({
+              igUserId,
+              accessToken: page.access_token,
+              caption: igCaption,
+              mediaType,
+              mediaUrl,
+            });
+            if (!igResult.ok && igResult.error) {
+              errorsList.push(`IG: ${igResult.error}`);
+            }
+          }
         }
       }
 
-      const nowIso = new Date().toISOString();
-      const anySuccess = Boolean(results.fb?.ok || results.ig?.ok);
-      const errorsList = [
-        results.fb && !results.fb.ok ? `FB: ${results.fb.error}` : null,
-        results.ig && !results.ig.ok ? `IG: ${results.ig.error}` : null,
-      ].filter(Boolean);
+      const anySuccess = Boolean(firstFbSuccess?.ok || igResult?.ok);
+      const mergedFbPostsMap: Record<string, string> = {
+        ...(targetItem.publishResults?.fb_posts_by_page || {}),
+      };
+      for (const [pid, resEntry] of Object.entries(fbByPage)) {
+        if (resEntry.ok && resEntry.postId) {
+          mergedFbPostsMap[pid] = resEntry.postId;
+        }
+      }
 
       const idx = vaultItems.findIndex((x: any) => x.id === targetItem.id);
       const updatedItem = {
@@ -604,8 +732,10 @@ Devuelve EXCLUSIVAMENTE un JSON válido con esta estructura exacta (sin markdown
         updatedAt: nowIso,
         publishResults: {
           ...(targetItem.publishResults || {}),
-          ...(results.fb?.postId ? { fb_post_id: results.fb.postId } : {}),
-          ...(results.ig?.mediaId ? { ig_media_id: results.ig.mediaId } : {}),
+          ...(firstFbSuccess?.postId ? { fb_post_id: firstFbSuccess.postId } : {}),
+          ...(firstFbSuccess?.pageId ? { page_id: firstFbSuccess.pageId, page_name: firstFbSuccess.pageName } : {}),
+          ...(Object.keys(mergedFbPostsMap).length > 0 ? { fb_posts_by_page: mergedFbPostsMap } : {}),
+          ...(igResult?.mediaId ? { ig_media_id: igResult.mediaId } : {}),
           published_at: anySuccess ? nowIso : targetItem.publishResults?.published_at,
           error: errorsList.length > 0 ? errorsList.join(' | ') : undefined,
         },
@@ -616,7 +746,11 @@ Devuelve EXCLUSIVAMENTE un JSON válido con esta estructura exacta (sin markdown
       } else {
         vaultItems.unshift(updatedItem);
       }
-      await writeDocJson(supabase, VAULT_DOC_TITLE, vaultItems, vaultDoc.id);
+
+      await Promise.all([
+        writeDocJson(supabase, VAULT_DOC_TITLE, vaultItems, vaultDoc.id),
+        writeDocJson(supabase, DIST_CONFIG_DOC_TITLE, { ...cfg, pageProfiles }, cfgDoc.id),
+      ]);
 
       // Si vino vinculado a post_queue clásica, sincronizamos también esa tabla
       if (targetItem.legacyQueueId && anySuccess) {
@@ -625,14 +759,18 @@ Devuelve EXCLUSIVAMENTE un JSON válido con esta estructura exacta (sin markdown
           .update({
             status: 'posted',
             posted_at: nowIso,
-            ...(results.fb?.postId ? { fb_post_id: results.fb.postId } : {}),
+            ...(firstFbSuccess?.postId ? { fb_post_id: firstFbSuccess.postId } : {}),
           })
           .eq('id', targetItem.legacyQueueId);
       }
 
       return res.status(anySuccess ? 200 : 400).json({
         ok: anySuccess,
-        results,
+        results: {
+          fb: firstFbSuccess || Object.values(fbByPage)[0],
+          fbByPage,
+          ig: igResult,
+        },
         item: updatedItem,
         error: !anySuccess ? errorsList.join(' | ') || 'Falló la publicación en Meta' : undefined,
       });

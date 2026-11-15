@@ -543,7 +543,7 @@ export function ColaPage() {
             </h1>
             <p className="text-xs tx-mu mt-1">
               {colaView === 'bodega'
-                ? 'Sube piezas de marca, videos y productos; genera copies IA y distribuye a Facebook + Instagram Business evitando SKUs agotados.'
+                ? 'Organiza contenido por página y nicho desde fb_pages, genera copies IA y publica automáticamente evitando SKUs agotados.'
                 : 'Vista clásica conectada a la tabla post_queue para compatibilidad con flujos anteriores.'}
             </p>
           </div>
@@ -595,7 +595,7 @@ export function ColaPage() {
               }`}
             >
               <Film size={14} style={{ color: colaView === 'bodega' ? 'var(--ac)' : undefined }} />
-              Bodega & Distribuidora (FB + IG)
+              Bodega & Distribuidora Multi-Nicho
             </button>
             <button
               type="button"

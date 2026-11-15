@@ -33,6 +33,9 @@ export interface ContentCopies {
 
 export interface ContentPublishResults {
   fb_post_id?: string;
+  fb_posts_by_page?: Record<string, string>;
+  page_id?: string;
+  page_name?: string;
   ig_media_id?: string;
   yt_video_id?: string;
   published_at?: string;
@@ -51,6 +54,7 @@ export interface ContentVaultItem {
   evergreen: boolean;
   cooldownDays: number;
   status: ContentStatus;
+  targetPageIds?: string[];
   targets: ContentTargets;
   copies: ContentCopies;
   publishResults?: ContentPublishResults;
@@ -59,10 +63,22 @@ export interface ContentVaultItem {
   updatedAt: string;
 }
 
+export interface PageNicheProfile {
+  pageId: string;
+  enabled: boolean;
+  niche: string;
+  tone: string;
+  ctaKeyword?: string;
+  autoCategories?: string[];
+  lastPublishedAt?: string | null;
+}
+
 export interface SocialDistConfig {
   defaultPageId: string;
   igAccountIdOverride: string;
   autoSkipOutOfStock: boolean;
+  cronStrategy: 'round_robin' | 'default_only';
+  pageProfiles: Record<string, PageNicheProfile>;
   defaultTargets: ContentTargets;
   n8nWorkerWebhookUrl?: string;
 }
@@ -89,14 +105,34 @@ export const DEFAULT_DIST_CONFIG: SocialDistConfig = {
   defaultPageId: '',
   igAccountIdOverride: '',
   autoSkipOutOfStock: true,
+  cronStrategy: 'round_robin',
+  pageProfiles: {},
   defaultTargets: {
     facebook: true,
-    instagram: true,
+    instagram: false,
     youtube: false,
     tiktok: false,
   },
   n8nWorkerWebhookUrl: '',
 };
+
+export function resolvePagesForCategory(
+  categoria: string | null | undefined,
+  cfg: SocialDistConfig
+): string[] {
+  const cat = String(categoria || '').trim().toLowerCase();
+  if (!cat) return cfg.defaultPageId ? [cfg.defaultPageId] : [];
+  const matched: string[] = [];
+  for (const [pageId, prof] of Object.entries(cfg.pageProfiles || {})) {
+    if (!prof || prof.enabled === false) continue;
+    const cats = Array.isArray(prof.autoCategories) ? prof.autoCategories : [];
+    if (cats.some((c) => c.trim().toLowerCase() === cat || cat.includes(c.trim().toLowerCase()))) {
+      matched.push(pageId);
+    }
+  }
+  if (matched.length > 0) return matched;
+  return cfg.defaultPageId ? [cfg.defaultPageId] : [];
+}
 
 export const CONTENT_PILARS: Array<{
   id: ContentPilar;
@@ -194,6 +230,8 @@ export async function fetchSocialDistConfig(): Promise<SocialDistConfig> {
       const merged: SocialDistConfig = {
         ...DEFAULT_DIST_CONFIG,
         ...parsed,
+        cronStrategy: parsed?.cronStrategy === 'default_only' ? 'default_only' : 'round_robin',
+        pageProfiles: parsed?.pageProfiles && typeof parsed.pageProfiles === 'object' ? parsed.pageProfiles : {},
         defaultTargets: {
           ...DEFAULT_DIST_CONFIG.defaultTargets,
           ...(parsed?.defaultTargets || {}),
@@ -208,7 +246,19 @@ export async function fetchSocialDistConfig(): Promise<SocialDistConfig> {
 
   try {
     const raw = localStorage.getItem(LOCAL_CFG_KEY);
-    if (raw) return { ...DEFAULT_DIST_CONFIG, ...JSON.parse(raw) };
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        ...DEFAULT_DIST_CONFIG,
+        ...parsed,
+        cronStrategy: parsed?.cronStrategy === 'default_only' ? 'default_only' : 'round_robin',
+        pageProfiles: parsed?.pageProfiles && typeof parsed.pageProfiles === 'object' ? parsed.pageProfiles : {},
+        defaultTargets: {
+          ...DEFAULT_DIST_CONFIG.defaultTargets,
+          ...(parsed?.defaultTargets || {}),
+        },
+      };
+    }
   } catch {}
   return { ...DEFAULT_DIST_CONFIG };
 }
