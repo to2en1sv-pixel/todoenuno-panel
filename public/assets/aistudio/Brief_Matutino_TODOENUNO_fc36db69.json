@@ -1,0 +1,116 @@
+{
+  "name": "Brief Matutino TODOENUNO",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "a50a3a67-479c-4f2a-bf58-a306ee264f0f",
+      "name": "Todos los días 8AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        1024,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://trgywmhxmkbjfcdvxpnz.supabase.co/rest/v1/rpc/obtener_resumen_diario",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyZ3l3bWh4bWtiamZjZHZ4cG56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjM3OTQzMSwiZXhwIjoyMTA3OTU1NDMxfQ.U735gMP_0_3Mok0rskiFhXHDaHG0Ct-QegJG079Cl8A"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyZ3l3bWh4bWtiamZjZHZ4cG56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjM3OTQzMSwiZXhwIjoyMTA3OTU1NDMxfQ.U735gMP_0_3Mok0rskiFhXHDaHG0Ct-QegJG079Cl8A"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": {}
+      },
+      "id": "4f5d3bbd-03df-493c-9746-3f6b1985f788",
+      "name": "Obtener resumen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1248,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot9285977193:AAGW_A7jwApkAoaOKX0fo9Brnv4bzGRAPsk/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: 9087238722, text: $json.mensaje, parse_mode: 'Markdown' }) }}",
+        "options": {}
+      },
+      "id": "845e1866-b365-4b36-acac-83af9c712e38",
+      "name": "Enviar Brief",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1472,
+        480
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Todos los días 8AM": {
+      "main": [
+        [
+          {
+            "node": "Obtener resumen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obtener resumen": {
+      "main": [
+        [
+          {
+            "node": "Enviar Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "57ad859e-5573-428a-a178-cd53b4f6a05d",
+  "meta": {
+    "instanceId": "5503467d94f74366c43b24f2bbc6d5b2dfc53e327ef144640ab016cdc04c7803"
+  },
+  "nodeGroups": [],
+  "id": "mb75YnyokD7jYpkX",
+  "tags": []
+}
