@@ -109,16 +109,54 @@ async function ensureStorageBucket(supabase: any): Promise<{ ok: boolean; error?
 }
 
 async function fetchMetaPagesWithIg(supabase: any) {
-  const { data: pages, error } = await supabase
-    .from('fb_pages')
-    .select('page_id, page_name, access_token');
+  const [fbRes, pubRes] = await Promise.all([
+    supabase.from('fb_pages').select('page_id, page_name, access_token'),
+    supabase.from('fb_publish_pages').select('page_id, page_name, publish_token, niche, active'),
+  ]);
 
-  if (error) {
-    throw new Error(`Error leyendo fb_pages: ${error.message}`);
+  if (fbRes.error && pubRes.error) {
+    throw new Error(`Error leyendo páginas Meta: ${fbRes.error.message}`);
+  }
+
+  const fbRows = Array.isArray(fbRes.data) ? fbRes.data : [];
+  const pubRows = !pubRes.error && Array.isArray(pubRes.data) ? pubRes.data : [];
+  const pubTableReady = !pubRes.error;
+
+  const mergedMap = new Map<
+    string,
+    {
+      page_id: string;
+      page_name: string;
+      access_token: string;
+      token_source: 'fb_publish_pages' | 'fb_pages' | 'none';
+      niche?: string | null;
+    }
+  >();
+
+  for (const p of fbRows) {
+    mergedMap.set(p.page_id, {
+      page_id: p.page_id,
+      page_name: p.page_name || `Página ${p.page_id}`,
+      access_token: p.access_token || '',
+      token_source: p.access_token ? 'fb_pages' : 'none',
+    });
+  }
+
+  for (const p of pubRows) {
+    if (p.active === false) continue;
+    const prev = mergedMap.get(p.page_id);
+    const tok = p.publish_token || prev?.access_token || '';
+    mergedMap.set(p.page_id, {
+      page_id: p.page_id,
+      page_name: p.page_name || prev?.page_name || `Página ${p.page_id}`,
+      access_token: tok,
+      token_source: p.publish_token ? 'fb_publish_pages' : prev?.token_source || 'none',
+      niche: p.niche || null,
+    });
   }
 
   const enriched = await Promise.all(
-    (pages || []).map(async (p: any) => {
+    Array.from(mergedMap.values()).map(async (p) => {
       let igAccount: { id: string; username?: string; profile_picture_url?: string } | null = null;
       let igError: string | null = null;
       if (p.access_token) {
@@ -142,9 +180,12 @@ async function fetchMetaPagesWithIg(supabase: any) {
 
       return {
         page_id: p.page_id,
-        page_name: p.page_name || `Página ${p.page_id}`,
+        page_name: p.page_name,
         has_token: Boolean(p.access_token),
-        access_token: p.access_token || '',
+        token_source: p.token_source,
+        pub_table_ready: pubTableReady,
+        niche: p.niche || null,
+        access_token: p.access_token,
         instagram_business_account: igAccount,
         igError,
       };
@@ -355,8 +396,74 @@ export default async function handler(req: any, res: any) {
 
       return res.status(200).json({
         ok: true,
+        pubTableReady: Boolean(pages[0]?.pub_table_ready),
         pages: pages.map(({ access_token: _tok, ...safe }) => safe),
         config: cfgDoc.data || {},
+      });
+    }
+
+    /* 1B. VERIFICAR PERMISOS REALES DE CADA TOKEN (SIN EXPONER TOKENS) */
+    if (action === 'check_permissions') {
+      const pages = await fetchMetaPagesWithIg(supabase);
+      const checked = await Promise.all(
+        pages.map(async ({ access_token, ...safe }) => {
+          if (!access_token) {
+            return {
+              ...safe,
+              tokenValid: false,
+              canPublish: false,
+              canInbox: false,
+              permissions: [] as string[],
+              error: 'Sin token configurado',
+            };
+          }
+          try {
+            const pRes = await fetch(
+              `https://graph.facebook.com/${GRAPH_VERSION}/me/permissions?access_token=${encodeURIComponent(
+                access_token
+              )}`
+            );
+            const pJson = await pRes.json().catch(() => ({}));
+            if (!pRes.ok || pJson?.error) {
+              return {
+                ...safe,
+                tokenValid: false,
+                canPublish: false,
+                canInbox: false,
+                permissions: [] as string[],
+                error: pJson?.error?.message || `Meta HTTP ${pRes.status}`,
+              };
+            }
+            const granted = (Array.isArray(pJson?.data) ? pJson.data : [])
+              .filter((x: any) => x.status === 'granted')
+              .map((x: any) => String(x.permission));
+
+            return {
+              ...safe,
+              tokenValid: true,
+              canPublish: granted.includes('pages_manage_posts'),
+              canInbox: granted.includes('pages_messaging'),
+              canIgPublish: granted.includes('instagram_content_publish'),
+              permissions: granted,
+              error: null,
+            };
+          } catch (err: any) {
+            return {
+              ...safe,
+              tokenValid: false,
+              canPublish: false,
+              canInbox: false,
+              permissions: [] as string[],
+              error: err?.message || 'Error consultando permisos',
+            };
+          }
+        })
+      );
+
+      return res.status(200).json({
+        ok: true,
+        pubTableReady: Boolean(pages[0]?.pub_table_ready),
+        pages: checked,
       });
     }
 

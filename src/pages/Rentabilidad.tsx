@@ -3,7 +3,8 @@ import { supabase } from '@/lib/supabase'
 import { emitOsEvent } from '@/lib/osEvents'
 import { KpiCard } from '@/components/KpiCard'
 import { BovedaProductosRoas } from '@/components/BovedaProductosRoas'
-import { Sparkles, BarChart3, Layers } from 'lucide-react'
+import { MetaAdsLiveView } from '@/components/rentabilidad/MetaAdsLiveView'
+import { Sparkles, BarChart3, Zap, RefreshCw } from 'lucide-react'
 import {
   construirRoas,
   etiquetaMes,
@@ -28,12 +29,13 @@ const FORM_INICIAL = {
 }
 
 export function RentabilidadPage() {
-  const [vistaActiva, setVistaActiva] = useState<'mensual' | 'boveda'>('mensual')
+  const [vistaActiva, setVistaActiva] = useState<'mensual' | 'meta_ads' | 'boveda'>('mensual')
   const [mes, setMes] = useState<string>(mesActual())
   const [gastos, setGastos] = useState<GastoPublicidad[]>([])
   const [ordenes, setOrdenes] = useState<OrdenWhatsapp[]>([])
   const [cargando, setCargando] = useState<boolean>(true)
   const [guardando, setGuardando] = useState<boolean>(false)
+  const [syncingMeta, setSyncingMeta] = useState<boolean>(false)
   const [eliminandoId, setEliminandoId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [exito, setExito] = useState<string | null>(null)
@@ -81,6 +83,40 @@ export function RentabilidadPage() {
   useEffect(() => {
     void cargarDatos()
   }, [cargarDatos])
+
+  const handleQuickMetaSync = async () => {
+    setSyncingMeta(true)
+    setError(null)
+    setExito(null)
+    try {
+      const res = await fetch('/api/meta-ads-sync?action=sync&days=2', { method: 'POST' })
+      const ct = res.headers.get('content-type') || ''
+      if (!ct.includes('application/json')) {
+        setError('La sincronización con Meta Ads requiere el servidor API desplegado en Vercel.')
+        return
+      }
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data?.error || 'No se pudo sincronizar con Meta Ads.')
+        return
+      }
+      if (!data.connected) {
+        setError(
+          data.message ||
+            'Falta configurar tus tokens de System User en Supabase (meta_ad_accounts). Revisa la pestaña Meta Ads Live o Sistema.'
+        )
+        return
+      }
+      setExito(
+        `Meta Ads sincronizado (${data.since} → ${data.until}): ${data.syncedSpendRows ?? 0} registros en gastos_publicidad.`
+      )
+      await cargarDatos()
+    } catch (err: any) {
+      setError(err?.message || 'Error conectando con /api/meta-ads-sync')
+    } finally {
+      setSyncingMeta(false)
+    }
+  }
 
   /* ----------------------------- Acciones ---------------------------- */
 
@@ -229,6 +265,16 @@ export function RentabilidadPage() {
             <BarChart3 size={14} /> ROAS Mensual
           </button>
           <button
+            onClick={() => setVistaActiva('meta_ads')}
+            className={`flex-1 lg:flex-none px-3.5 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap ${
+              vistaActiva === 'meta_ads'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-indigo-700 dark:text-indigo-400 hover:bg-indigo-100/60'
+            }`}
+          >
+            <Zap size={14} /> Meta Ads Live
+          </button>
+          <button
             onClick={() => setVistaActiva('boveda')}
             className={`flex-1 lg:flex-none px-3.5 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap ${
               vistaActiva === 'boveda'
@@ -241,9 +287,11 @@ export function RentabilidadPage() {
         </div>
       </header>
 
-      {/* RENDER CONDICIONAL DE LA BÓVEDA */}
+      {/* RENDER CONDICIONAL DE VISTAS */}
       {vistaActiva === 'boveda' ? (
         <BovedaProductosRoas />
+      ) : vistaActiva === 'meta_ads' ? (
+        <MetaAdsLiveView onSynced={cargarDatos} />
       ) : (
         <>
           {error ? (
@@ -257,6 +305,39 @@ export function RentabilidadPage() {
               {exito}
             </div>
           ) : null}
+
+          {/* Barra rápida de Meta Ads Sync */}
+          <section className="rounded-xl border border-indigo-200 bg-indigo-50/60 px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Zap size={18} className="text-indigo-600 shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-slate-900">
+                  Importación automática de gastos desde Meta Ads
+                </div>
+                <p className="text-[11px] text-slate-600">
+                  Sincroniza el gasto real de ayer y hoy directamente en <code className="font-mono">gastos_publicidad</code> sin cargar a mano.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => void handleQuickMetaSync()}
+                disabled={syncingMeta}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60"
+              >
+                <RefreshCw size={13} className={syncingMeta ? 'animate-spin' : ''} />
+                {syncingMeta ? 'Sincronizando…' : 'Sincronizar Meta Ads (Hoy/Ayer)'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setVistaActiva('meta_ads')}
+                className="inline-flex items-center gap-1 rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50"
+              >
+                Abrir Meta Ads Live →
+              </button>
+            </div>
+          </section>
 
       {/* A. Formulario de gasto manual */}
       <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">

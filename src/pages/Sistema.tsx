@@ -15,9 +15,12 @@ import {
 } from '@/lib/whatsappTemplates';
 import {
   Activity,
+  AlertTriangle,
   Bot,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Code,
   Copy,
@@ -36,6 +39,7 @@ import {
   Sparkles,
   Trash2,
   XCircle,
+  Zap,
 } from 'lucide-react';
 
 type CronJob = {
@@ -58,6 +62,60 @@ type TableHealth = {
 };
 
 type SistemaTab = 'plantillas' | 'todd' | 'stream' | 'diagnostico' | 'architecture';
+
+type MetaPagePermStatus = {
+  page_id: string;
+  page_name: string;
+  niche?: string | null;
+  token_source?: 'fb_publish_pages' | 'fb_pages' | 'none';
+  has_token?: boolean;
+  tokenValid: boolean;
+  canPublish: boolean;
+  canInbox: boolean;
+  canIgPublish?: boolean;
+  permissions?: string[];
+  error?: string | null;
+};
+
+type MetaAdsStatusData = {
+  tableReady: boolean;
+  connected: boolean;
+  status: 'missing_table' | 'pending_tokens' | 'connected';
+  message?: string;
+  lastSyncedAt?: string | null;
+  accounts: Array<{
+    ad_account_id: string;
+    account_name: string;
+    page_id?: string | null;
+    currency: string;
+    active: boolean;
+    has_token: boolean;
+    last_synced_at?: string | null;
+  }>;
+};
+
+const META_TOKENS_SETUP_SQL = `-- TODOENUNO OS · Tablas Seguras para Tokens (RLS sin políticas para anon)
+CREATE TABLE IF NOT EXISTS public.fb_publish_pages (
+  page_id TEXT PRIMARY KEY,
+  page_name TEXT NOT NULL,
+  publish_token TEXT NOT NULL,
+  niche TEXT,
+  active BOOLEAN NOT NULL DEFAULT true,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE public.fb_publish_pages ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.meta_ad_accounts (
+  ad_account_id TEXT PRIMARY KEY, -- Ej: act_123456789012345
+  account_name TEXT NOT NULL,
+  access_token TEXT NOT NULL,
+  page_id TEXT,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  active BOOLEAN NOT NULL DEFAULT true,
+  last_synced_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE public.meta_ad_accounts ENABLE ROW LEVEL SECURITY;`;
 
 function resolveTabParam(raw: string | null): SistemaTab {
   if (raw === 'plantillas') return 'plantillas';
@@ -256,6 +314,74 @@ export function SistemaPage() {
   const [checkingTables, setCheckingTables] = useState(false);
   const [toddBridgeOk, setToddBridgeOk] = useState<{ ok: boolean; detail: string } | null>(null);
 
+  // Infraestructura Meta (Páginas + Ads) sin exponer tokens
+  const [checkingMeta, setCheckingMeta] = useState(false);
+  const [metaApiUnavailable, setMetaApiUnavailable] = useState(false);
+  const [metaPubTableReady, setMetaPubTableReady] = useState<boolean | null>(null);
+  const [metaPagesStatus, setMetaPagesStatus] = useState<MetaPagePermStatus[]>([]);
+  const [metaAdsStatus, setMetaAdsStatus] = useState<MetaAdsStatusData | null>(null);
+  const [metaInfraError, setMetaInfraError] = useState<string | null>(null);
+  const [showMetaSql, setShowMetaSql] = useState(false);
+  const [copiedMetaSql, setCopiedMetaSql] = useState(false);
+  const [copiedMetaCron, setCopiedMetaCron] = useState(false);
+
+  const metaCronUrl = useMemo(() => {
+    const origin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'https://todoenuno-panel.vercel.app';
+    return `${origin}/api/meta-ads-sync?action=sync&days=2`;
+  }, []);
+
+  const checkMetaInfra = useCallback(async () => {
+    setCheckingMeta(true);
+    setMetaInfraError(null);
+    setMetaApiUnavailable(false);
+    try {
+      const [permRes, adsRes] = await Promise.all([
+        fetch('/api/content-distribute?action=check_permissions'),
+        fetch('/api/meta-ads-sync?action=status'),
+      ]);
+
+      const permCt = permRes.headers.get('content-type') || '';
+      const adsCt = adsRes.headers.get('content-type') || '';
+
+      if (!permCt.includes('application/json') || !adsCt.includes('application/json')) {
+        setMetaApiUnavailable(true);
+        return;
+      }
+
+      const [permJson, adsJson] = await Promise.all([
+        permRes.json().catch(() => null),
+        adsRes.json().catch(() => null),
+      ]);
+
+      if (permRes.ok && permJson?.ok) {
+        setMetaPubTableReady(Boolean(permJson.pubTableReady));
+        setMetaPagesStatus(Array.isArray(permJson.pages) ? permJson.pages : []);
+      } else if (permJson?.error) {
+        setMetaInfraError(permJson.error);
+      }
+
+      if (adsRes.ok && adsJson?.ok) {
+        setMetaAdsStatus({
+          tableReady: Boolean(adsJson.tableReady),
+          connected: Boolean(adsJson.connected),
+          status: adsJson.status || 'pending_tokens',
+          message: adsJson.message,
+          lastSyncedAt: adsJson.lastSyncedAt || null,
+          accounts: Array.isArray(adsJson.accounts) ? adsJson.accounts : [],
+        });
+      } else if (adsJson?.error) {
+        setMetaInfraError((prev) => prev || adsJson.error);
+      }
+    } catch (err: any) {
+      setMetaInfraError(err?.message || 'Error consultando infraestructura Meta');
+    } finally {
+      setCheckingMeta(false);
+    }
+  }, []);
+
   const checkCrons = useCallback(async () => {
     setIsCheckingCrons(true);
     setCronError('');
@@ -326,8 +452,9 @@ export function SistemaPage() {
     if (activeTab === 'diagnostico') {
       void checkCrons();
       void runSystemHealthCheck();
+      void checkMetaInfra();
     }
-  }, [activeTab, checkCrons, runSystemHealthCheck]);
+  }, [activeTab, checkCrons, runSystemHealthCheck, checkMetaInfra]);
 
   const fmtTime = (ts: number) => {
     if (!ts) return '—';
@@ -852,6 +979,201 @@ export function SistemaPage() {
                     No se encontraron tareas registradas en cron-job.org.
                   </div>
                 )}
+              </div>
+            </section>
+
+            {/* Infraestructura Segura Meta (Páginas + Ads) */}
+            <section className="bg-cd bd rounded-2xl p-5 flex flex-col gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Zap size={16} style={{ color: 'var(--ac)' }} />
+                    <h2 className="text-sm font-semibold">Infraestructura Segura Meta (Páginas + Ads)</h2>
+                  </div>
+                  <p className="text-[11px] tx-mu mt-0.5">
+                    Verifica permisos desde el servidor (<code className="mono">/me/permissions</code>) sin exponer tokens en el navegador.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={checkMetaInfra}
+                  disabled={checkingMeta}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sf bd text-xs font-medium rounded-xl disabled:opacity-50 cursor-pointer self-start sm:self-auto shrink-0"
+                >
+                  <RefreshCw size={13} className={checkingMeta ? 'animate-spin' : ''} />
+                  {checkingMeta ? 'Verificando...' : 'Verificar permisos Meta'}
+                </button>
+              </div>
+
+              {metaApiUnavailable && (
+                <div className="p-3 bg-sf bd rounded-xl text-xs tx-mu flex items-center gap-2">
+                  <AlertTriangle size={14} style={{ color: 'var(--wa)' }} />
+                  <span>
+                    Los endpoints <code className="mono">/api/content-distribute</code> y <code className="mono">/api/meta-ads-sync</code> se ejecutan en producción (Vercel). Al desplegar verás aquí el estado en vivo de tus 4 páginas y cuentas publicitarias.
+                  </span>
+                </div>
+              )}
+
+              {metaInfraError && (
+                <div
+                  className="p-3 bg-sf bd text-xs rounded-xl"
+                  style={{ borderColor: 'var(--er)', color: 'var(--er)' }}
+                >
+                  {metaInfraError}
+                </div>
+              )}
+
+              {/* Estado de tablas RLS */}
+              {!metaApiUnavailable && (metaPubTableReady !== null || metaAdsStatus) && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="p-3 bg-sf bd rounded-xl flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold truncate">Tabla fb_publish_pages</div>
+                      <div className="text-[11px] tx-mu truncate">Tokens publicación (sin tocar Social Inbox)</div>
+                    </div>
+                    <span
+                      className="text-[11px] font-bold shrink-0"
+                      style={{ color: metaPubTableReady ? 'var(--ok)' : 'var(--wa)' }}
+                    >
+                      {metaPubTableReady ? 'Tabla lista' : 'Ejecutar SQL'}
+                    </span>
+                  </div>
+
+                  <div className="p-3 bg-sf bd rounded-xl flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold truncate">Tabla meta_ad_accounts</div>
+                      <div className="text-[11px] tx-mu truncate">
+                        {metaAdsStatus?.connected
+                          ? `${metaAdsStatus.accounts.filter((a) => a.active && a.has_token).length} cuenta(s) activa(s)`
+                          : metaAdsStatus?.tableReady
+                            ? 'Lista · Pendiente de tokens'
+                            : 'Ejecutar SQL'}
+                      </div>
+                    </div>
+                    <span
+                      className="text-[11px] font-bold shrink-0"
+                      style={{
+                        color: metaAdsStatus?.connected
+                          ? 'var(--ok)'
+                          : metaAdsStatus?.tableReady
+                            ? 'var(--ac)'
+                            : 'var(--wa)',
+                      }}
+                    >
+                      {metaAdsStatus?.connected
+                        ? 'Conectado'
+                        : metaAdsStatus?.tableReady
+                          ? 'Pendiente'
+                          : 'Falta SQL'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Lista de páginas y permisos detectados */}
+              {metaPagesStatus.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-[11px] font-semibold tx-mu uppercase tracking-wider">
+                    Permisos por Página Facebook ({metaPagesStatus.length})
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {metaPagesStatus.map((p) => (
+                      <div key={p.page_id} className="p-3 bg-sf bd rounded-xl space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold truncate">{p.page_name}</span>
+                          <span className="text-[10px] mono px-1.5 py-0.5 rounded bg-cd bd tx-mu shrink-0">
+                            {p.token_source === 'fb_publish_pages'
+                              ? 'fb_publish_pages'
+                              : p.token_source === 'fb_pages'
+                                ? 'fb_pages (Inbox)'
+                                : 'Sin token'}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                          <span
+                            className="inline-flex items-center gap-1 font-medium"
+                            style={{ color: p.canPublish ? 'var(--ok)' : 'var(--er)' }}
+                          >
+                            {p.canPublish ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                            pages_manage_posts
+                          </span>
+                          <span
+                            className="inline-flex items-center gap-1 font-medium"
+                            style={{ color: p.canInbox ? 'var(--ok)' : 'var(--mu)' }}
+                          >
+                            {p.canInbox ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+                            pages_messaging
+                          </span>
+                        </div>
+                        {p.error && (
+                          <div className="text-[11px] truncate" style={{ color: 'var(--er)' }} title={p.error}>
+                            {p.error}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Bloque SQL copiable con RLS */}
+              <div className="p-3.5 bg-sf bd rounded-xl space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowMetaSql((v) => !v)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer hover:opacity-80"
+                  >
+                    <Code size={14} style={{ color: 'var(--ac)' }} />
+                    SQL de creación segura en Supabase (RLS sin políticas públicas)
+                    {showMetaSql ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(META_TOKENS_SETUP_SQL);
+                      setCopiedMetaSql(true);
+                      setTimeout(() => setCopiedMetaSql(false), 2000);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cd bd text-[11px] font-medium cursor-pointer"
+                  >
+                    {copiedMetaSql ? <Check size={12} style={{ color: 'var(--ok)' }} /> : <Copy size={12} />}
+                    {copiedMetaSql ? 'SQL copiado' : 'Copiar SQL'}
+                  </button>
+                </div>
+
+                {showMetaSql && (
+                  <pre className="p-3 rounded-lg bg-cd bd text-[11px] mono overflow-x-auto leading-relaxed tx-mu">
+                    {META_TOKENS_SETUP_SQL}
+                  </pre>
+                )}
+              </div>
+
+              {/* Cron URL recomendado para Meta Ads Sync */}
+              <div className="p-3.5 bg-sf bd rounded-xl space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold">Endpoint Cron diario de Meta Ads</div>
+                    <p className="text-[11px] tx-mu">
+                      Recomendado programar en cron-job.org todos los días a las <strong>4:55 PM</strong> (antes del Brief Nocturno de las 5:00 PM).
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(metaCronUrl);
+                      setCopiedMetaCron(true);
+                      setTimeout(() => setCopiedMetaCron(false), 2000);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cd bd text-[11px] font-medium cursor-pointer shrink-0"
+                  >
+                    {copiedMetaCron ? <Check size={12} style={{ color: 'var(--ok)' }} /> : <Copy size={12} />}
+                    {copiedMetaCron ? 'URL copiada' : 'Copiar URL Cron'}
+                  </button>
+                </div>
+                <div className="p-2 rounded-lg bg-cd bd text-[11px] mono truncate tx-mu">
+                  {metaCronUrl}
+                </div>
               </div>
             </section>
           </div>
