@@ -1035,21 +1035,65 @@ interface DraftItem {
   subtotal: number;
 }
 
-interface PurchaseDraft {
-  id: string;
-  chatId: string;
-  status: 'pending' | 'confirmed' | 'cancelled';
-  createdAt: string;
-  proveedor: string;
-  notas: string;
-  account_id: string;
-  account_nombre: string;
-  asentar_en_finanzas_sugerido: boolean;
-  items: DraftItem[];
-  total: number;
-  unmatchedNotes?: string[];
-  rawInput?: string;
-}
+type TelegramDraft =
+  | {
+      id: string;
+      kind?: 'compra';
+      chatId: string;
+      status: 'pending' | 'confirmed' | 'cancelled';
+      createdAt: string;
+      proveedor: string;
+      notas: string;
+      account_id: string;
+      account_nombre: string;
+      asentar_en_finanzas_sugerido: boolean;
+      items: DraftItem[];
+      total: number;
+      unmatchedNotes?: string[];
+      rawInput?: string;
+    }
+  | {
+      id: string;
+      kind: 'gasto_operativo';
+      chatId: string;
+      status: 'pending' | 'confirmed' | 'cancelled';
+      createdAt: string;
+      monto: number;
+      categoria: string;
+      descripcion: string;
+      account_id: string;
+      account_nombre: string;
+      rawInput?: string;
+    }
+  | {
+      id: string;
+      kind: 'gasto_pauta';
+      chatId: string;
+      status: 'pending' | 'confirmed' | 'cancelled';
+      createdAt: string;
+      monto: number;
+      codigo_anuncio: string;
+      plataforma: 'Meta' | 'TikTok' | 'Google' | 'WhatsApp' | 'Otro';
+      notas: string;
+      account_id: string;
+      account_nombre: string;
+      rawInput?: string;
+    }
+  | {
+      id: string;
+      kind: 'ajuste_inventario';
+      chatId: string;
+      status: 'pending' | 'confirmed' | 'cancelled';
+      createdAt: string;
+      sku: string;
+      nombre: string;
+      tipo_movimiento: 'merma_dano' | 'ajuste_positivo' | 'ajuste_negativo';
+      cantidad: number;
+      stock_actual: number;
+      stock_resultante: number;
+      motivo: string;
+      rawInput?: string;
+    };
 
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -1190,6 +1234,12 @@ async function writeDocJson(supabase: any, titulo: string, payload: unknown, exi
   }
 }
 
+async function saveDraft(supabase: any, draft: TelegramDraft) {
+  const draftsDoc = await readDocJson<TelegramDraft[]>(supabase, DRAFTS_DOC_TITLE, []);
+  const nextDrafts = [draft, ...(Array.isArray(draftsDoc.data) ? draftsDoc.data : [])].slice(0, 25);
+  await writeDocJson(supabase, DRAFTS_DOC_TITLE, nextDrafts, draftsDoc.id);
+}
+
 async function fetchActiveStockCatalog(supabase: any) {
   const { data, error } = await supabase
     .from('inventory_stock')
@@ -1270,11 +1320,57 @@ async function downloadTelegramPhotoAsDataUrl(fileId: string): Promise<string> {
   return `data:${mime};base64,${bytes.toString('base64')}`;
 }
 
+async function transcribeTelegramAudio(
+  fileId: string,
+  mimeType = 'audio/ogg',
+  fileName?: string
+): Promise<string> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!token) throw new Error('Falta TELEGRAM_BOT_TOKEN en Vercel');
+  if (!apiKey) throw new Error('Falta OPENAI_API_KEY en Vercel para transcribir audio');
+
+  const fileInfo = await tgCall('getFile', { file_id: fileId });
+  const filePath = String(fileInfo?.file_path || '');
+  if (!filePath) throw new Error('Telegram no devolvió ruta del audio');
+
+  const fileRes = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+  if (!fileRes.ok) {
+    throw new Error(`No se pudo descargar el audio desde Telegram (${fileRes.status})`);
+  }
+
+  const arrayBuf = await fileRes.arrayBuffer();
+  const extFromPath = filePath.split('.').pop()?.toLowerCase();
+  const safeExt =
+    extFromPath === 'oga' || extFromPath === 'ogg'
+      ? 'ogg'
+      : extFromPath || 'ogg';
+  const safeName = fileName || `voice.${safeExt}`;
+  const blob = new Blob([arrayBuf], { type: mimeType || 'audio/ogg' });
+
+  const formData = new FormData();
+  formData.append('file', blob, safeName);
+  formData.append('model', 'whisper-1');
+  formData.append('language', 'es');
+
+  const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: formData,
+  });
+  const whisperJson = await whisperRes.json().catch(() => ({}));
+  if (!whisperRes.ok) {
+    throw new Error(whisperJson?.error?.message || `Whisper HTTP ${whisperRes.status}`);
+  }
+  return String(whisperJson?.text || '').trim();
+}
+
 async function interpretWithOpenAI(params: {
   text: string;
   imageDataUrl?: string | null;
   catalog: any[];
   accounts: any[];
+  intentHint?: string;
 }) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -1285,7 +1381,7 @@ async function interpretWithOpenAI(params: {
     .slice(0, 120)
     .map(
       (i: any) =>
-        `- SKU: ${i.sku} | Nombre: ${i.nombre} | Costo actual: $${Number(i.costo_unitario || 0).toFixed(2)} | Disp: ${Number(i.stock_disponible || 0)}`
+        `- SKU: ${i.sku} | Nombre: ${i.nombre} | Costo: $${Number(i.costo_unitario || 0).toFixed(2)} | Físico: ${Number(i.stock_fisico || 0)} | Disp: ${Number(i.stock_disponible || 0)}`
     )
     .join('\n');
 
@@ -1296,8 +1392,8 @@ async function interpretWithOpenAI(params: {
     )
     .join('\n');
 
-  const systemPrompt = `Eres el asistente operativo de inventario y compras de TODOENUNO OS en El Salvador.
-Analizas mensajes de texto o fotos de facturas/recibos de compras a proveedores que el dueño envía por Telegram.
+  const systemPrompt = `Eres el asistente operativo integral de TODOENUNO OS en El Salvador (compras, gastos, pauta, pedidos COD e inventario).
+Analizas texto, transcripciones de notas de voz o fotos de recibos/facturas enviados por Telegram.
 
 CATÁLOGO ACTIVO DE INVENTARIO (usa EXACTAMENTE el SKU del catálogo cuando corresponda):
 ${catalogLines || '(Sin productos registrados)'}
@@ -1306,28 +1402,42 @@ CUENTAS DE DINERO / CAJAS EN FINANZAS:
 ${accountLines}
 
 REGLAS ESTRICTAS:
-1. Clasifica "intent":
-   - "compra": cuando el usuario reporta una compra, factura, recibo o ingreso de mercadería/unidades.
-   - "consulta_stock": si solo pregunta cuánto stock hay de uno o más productos.
-   - "consulta_brief": si pide el resumen/brief/ventas del día.
-   - "otro": saludo o mensaje no relacionado.
-2. Si "intent" = "compra":
-   - Extrae cada línea de producto en "items":
-     - "sku": código SKU exacto del catálogo que mejor coincide (o "" si definitivamente no existe en el catálogo).
-     - "raw_name": nombre tal como viene en el mensaje o factura.
-     - "cantidad": entero positivo.
-     - "costo_unitario": número >= 0 (si viene el total de la línea en la factura en vez del unitario, divídelo entre la cantidad para obtener el costo_unitario; si no menciona precio, usa el costo actual del catálogo o 0).
-   - "proveedor": nombre del proveedor o tienda (ej. "MotoParts", "Importadora X", o "Proveedor" si no se menciona).
-   - "account_id": id exacto de la cuenta que mejor coincide si mencionó pago ("efectivo"/"caja" -> caja_chica, "banco"/"transferencia" -> banco_principal), si no mencionó usa "${params.accounts[0]?.id || 'banco_principal'}".
-   - "asentar_en_finanzas": true si mencionó que pagó / efectivo / transferencia / caja / banco o envió factura pagada; false si solo dijo ingresar stock.
-   - "notas": breve nota útil (ej. número de factura o detalle extra).
-3. Devuelve EXCLUSIVAMENTE JSON válido con este formato:
+1. Clasifica "intent" en UNA de estas opciones:
+   - "compra": compra de mercadería/inventario o ingreso de unidades para reventa (factura de proveedor, "compré X unidades de producto Y").
+   - "gasto_pauta": pago/inversión en publicidad o anuncios ("pagué $30 de pauta", "metí $25 a Meta Ads en PROMO1", "anuncio CASCO").
+   - "gasto_operativo": gasto del negocio que NO es compra de mercadería para reventa ni pauta ("pagué $20 de gasolina", "bolsas de empaque", "almuerzo", "flete", "internet", "sueldo").
+   - "ajuste_inventario": daño, merma, pérdida, muestra regalada o corrección por conteo físico ("se dañaron 2 cascos", "merma 1 unidad", "en bodega solo quedan 8 cascos").
+   - "consulta_pedido": busca un pedido por nombre de cliente, teléfono, código o estado ("¿cómo va el pedido de Tatiana?", "busca el 70231940").
+   - "consulta_pendientes": pregunta qué hay pendiente por empacar, en ruta, encargos o por liquidar.
+   - "consulta_stock": pregunta cuánto stock hay de uno o más productos.
+   - "consulta_brief": pide el brief / resumen de ventas del día.
+   - "otro": saludo o tema ajeno.
+${params.intentHint ? `\nPISTA DE CONTEXTO: El usuario inició con el comando ${params.intentHint}.\n` : ''}
+2. Detalles por intent:
+   - Si "compra": llena "items" [{ "sku", "raw_name", "cantidad", "costo_unitario" }], "proveedor", "account_id", "asentar_en_finanzas", "notas". (Si en factura viene total de línea, divide entre cantidad para obtener costo_unitario).
+   - Si "gasto_operativo": llena "monto" (>0), "descripcion", "account_id", y "categoria" entre: "flete_envio", "empaque_suministros", "alquiler_servicios", "nomina_sueldos", "suscripciones", "comision_pasarela", "gasto_manual", "otro_gasto".
+   - Si "gasto_pauta": llena "monto" (>0), "codigo_anuncio" (en MAYÚSCULAS, ej. "PROMO1", o "GENERAL" si no menciona código), "plataforma" ("Meta"|"TikTok"|"Google"|"WhatsApp"|"Otro"), "account_id", "notas".
+   - Si "ajuste_inventario": llena "adjustment_mode": "merma" (daño/pérdida/muestra), "delta_positivo" (sumar), "delta_negativo" (restar), o "conteo_exacto" (fijar stock físico total); llena "sku", "raw_name", "cantidad" (entero >= 0: si es conteo_exacto es la cantidad final observada en bodega, si es merma/delta es las unidades que salen/entran), y "motivo".
+   - Si "consulta_pedido" o "consulta_stock": pon en "search_query" el nombre, teléfono, código o producto buscado.
+   - En "account_id": elige el id exacto ("efectivo"/"caja" -> caja_chica, "banco"/"transferencia" -> banco_principal), o "${params.accounts[0]?.id || 'caja_chica'}" si no menciona.
+
+3. Devuelve EXCLUSIVAMENTE JSON válido con esta estructura:
 {
-  "intent": "compra" | "consulta_stock" | "consulta_brief" | "otro",
+  "intent": "compra" | "gasto_operativo" | "gasto_pauta" | "ajuste_inventario" | "consulta_pedido" | "consulta_pendientes" | "consulta_stock" | "consulta_brief" | "otro",
   "search_query": "",
   "proveedor": "",
   "account_id": "",
   "asentar_en_finanzas": true,
+  "monto": 0,
+  "categoria": "gasto_manual",
+  "descripcion": "",
+  "codigo_anuncio": "",
+  "plataforma": "Meta",
+  "adjustment_mode": "merma",
+  "sku": "",
+  "raw_name": "",
+  "cantidad": 0,
+  "motivo": "",
   "notas": "",
   "items": [
     { "sku": "", "raw_name": "", "cantidad": 0, "costo_unitario": 0 }
@@ -1341,7 +1451,7 @@ REGLAS ESTRICTAS:
   } else {
     userContent.push({
       type: 'text',
-      text: 'Extrae los productos, cantidades, costos y proveedor de esta imagen de compra/factura.',
+      text: 'Extrae la compra de mercadería o el gasto (monto, concepto, productos, cantidades, costos y proveedor) de esta imagen.',
     });
   }
   if (params.imageDataUrl) {
@@ -1360,7 +1470,7 @@ REGLAS ESTRICTAS:
     body: JSON.stringify({
       model: 'gpt-4o-mini',
       temperature: 0.15,
-      max_tokens: 900,
+      max_tokens: 950,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
@@ -1378,12 +1488,13 @@ REGLAS ESTRICTAS:
   return JSON.parse(rawContent);
 }
 
-async function executePurchaseMovement(
+async function executeInventoryMovementServer(
   supabase: any,
   params: {
     sku: string;
+    tipo_movimiento: 'compra_entrada' | 'merma_dano' | 'ajuste_positivo' | 'ajuste_negativo';
     cantidad: number;
-    costo_unitario: number;
+    costo_unitario?: number;
     motivo: string;
     source_id: string;
   }
@@ -1400,7 +1511,7 @@ async function executePurchaseMovement(
   // 1. Intentar RPC atómico public.record_movement
   const rpcRes = await supabase.rpc('record_movement', {
     p_sku: skuClean,
-    p_tipo_movimiento: 'compra_entrada',
+    p_tipo_movimiento: params.tipo_movimiento,
     p_cantidad: absQty,
     p_costo_unitario: costo,
     p_motivo: params.motivo,
@@ -1430,14 +1541,19 @@ async function executePurchaseMovement(
 
   const stockActual = Number(existingRow?.stock_fisico ?? 0);
   const reservadoActual = Number(existingRow?.stock_reservado ?? 0);
-  const nuevoFisico = stockActual + absQty;
+  const isAdd =
+    params.tipo_movimiento === 'compra_entrada' || params.tipo_movimiento === 'ajuste_positivo';
+  const nuevoFisico = isAdd ? stockActual + absQty : Math.max(stockActual - absQty, 0);
   const nuevoDisponible = Math.max(nuevoFisico - reservadoActual, 0);
+  const deltaKardex = isAdd ? absQty : -absQty;
 
   const updatePayload: Record<string, any> = {
     stock_fisico: nuevoFisico,
     updated_at: new Date().toISOString(),
   };
-  if (costo > 0) updatePayload.costo_unitario = costo;
+  if (costo > 0 && params.tipo_movimiento === 'compra_entrada') {
+    updatePayload.costo_unitario = costo;
+  }
 
   if (existingRow) {
     const { error: updErr } = await supabase
@@ -1459,8 +1575,8 @@ async function executePurchaseMovement(
 
   await supabase.from('inventory_kardex').insert({
     sku: skuClean,
-    tipo_movimiento: 'compra_entrada',
-    cantidad: absQty,
+    tipo_movimiento: params.tipo_movimiento,
+    cantidad: deltaKardex,
     costo_unitario: costo,
     saldo_fisico: nuevoFisico,
     motivo: params.motivo,
@@ -1472,10 +1588,11 @@ async function executePurchaseMovement(
   return { ok: true, nuevoFisico, nuevoDisponible };
 }
 
-async function recordFinancePurchaseExpense(
+async function recordFinanceExpenseServer(
   supabase: any,
   params: {
     account_id: string;
+    categoria: string;
     monto: number;
     descripcion: string;
     fecha: string;
@@ -1490,7 +1607,7 @@ async function recordFinancePurchaseExpense(
       .insert({
         account_id: params.account_id,
         tipo: 'expense',
-        categoria: 'pago_proveedor',
+        categoria: params.categoria || 'gasto_manual',
         monto,
         descripcion: params.descripcion,
         fecha: params.fecha,
@@ -1560,43 +1677,128 @@ async function emitBestEffortOsEvent(
   }
 }
 
-async function sendDraftConfirmationCard(chatId: string | number, draft: PurchaseDraft) {
+async function sendDraftConfirmationCard(chatId: string | number, draft: TelegramDraft) {
+  const kind = draft.kind || 'compra';
+
+  if (kind === 'gasto_operativo' && draft.kind === 'gasto_operativo') {
+    const lines = [
+      `💸 <b>BORRADOR DE GASTO OPERATIVO</b>`,
+      `💵 Monto: <b>${fmtMoney(draft.monto)}</b>`,
+      `🏷️ Categoría: <code>${escapeHtml(draft.categoria)}</code>`,
+      `📝 Concepto: <b>${escapeHtml(draft.descripcion)}</b>`,
+      `🏦 Caja/Cuenta: <b>${escapeHtml(draft.account_nombre)}</b>`,
+      '',
+      '¿Confirmas descontar este gasto en Finanzas?',
+    ];
+    await sendTgMessage(chatId, lines.join('\n'), {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '✅ Confirmar Gasto en Caja', callback_data: `tg_ok:${draft.id}:1` },
+            { text: '❌ Cancelar', callback_data: `tg_no:${draft.id}` },
+          ],
+        ],
+      },
+    });
+    return;
+  }
+
+  if (kind === 'gasto_pauta' && draft.kind === 'gasto_pauta') {
+    const lines = [
+      `📈 <b>BORRADOR DE GASTO DE PAUTA</b>`,
+      `💵 Monto: <b>${fmtMoney(draft.monto)}</b>`,
+      `🎯 Código anuncio: <code>${escapeHtml(draft.codigo_anuncio)}</code>`,
+      `📣 Plataforma: <b>${escapeHtml(draft.plataforma)}</b>`,
+      draft.notas ? `📝 Nota: <i>${escapeHtml(draft.notas)}</i>` : '',
+      `🏦 Caja sugerida: <b>${escapeHtml(draft.account_nombre)}</b>`,
+      '',
+      'Elige cómo registrar esta pauta en TODOENUNO OS:',
+    ].filter((l) => l !== '');
+
+    await sendTgMessage(chatId, lines.join('\n'), {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '📈 Solo Pauta (ROAS)', callback_data: `tg_ok:${draft.id}:0` },
+            { text: '💰 Pauta + Descontar Caja', callback_data: `tg_ok:${draft.id}:1` },
+          ],
+          [{ text: '❌ Cancelar', callback_data: `tg_no:${draft.id}` }],
+        ],
+      },
+    });
+    return;
+  }
+
+  if (kind === 'ajuste_inventario' && draft.kind === 'ajuste_inventario') {
+    const labelTipo =
+      draft.tipo_movimiento === 'merma_dano'
+        ? 'Merma / Daño'
+        : draft.tipo_movimiento === 'ajuste_positivo'
+          ? 'Ajuste Positivo (+)'
+          : 'Ajuste Negativo (-)';
+    const sign = draft.tipo_movimiento === 'ajuste_positivo' ? '+' : '-';
+
+    const lines = [
+      `🛠️ <b>BORRADOR DE AJUSTE / MERMA</b>`,
+      `📦 SKU: <code>${escapeHtml(draft.sku)}</code> (${escapeHtml(draft.nombre)})`,
+      `⚙️ Movimiento: <b>${labelTipo}</b> (<b>${sign}${draft.cantidad} u.</b>)`,
+      `📊 Físico actual: <b>${draft.stock_actual}</b> → Nuevo físico: <b>${draft.stock_resultante}</b>`,
+      `📝 Motivo: <i>${escapeHtml(draft.motivo)}</i>`,
+      '',
+      '¿Confirmas asentar este movimiento en Kárdex?',
+    ];
+
+    await sendTgMessage(chatId, lines.join('\n'), {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '✅ Confirmar Ajuste', callback_data: `tg_ok:${draft.id}:0` },
+            { text: '❌ Cancelar', callback_data: `tg_no:${draft.id}` },
+          ],
+        ],
+      },
+    });
+    return;
+  }
+
+  // Default: Compra de mercadería
+  const compra = draft as Extract<TelegramDraft, { items: DraftItem[] }>;
   const lines: string[] = [];
   lines.push(`📦 <b>BORRADOR DE COMPRA POR CONFIRMAR</b>`);
-  lines.push(`🏭 Proveedor: <b>${escapeHtml(draft.proveedor || 'Proveedor')}</b>`);
-  if (draft.notas) lines.push(`📝 Nota: <i>${escapeHtml(draft.notas)}</i>`);
+  lines.push(`🏭 Proveedor: <b>${escapeHtml(compra.proveedor || 'Proveedor')}</b>`);
+  if (compra.notas) lines.push(`📝 Nota: <i>${escapeHtml(compra.notas)}</i>`);
   lines.push('');
 
-  for (const it of draft.items) {
+  for (const it of compra.items) {
     lines.push(
       `• <code>${escapeHtml(it.sku)}</code> (${escapeHtml(it.nombre)})\n  <b>+${it.cantidad} u.</b> × ${fmtMoney(it.costo_unitario)} = <b>${fmtMoney(it.subtotal)}</b>`
     );
   }
 
-  if (draft.unmatchedNotes && draft.unmatchedNotes.length > 0) {
+  if (compra.unmatchedNotes && compra.unmatchedNotes.length > 0) {
     lines.push('');
     lines.push(`⚠️ <i>No encontré SKU exacto para:</i>`);
-    for (const u of draft.unmatchedNotes) {
+    for (const u of compra.unmatchedNotes) {
       lines.push(`  • ${escapeHtml(u)}`);
     }
   }
 
   lines.push('');
-  lines.push(`💵 <b>Total compra: ${fmtMoney(draft.total)}</b>`);
-  lines.push(`🏦 Caja sugerida: <b>${escapeHtml(draft.account_nombre)}</b>`);
+  lines.push(`💵 <b>Total compra: ${fmtMoney(compra.total)}</b>`);
+  lines.push(`🏦 Caja sugerida: <b>${escapeHtml(compra.account_nombre)}</b>`);
   lines.push('');
   lines.push('Elige cómo registrar esta entrada en TODOENUNO OS:');
 
-  const keyboard = [
-    [
-      { text: '✅ Solo Inventario', callback_data: `tg_ok:${draft.id}:0` },
-      { text: '💰 Inventario + Descontar Caja', callback_data: `tg_ok:${draft.id}:1` },
-    ],
-    [{ text: '❌ Cancelar', callback_data: `tg_no:${draft.id}` }],
-  ];
-
   await sendTgMessage(chatId, lines.join('\n'), {
-    reply_markup: { inline_keyboard: keyboard },
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '✅ Solo Inventario', callback_data: `tg_ok:${compra.id}:0` },
+          { text: '💰 Inventario + Descontar Caja', callback_data: `tg_ok:${compra.id}:1` },
+        ],
+        [{ text: '❌ Cancelar', callback_data: `tg_no:${compra.id}` }],
+      ],
+    },
   });
 }
 
@@ -1633,6 +1835,151 @@ async function handleStockQuery(supabase: any, chatId: string | number, searchRa
 
   if (filtered.length > 15) {
     lines.push(`\n<i>Mostrando 15 de ${filtered.length} SKUs. Usa /stock palabra para filtrar.</i>`);
+  }
+
+  await sendTgMessage(chatId, lines.join('\n'));
+}
+
+function formatEstadoBadge(estado?: string | null): string {
+  const e = String(estado || '').toLowerCase();
+  if (e === 'entregado') return '✅ Entregado';
+  if (e === 'en_camino') return '🚚 En ruta';
+  if (e === 'por_empacar') return '📦 Por empacar';
+  if (e === 'programado') return '📅 Encargo';
+  if (e === 'cancelado') return '❌ Cancelado';
+  return '🆕 Nuevo';
+}
+
+async function handleOrderSearchQuery(supabase: any, chatId: string | number, queryRaw: string) {
+  const q = queryRaw.trim();
+  if (!q) {
+    await handlePendingOrdersQuery(supabase, chatId);
+    return;
+  }
+
+  const { data: orders, error } = await supabase
+    .from('whatsapp_orders')
+    .select(
+      'id,pedido_codigo,nombre_cliente,telefono,direccion,departamento,courier,sku,catalogo_sku,total,estado,liquidado,es_encargo,fecha_programada,created_at'
+    )
+    .order('created_at', { ascending: false })
+    .limit(400);
+
+  if (error) {
+    throw new Error(`Error consultando pedidos: ${error.message}`);
+  }
+
+  const qLower = q.toLowerCase();
+  const qDigits = q.replace(/\D/g, '');
+  const matched = (orders || []).filter((o: any) => {
+    const hay = [
+      o.pedido_codigo,
+      o.nombre_cliente,
+      o.telefono,
+      o.sku,
+      o.catalogo_sku,
+      o.courier,
+      o.departamento,
+      String(o.id || '').slice(0, 8),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    if (hay.includes(qLower)) return true;
+    if (qDigits.length >= 4 && String(o.telefono || '').replace(/\D/g, '').includes(qDigits)) {
+      return true;
+    }
+    return false;
+  });
+
+  if (matched.length === 0) {
+    await sendTgMessage(
+      chatId,
+      `🔍 No encontré pedidos recientes para <b>${escapeHtml(q)}</b>.\nPrueba con nombre, teléfono o código (ej. <code>/pedido 70231940</code>).`
+    );
+    return;
+  }
+
+  const lines = [
+    `🔎 <b>PEDIDOS ENCONTRADOS PARA "${escapeHtml(q)}" (${matched.length})</b>`,
+    '',
+    ...matched.slice(0, 6).map((o: any) => {
+      const code = o.pedido_codigo || String(o.id || '').slice(0, 8).toUpperCase();
+      const liq =
+        String(o.estado || '').toLowerCase() === 'entregado'
+          ? o.liquidado
+            ? ' · 💵 Liquidado'
+            : ' · ⏳ Por liquidar'
+          : '';
+      const fechaProg = o.fecha_programada ? ` · Prog: ${o.fecha_programada}` : '';
+      return (
+        `${formatEstadoBadge(o.estado)} <code>${escapeHtml(code)}</code> — <b>${fmtMoney(o.total)}</b>${liq}\n` +
+        `👤 ${escapeHtml(o.nombre_cliente || 'Cliente')} (${escapeHtml(o.telefono || 's/n')})\n` +
+        `📦 ${escapeHtml(o.sku || o.catalogo_sku || 'Producto')}\n` +
+        `📍 ${escapeHtml(o.departamento || 'SV')}${o.courier ? ` · 🛵 ${escapeHtml(o.courier)}` : ''}${fechaProg}`
+      );
+    }),
+  ];
+
+  if (matched.length > 6) {
+    lines.push(`\n<i>Mostrando los 6 más recientes de ${matched.length} coincidencias.</i>`);
+  }
+
+  await sendTgMessage(chatId, lines.join('\n\n'));
+}
+
+async function handlePendingOrdersQuery(supabase: any, chatId: string | number) {
+  const todayIso = getElSalvadorDate();
+  const { data: orders, error } = await supabase
+    .from('whatsapp_orders')
+    .select(
+      'id,pedido_codigo,nombre_cliente,telefono,departamento,courier,sku,total,estado,liquidado,es_encargo,fecha_programada,created_at'
+    )
+    .order('created_at', { ascending: false })
+    .limit(500);
+
+  if (error) {
+    throw new Error(`Error consultando pendientes: ${error.message}`);
+  }
+
+  const all = Array.isArray(orders) ? orders : [];
+  const nuevos = all.filter((o: any) => String(o.estado || '').toLowerCase() === 'nuevo');
+  const porEmpacar = all.filter((o: any) => String(o.estado || '').toLowerCase() === 'por_empacar');
+  const enCamino = all.filter((o: any) => String(o.estado || '').toLowerCase() === 'en_camino');
+  const encargosProntos = all.filter((o: any) => {
+    const est = String(o.estado || '').toLowerCase();
+    if (est !== 'programado') return false;
+    if (!o.fecha_programada) return true;
+    return String(o.fecha_programada).slice(0, 10) <= todayIso;
+  });
+  const porLiquidar = all.filter(
+    (o: any) => String(o.estado || '').toLowerCase() === 'entregado' && o.liquidado !== true
+  );
+
+  const sumTotal = (arr: any[]) => arr.reduce((s, o) => s + (Number(o.total) || 0), 0);
+
+  const lines: string[] = [
+    `📋 <b>COLA OPERATIVA Y PENDIENTES (EN VIVO)</b>`,
+    '',
+    `• 🆕 Nuevos sin confirmar: <b>${nuevos.length}</b> (${fmtMoney(sumTotal(nuevos))})`,
+    `• 📦 Por empacar: <b>${porEmpacar.length}</b> (${fmtMoney(sumTotal(porEmpacar))})`,
+    `• 🚚 En ruta con motorista: <b>${enCamino.length}</b> (${fmtMoney(sumTotal(enCamino))})`,
+    `• 📅 Encargos para hoy o vencidos: <b>${encargosProntos.length}</b> (${fmtMoney(sumTotal(encargosProntos))})`,
+    `• 💵 Entregados por liquidar: <b>${porLiquidar.length}</b> (<b>${fmtMoney(sumTotal(porLiquidar))}</b>)`,
+  ];
+
+  const despachoQueue = [...porEmpacar, ...encargosProntos].slice(0, 6);
+  if (despachoQueue.length > 0) {
+    lines.push('');
+    lines.push(`<b>Próximos a empacar / despachar:</b>`);
+    for (const o of despachoQueue) {
+      const code = o.pedido_codigo || String(o.id || '').slice(0, 6).toUpperCase();
+      lines.push(
+        `• <code>${escapeHtml(code)}</code> · ${escapeHtml(o.nombre_cliente || 'Cliente')} · ${escapeHtml(
+          o.sku || 'SKU'
+        )} · <b>${fmtMoney(o.total)}</b>`
+      );
+    }
   }
 
   await sendTgMessage(chatId, lines.join('\n'));
@@ -1732,11 +2079,15 @@ async function handleTelegramBotRequest(req: any, res: any) {
       await tgCall('setWebhook', setPayload);
       await tgCall('setMyCommands', {
         commands: [
-          { command: 'compra', description: 'Registrar compra: /compra SKU CANTIDAD COSTO' },
+          { command: 'compra', description: 'Registrar compra: /compra SKU CANT COSTO' },
+          { command: 'gasto', description: 'Registrar gasto o pauta: /gasto MONTO CONCEPTO' },
+          { command: 'pedido', description: 'Buscar pedido por cliente, tel o código' },
+          { command: 'pendientes', description: 'Ver empaque, ruta y cobros por liquidar' },
+          { command: 'merma', description: 'Registrar daño o ajuste: /merma SKU CANT' },
           { command: 'stock', description: 'Ver inventario actual: /stock [producto]' },
           { command: 'cajas', description: 'Ver saldos de cajas y bancos' },
           { command: 'brief', description: 'Pedir el brief operativo (AM/PM)' },
-          { command: 'ayuda', description: 'Ver ejemplos de uso con texto o foto' },
+          { command: 'ayuda', description: 'Ver guía de texto, notas de voz y fotos' },
         ],
       });
 
@@ -1791,7 +2142,7 @@ async function handleTelegramBotRequest(req: any, res: any) {
         return res.status(200).json({ ok: true });
       }
 
-      const draftsDoc = await readDocJson<PurchaseDraft[]>(supabase, DRAFTS_DOC_TITLE, []);
+      const draftsDoc = await readDocJson<TelegramDraft[]>(supabase, DRAFTS_DOC_TITLE, []);
       const drafts = Array.isArray(draftsDoc.data) ? draftsDoc.data : [];
       const idx = drafts.findIndex((d) => d.id === draftId);
 
@@ -1810,7 +2161,7 @@ async function handleTelegramBotRequest(req: any, res: any) {
           callback_query_id: cqId,
           text:
             draft.status === 'confirmed'
-              ? 'Esta compra ya fue confirmada.'
+              ? 'Este registro ya fue confirmado.'
               : 'Este borrador ya fue cancelado.',
         });
         return res.status(200).json({ ok: true });
@@ -1824,84 +2175,34 @@ async function handleTelegramBotRequest(req: any, res: any) {
           await tgCall('editMessageText', {
             chat_id: chatId,
             message_id: messageId,
-            text: `❌ <b>Compra cancelada</b>\nNo se hicieron cambios en Inventario ni Finanzas.`,
+            text: `❌ <b>Operación cancelada</b>\nNo se hicieron cambios en Inventario, ROAS ni Finanzas.`,
             parse_mode: 'HTML',
           });
         }
         return res.status(200).json({ ok: true });
       }
 
-      // Confirmación real: bloquear inmediatamente contra doble clic
+      // Bloquear inmediatamente contra doble clic
       drafts[idx] = { ...draft, status: 'confirmed' };
       await writeDocJson(supabase, DRAFTS_DOC_TITLE, drafts.slice(0, 25), draftsDoc.id);
       await tgCall('answerCallbackQuery', {
         callback_query_id: cqId,
-        text: 'Registrando compra...',
+        text: 'Guardando en TODOENUNO OS...',
       });
 
-      const withFinance = finFlag === '1';
-      const resultLines: string[] = [];
-      let hadError = false;
+      const kind = draft.kind || 'compra';
+      let finalMsg = '';
 
-      for (const item of draft.items) {
-        const motivo = `Compra Telegram · ${draft.proveedor || 'Proveedor'}${
-          draft.notas ? ` · ${draft.notas}` : ''
-        }`.trim();
-
-        const movRes = await executePurchaseMovement(supabase, {
-          sku: item.sku,
-          cantidad: item.cantidad,
-          costo_unitario: item.costo_unitario,
-          motivo,
-          source_id: draft.id,
-        });
-
-        if (movRes.ok) {
-          resultLines.push(
-            `• <code>${escapeHtml(item.sku)}</code> +${item.cantidad} u. (${fmtMoney(
-              item.costo_unitario
-            )}) → Físico: <b>${movRes.nuevoFisico ?? 'OK'}</b> · Disp: <b>${
-              movRes.nuevoDisponible ?? 'OK'
-            }</b>`
-          );
-
-          await emitBestEffortOsEvent(supabase, 'supplier.bid.received', 'inventory_stock', item.sku, {
-            sku: item.sku,
-            cantidad: item.cantidad,
-            costo_unitario: item.costo_unitario,
-            total_compra: item.subtotal,
-            proveedor: draft.proveedor || null,
-            tipo: 'compra_entrada',
-            origen: 'telegram_bot',
-            saldo_nuevo: movRes.nuevoFisico,
-          });
-        } else {
-          hadError = true;
-          resultLines.push(`• ❌ <code>${escapeHtml(item.sku)}</code>: ${escapeHtml(movRes.error)}`);
-        }
-      }
-
-      let financeSummary = 'Finanzas: No descontado (solo entrada de inventario).';
-      if (withFinance && draft.total > 0) {
-        const desc = `Compra Telegram (${draft.proveedor}): ${draft.items
-          .map((i) => `${i.cantidad}x ${i.sku}`)
-          .join(', ')}`;
-        const finRes = await recordFinancePurchaseExpense(supabase, {
+      if (kind === 'gasto_operativo' && draft.kind === 'gasto_operativo') {
+        const finRes = await recordFinanceExpenseServer(supabase, {
           account_id: draft.account_id,
-          monto: draft.total,
-          descripcion: desc,
+          categoria: draft.categoria,
+          monto: draft.monto,
+          descripcion: `[Telegram] ${draft.descripcion}`,
           fecha: getElSalvadorDate(),
         });
 
         if (finRes.ok) {
-          financeSummary = `💰 Egreso asentado en <b>${escapeHtml(draft.account_nombre)}</b>: -${fmtMoney(
-            draft.total
-          )}${
-            finRes.nuevoSaldo !== undefined
-              ? ` (Saldo actual: <b>${fmtMoney(finRes.nuevoSaldo)}</b>)`
-              : ''
-          }`;
-
           await emitBestEffortOsEvent(
             supabase,
             'finance.expense.created',
@@ -1909,27 +2210,219 @@ async function handleTelegramBotRequest(req: any, res: any) {
             draft.id,
             {
               account_id: draft.account_id,
-              categoria: 'pago_proveedor',
-              monto: draft.total,
-              descripcion: desc,
+              categoria: draft.categoria,
+              monto: draft.monto,
+              descripcion: draft.descripcion,
               fecha: getElSalvadorDate(),
               es_manual: true,
               origen: 'telegram_bot',
             }
           );
+          finalMsg = [
+            `✅ <b>GASTO OPERATIVO REGISTRADO</b>`,
+            `💵 Monto: <b>-${fmtMoney(draft.monto)}</b>`,
+            `🏷️ Categoría: <code>${escapeHtml(draft.categoria)}</code>`,
+            `📝 ${escapeHtml(draft.descripcion)}`,
+            `🏦 Descontado de <b>${escapeHtml(draft.account_nombre)}</b>${
+              finRes.nuevoSaldo !== undefined
+                ? ` (Saldo actual: <b>${fmtMoney(finRes.nuevoSaldo)}</b>)`
+                : ''
+            }`,
+          ].join('\n');
         } else {
-          financeSummary = `⚠️ Inventario actualizado, pero falló Finanzas: ${escapeHtml(finRes.error)}`;
+          finalMsg = `⚠️ No se pudo guardar el gasto en Finanzas: ${escapeHtml(finRes.error)}`;
         }
-      }
+      } else if (kind === 'gasto_pauta' && draft.kind === 'gasto_pauta') {
+        const fechaHoy = getElSalvadorDate();
+        const { error: adErr } = await supabase.from('gastos_publicidad').insert({
+          fecha: fechaHoy,
+          codigo_anuncio: draft.codigo_anuncio,
+          plataforma: draft.plataforma,
+          monto: draft.monto,
+          notas: draft.notas ? `[Telegram] ${draft.notas}` : '[Telegram]',
+        });
 
-      const finalMsg = [
-        hadError ? `⚠️ <b>COMPRA PARCIAL REGISTRADA</b>` : `✅ <b>COMPRA REGISTRADA EN TODOENUNO OS</b>`,
-        `🏭 Proveedor: <b>${escapeHtml(draft.proveedor)}</b> · Total: <b>${fmtMoney(draft.total)}</b>`,
-        '',
-        ...resultLines,
-        '',
-        financeSummary,
-      ].join('\n');
+        if (adErr) {
+          finalMsg = `⚠️ Error guardando en gastos_publicidad: ${escapeHtml(adErr.message)}`;
+        } else {
+          await emitBestEffortOsEvent(
+            supabase,
+            'marketing.ad.expense',
+            'gastos_publicidad',
+            draft.id,
+            {
+              codigo_anuncio: draft.codigo_anuncio,
+              platform: draft.plataforma.toLowerCase(),
+              amount: draft.monto,
+              date: fechaHoy,
+              origen: 'telegram_bot',
+            }
+          );
+
+          let boxLine = 'Finanzas: No descontado de caja (solo ROAS).';
+          if (finFlag === '1') {
+            const finRes = await recordFinanceExpenseServer(supabase, {
+              account_id: draft.account_id,
+              categoria: 'pauta_publicidad',
+              monto: draft.monto,
+              descripcion: `Pauta ${draft.plataforma} (${draft.codigo_anuncio})`,
+              fecha: fechaHoy,
+            });
+            if (finRes.ok) {
+              boxLine = `💰 Descontado de <b>${escapeHtml(draft.account_nombre)}</b>${
+                finRes.nuevoSaldo !== undefined
+                  ? ` (Saldo actual: <b>${fmtMoney(finRes.nuevoSaldo)}</b>)`
+                  : ''
+              }`;
+            } else {
+              boxLine = `⚠️ Pauta guardada, pero falló descuento de caja: ${escapeHtml(finRes.error)}`;
+            }
+          }
+
+          finalMsg = [
+            `✅ <b>GASTO DE PAUTA REGISTRADO</b>`,
+            `🎯 Anuncio: <code>${escapeHtml(draft.codigo_anuncio)}</code> (${escapeHtml(draft.plataforma)})`,
+            `💵 Monto: <b>${fmtMoney(draft.monto)}</b> · Fecha: ${fechaHoy}`,
+            boxLine,
+          ].join('\n');
+        }
+      } else if (kind === 'ajuste_inventario' && draft.kind === 'ajuste_inventario') {
+        const movRes = await executeInventoryMovementServer(supabase, {
+          sku: draft.sku,
+          tipo_movimiento: draft.tipo_movimiento,
+          cantidad: draft.cantidad,
+          motivo: `[Telegram] ${draft.motivo}`,
+          source_id: draft.id,
+        });
+
+        if (movRes.ok) {
+          await emitBestEffortOsEvent(
+            supabase,
+            'inventory.adjustment',
+            'inventory_stock',
+            draft.sku,
+            {
+              sku: draft.sku,
+              tipo: draft.tipo_movimiento,
+              cantidad: draft.cantidad,
+              motivo: draft.motivo,
+              saldo_nuevo: movRes.nuevoFisico,
+              origen: 'telegram_bot',
+            }
+          );
+          finalMsg = [
+            `✅ <b>AJUSTE DE INVENTARIO ASENTADO</b>`,
+            `📦 <code>${escapeHtml(draft.sku)}</code> (${escapeHtml(draft.nombre)})`,
+            `⚙️ ${escapeHtml(draft.tipo_movimiento)} · ${draft.cantidad} u.`,
+            `📊 Nuevo Físico: <b>${movRes.nuevoFisico ?? 'OK'}</b> · Disponible: <b>${movRes.nuevoDisponible ?? 'OK'}</b>`,
+            `📝 ${escapeHtml(draft.motivo)}`,
+          ].join('\n');
+        } else {
+          finalMsg = `⚠️ No se pudo registrar el ajuste en Kárdex: ${escapeHtml(movRes.error)}`;
+        }
+      } else {
+        // Compra de mercadería
+        const compra = draft as Extract<TelegramDraft, { items: DraftItem[] }>;
+        const withFinance = finFlag === '1';
+        const resultLines: string[] = [];
+        let hadError = false;
+
+        for (const item of compra.items) {
+          const motivo = `Compra Telegram · ${compra.proveedor || 'Proveedor'}${
+            compra.notas ? ` · ${compra.notas}` : ''
+          }`.trim();
+
+          const movRes = await executeInventoryMovementServer(supabase, {
+            sku: item.sku,
+            tipo_movimiento: 'compra_entrada',
+            cantidad: item.cantidad,
+            costo_unitario: item.costo_unitario,
+            motivo,
+            source_id: compra.id,
+          });
+
+          if (movRes.ok) {
+            resultLines.push(
+              `• <code>${escapeHtml(item.sku)}</code> +${item.cantidad} u. (${fmtMoney(
+                item.costo_unitario
+              )}) → Físico: <b>${movRes.nuevoFisico ?? 'OK'}</b> · Disp: <b>${
+                movRes.nuevoDisponible ?? 'OK'
+              }</b>`
+            );
+
+            await emitBestEffortOsEvent(
+              supabase,
+              'supplier.bid.received',
+              'inventory_stock',
+              item.sku,
+              {
+                sku: item.sku,
+                cantidad: item.cantidad,
+                costo_unitario: item.costo_unitario,
+                total_compra: item.subtotal,
+                proveedor: compra.proveedor || null,
+                tipo: 'compra_entrada',
+                origen: 'telegram_bot',
+                saldo_nuevo: movRes.nuevoFisico,
+              }
+            );
+          } else {
+            hadError = true;
+            resultLines.push(`• ❌ <code>${escapeHtml(item.sku)}</code>: ${escapeHtml(movRes.error)}`);
+          }
+        }
+
+        let financeSummary = 'Finanzas: No descontado (solo entrada de inventario).';
+        if (withFinance && compra.total > 0) {
+          const desc = `Compra Telegram (${compra.proveedor}): ${compra.items
+            .map((i) => `${i.cantidad}x ${i.sku}`)
+            .join(', ')}`;
+          const finRes = await recordFinanceExpenseServer(supabase, {
+            account_id: compra.account_id,
+            categoria: 'pago_proveedor',
+            monto: compra.total,
+            descripcion: desc,
+            fecha: getElSalvadorDate(),
+          });
+
+          if (finRes.ok) {
+            financeSummary = `💰 Egreso asentado en <b>${escapeHtml(compra.account_nombre)}</b>: -${fmtMoney(
+              compra.total
+            )}${
+              finRes.nuevoSaldo !== undefined
+                ? ` (Saldo actual: <b>${fmtMoney(finRes.nuevoSaldo)}</b>)`
+                : ''
+            }`;
+
+            await emitBestEffortOsEvent(
+              supabase,
+              'finance.expense.created',
+              'finance_money_transactions',
+              compra.id,
+              {
+                account_id: compra.account_id,
+                categoria: 'pago_proveedor',
+                monto: compra.total,
+                descripcion: desc,
+                fecha: getElSalvadorDate(),
+                es_manual: true,
+                origen: 'telegram_bot',
+              }
+            );
+          } else {
+            financeSummary = `⚠️ Inventario actualizado, pero falló Finanzas: ${escapeHtml(finRes.error)}`;
+          }
+        }
+
+        finalMsg = [
+          hadError ? `⚠️ <b>COMPRA PARCIAL REGISTRADA</b>` : `✅ <b>COMPRA REGISTRADA EN TODOENUNO OS</b>`,
+          `🏭 Proveedor: <b>${escapeHtml(compra.proveedor)}</b> · Total: <b>${fmtMoney(compra.total)}</b>`,
+          '',
+          ...resultLines,
+          '',
+          financeSummary,
+        ].join('\n');
+      }
 
       if (messageId) {
         await tgCall('editMessageText', {
@@ -1945,7 +2438,7 @@ async function handleTelegramBotRequest(req: any, res: any) {
       return res.status(200).json({ ok: true });
     }
 
-    /* 5. MANEJO DE MENSAJES DE TEXTO Y FOTOS */
+    /* 5. MANEJO DE MENSAJES (TEXTO, NOTAS DE VOZ Y FOTOS) */
     const msg = update.message;
     if (!msg) {
       return res.status(200).json({ ok: true });
@@ -1955,18 +2448,33 @@ async function handleTelegramBotRequest(req: any, res: any) {
     if (!allowedChatIds.includes(chatId)) {
       await sendTgMessage(
         chatId,
-        `⛔ Chat ID <code>${escapeHtml(chatId)}</code> no autorizado para registrar movimientos. Agrégalo a <code>TELEGRAM_ALLOWED_CHAT_IDS</code> en Vercel si deseas darle acceso.`
+        `⛔ Chat ID <code>${escapeHtml(chatId)}</code> no autorizado para operar TODOENUNO OS. Agrégalo a <code>TELEGRAM_ALLOWED_CHAT_IDS</code> en Vercel si deseas darle acceso.`
       );
       return res.status(200).json({ ok: true });
     }
 
-    const rawText = String(msg.text || msg.caption || '').trim();
+    let rawText = String(msg.text || msg.caption || '').trim();
     const hasPhoto = Array.isArray(msg.photo) && msg.photo.length > 0;
+    const voiceOrAudio = msg.voice || msg.audio || null;
+
+    if (voiceOrAudio?.file_id) {
+      const transcript = await transcribeTelegramAudio(
+        voiceOrAudio.file_id,
+        voiceOrAudio.mime_type || 'audio/ogg',
+        voiceOrAudio.file_name
+      );
+      if (!transcript) {
+        await sendTgMessage(chatId, '🎙️ No logré entender el audio. Intenta grabarlo de nuevo más claro.');
+        return res.status(200).json({ ok: true });
+      }
+      await sendTgMessage(chatId, `🎙️ <i>Escuché: "${escapeHtml(transcript)}"</i>`);
+      rawText = rawText ? `${rawText} ${transcript}` : transcript;
+    }
 
     if (!rawText && !hasPhoto) {
       await sendTgMessage(
         chatId,
-        'Envíame un texto (ej. <i>"Compré 10 cascos negros a $12"</i>), una foto de factura o usa /ayuda.'
+        'Envíame un texto, una <b>nota de voz</b> o una <b>foto de factura/recibo</b>. Escribe /ayuda para ver ejemplos.'
       );
       return res.status(200).json({ ok: true });
     }
@@ -1978,20 +2486,27 @@ async function handleTelegramBotRequest(req: any, res: any) {
       await sendTgMessage(
         chatId,
         [
-          `🤖 <b>TODOENUNO OS · Bot de Compras e Inventario (GPT)</b>`,
+          `🤖 <b>TODOENUNO OS · Bot Operativo (Vercel + Whisper + GPT)</b>`,
           '',
-          `<b>1. Registrar compra en lenguaje natural:</b>`,
+          `Puedes escribir natural, mandar <b>nota de voz 🎙️</b> o enviar <b>foto de recibo/factura 📸</b>:`,
+          '',
+          `📦 <b>Compras e Inventario:</b>`,
           `• <i>"Compré 10 cascos negros a $12.50 en MotoParts pagado de banco"</i>`,
-          `• <i>"Entraron 20 mini masajeadores a $4 c/u"</i>`,
-          '',
-          `<b>2. Foto de factura o recibo:</b>`,
-          `• Envía la foto de la factura (con o sin comentario) y GPT extraerá productos, cantidades y costos.`,
-          '',
-          `<b>3. Comandos rápidos:</b>`,
           `• <code>/compra SKU CANTIDAD COSTO [PROVEEDOR]</code>`,
-          `• <code>/stock [nombre o sku]</code> — Ver disponible en bodega`,
-          `• <code>/cajas</code> — Ver saldos de cajas/bancos`,
-          `• <code>/brief [am|pm]</code> — Pedir el resumen al instante`,
+          `• <code>/merma SKU CANT [MOTIVO]</code> o <i>"Se dañaron 2 cascos"</i>`,
+          `• <code>/ajuste SKU NUEVO_CONTEO [MOTIVO]</code> o <i>"En bodega solo quedan 8 cascos"</i>`,
+          '',
+          `💸 <b>Gastos y Pauta:</b>`,
+          `• <i>"Pagué $20 de gasolina de Caja Chica"</i>`,
+          `• <i>"Pagué $35 de pauta al anuncio PROMO1"</i>`,
+          `• <code>/gasto MONTO CONCEPTO</code>`,
+          '',
+          `🔎 <b>Consultas en vivo:</b>`,
+          `• <code>/pedido [nombre, teléfono o código]</code>`,
+          `• <code>/pendientes</code> — Cola de empaque, ruta y cobros por liquidar`,
+          `• <code>/stock [producto]</code> — Disponible en bodega`,
+          `• <code>/cajas</code> — Saldos de cajas y bancos`,
+          `• <code>/brief [am|pm]</code> — Brief operativo completo`,
         ].join('\n')
       );
       return res.status(200).json({ ok: true });
@@ -2003,13 +2518,25 @@ async function handleTelegramBotRequest(req: any, res: any) {
       return res.status(200).json({ ok: true });
     }
 
+    if (lowerText.startsWith('/pendientes')) {
+      await handlePendingOrdersQuery(supabase, chatId);
+      return res.status(200).json({ ok: true });
+    }
+
+    if (lowerText.startsWith('/pedido')) {
+      const q = rawText.replace(/^\/pedido(@\S+)?/i, '').trim();
+      await handleOrderSearchQuery(supabase, chatId, q);
+      return res.status(200).json({ ok: true });
+    }
+
     if (lowerText.startsWith('/cajas')) {
       const accounts = await fetchCashAccounts(supabase);
       const lines = [
         `🏦 <b>CUENTAS Y CAJAS EN FINANZAS</b>`,
         '',
         ...accounts.map(
-          (a: any) => `• <b>${escapeHtml(a.nombre)}</b> (<code>${escapeHtml(a.id)}</code>): <b>${fmtMoney(a.saldo_actual)}</b>`
+          (a: any) =>
+            `• <b>${escapeHtml(a.nombre)}</b> (<code>${escapeHtml(a.id)}</code>): <b>${fmtMoney(a.saldo_actual)}</b>`
         ),
       ];
       await sendTgMessage(chatId, lines.join('\n'));
@@ -2028,7 +2555,9 @@ async function handleTelegramBotRequest(req: any, res: any) {
     ]);
 
     // Comando rápido determinístico: /compra SKU CANTIDAD COSTO [PROVEEDOR...]
+    let intentHint = '';
     if (lowerText.startsWith('/compra')) {
+      intentHint = '/compra';
       const rest = rawText.replace(/^\/compra(@\S+)?/i, '').trim();
       const parts = rest.split(/\s+/).filter(Boolean);
       if (parts.length >= 3 && !Number.isNaN(Number(parts[1])) && !Number.isNaN(Number(parts[2]))) {
@@ -2049,8 +2578,9 @@ async function handleTelegramBotRequest(req: any, res: any) {
         }
 
         const defaultAcc = accounts[0] || { id: 'banco_principal', nombre: 'Banco Principal' };
-        const draft: PurchaseDraft = {
+        const draft: TelegramDraft = {
           id: `p_${Date.now().toString(36)}`,
+          kind: 'compra',
           chatId,
           status: 'pending',
           createdAt: new Date().toISOString(),
@@ -2072,31 +2602,111 @@ async function handleTelegramBotRequest(req: any, res: any) {
           rawInput: rawText,
         };
 
-        const draftsDoc = await readDocJson<PurchaseDraft[]>(supabase, DRAFTS_DOC_TITLE, []);
-        const nextDrafts = [draft, ...(Array.isArray(draftsDoc.data) ? draftsDoc.data : [])].slice(0, 25);
-        await writeDocJson(supabase, DRAFTS_DOC_TITLE, nextDrafts, draftsDoc.id);
+        await saveDraft(supabase, draft);
         await sendDraftConfirmationCard(chatId, draft);
         return res.status(200).json({ ok: true });
       }
-      // Si escribió /compra en formato libre (ej. "/compra 10 cascos a $12"), lo dejamos pasar a GPT
+    } else if (lowerText.startsWith('/merma') || lowerText.startsWith('/ajuste')) {
+      const isMerma = lowerText.startsWith('/merma');
+      intentHint = isMerma ? '/merma (ajuste_inventario)' : '/ajuste (ajuste_inventario)';
+      const rest = rawText.replace(/^\/(merma|ajuste)(@\S+)?/i, '').trim();
+      const parts = rest.split(/\s+/).filter(Boolean);
+      if (parts.length >= 2 && !Number.isNaN(Number(parts[1]))) {
+        const matched = findBestSkuMatch(parts[0], catalog);
+        if (matched) {
+          const rawNum = Number(parts[1]);
+          const motivo = parts.slice(2).join(' ') || (isMerma ? 'Merma / Daño reportado' : 'Conteo físico');
+          const stockActual = Number(matched.stock_fisico || 0);
+
+          let tipoMov: 'merma_dano' | 'ajuste_positivo' | 'ajuste_negativo' = 'merma_dano';
+          let qty = Math.abs(Math.round(rawNum));
+          let resultante = Math.max(stockActual - qty, 0);
+
+          if (!isMerma) {
+            if (parts[1].startsWith('+')) {
+              tipoMov = 'ajuste_positivo';
+              resultante = stockActual + qty;
+            } else if (parts[1].startsWith('-')) {
+              tipoMov = 'ajuste_negativo';
+              resultante = Math.max(stockActual - qty, 0);
+            } else {
+              // Conteo físico exacto
+              const target = Math.max(0, Math.round(rawNum));
+              const diff = target - stockActual;
+              if (diff === 0) {
+                await sendTgMessage(
+                  chatId,
+                  `ℹ️ <code>${escapeHtml(matched.sku)}</code> ya tiene stock físico de <b>${stockActual}</b>.`
+                );
+                return res.status(200).json({ ok: true });
+              }
+              tipoMov = diff > 0 ? 'ajuste_positivo' : 'ajuste_negativo';
+              qty = Math.abs(diff);
+              resultante = target;
+            }
+          }
+
+          if (qty > 0) {
+            const draft: TelegramDraft = {
+              id: `a_${Date.now().toString(36)}`,
+              kind: 'ajuste_inventario',
+              chatId,
+              status: 'pending',
+              createdAt: new Date().toISOString(),
+              sku: matched.sku,
+              nombre: matched.nombre || matched.sku,
+              tipo_movimiento: tipoMov,
+              cantidad: qty,
+              stock_actual: stockActual,
+              stock_resultante: resultante,
+              motivo,
+              rawInput: rawText,
+            };
+            await saveDraft(supabase, draft);
+            await sendDraftConfirmationCard(chatId, draft);
+            return res.status(200).json({ ok: true });
+          }
+        }
+      }
+    } else if (lowerText.startsWith('/gasto')) {
+      intentHint = '/gasto (gasto_operativo o gasto_pauta)';
     }
 
-    // Flujo inteligente con OpenAI GPT-4o-mini (texto natural o foto de factura)
+    // Flujo inteligente con OpenAI GPT-4o-mini (texto, voz transcrita o foto)
     let imageDataUrl: string | null = null;
     if (hasPhoto) {
       const largestPhoto = msg.photo[msg.photo.length - 1];
       imageDataUrl = await downloadTelegramPhotoAsDataUrl(largestPhoto.file_id);
     }
 
+    const cleanedPromptText = rawText
+      .replace(/^\/(compra|gasto|merma|ajuste)(@\S+)?/i, '')
+      .trim();
+
     const parsed = await interpretWithOpenAI({
-      text: rawText.replace(/^\/compra(@\S+)?/i, '').trim(),
+      text: cleanedPromptText || rawText,
       imageDataUrl,
       catalog,
       accounts,
+      intentHint,
     });
 
     if (parsed.intent === 'consulta_stock') {
-      await handleStockQuery(supabase, chatId, String(parsed.search_query || rawText));
+      await handleStockQuery(supabase, chatId, String(parsed.search_query || cleanedPromptText || rawText));
+      return res.status(200).json({ ok: true });
+    }
+
+    if (parsed.intent === 'consulta_pedido') {
+      await handleOrderSearchQuery(
+        supabase,
+        chatId,
+        String(parsed.search_query || cleanedPromptText || rawText)
+      );
+      return res.status(200).json({ ok: true });
+    }
+
+    if (parsed.intent === 'consulta_pendientes') {
+      await handlePendingOrdersQuery(supabase, chatId);
       return res.status(200).json({ ok: true });
     }
 
@@ -2105,12 +2715,146 @@ async function handleTelegramBotRequest(req: any, res: any) {
       return res.status(200).json({ ok: true });
     }
 
+    const chosenAccount =
+      accounts.find((a: any) => a.id === parsed.account_id) ||
+      accounts[0] || { id: 'caja_chica', nombre: 'Caja Chica' };
+
+    if (parsed.intent === 'gasto_operativo') {
+      const monto = Math.round(Number(parsed.monto || 0) * 100) / 100;
+      if (monto <= 0) {
+        await sendTgMessage(
+          chatId,
+          '⚠️ Detecté un gasto operativo pero no identifiqué el monto. Ejemplo: <i>"Pagué $20 de gasolina de caja chica"</i>.'
+        );
+        return res.status(200).json({ ok: true });
+      }
+      const draft: TelegramDraft = {
+        id: `g_${Date.now().toString(36)}`,
+        kind: 'gasto_operativo',
+        chatId,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        monto,
+        categoria: String(parsed.categoria || 'gasto_manual').trim() || 'gasto_manual',
+        descripcion: String(parsed.descripcion || cleanedPromptText || 'Gasto operativo').trim(),
+        account_id: chosenAccount.id,
+        account_nombre: chosenAccount.nombre,
+        rawInput: rawText || '[Foto de recibo]',
+      };
+      await saveDraft(supabase, draft);
+      await sendDraftConfirmationCard(chatId, draft);
+      return res.status(200).json({ ok: true });
+    }
+
+    if (parsed.intent === 'gasto_pauta') {
+      const monto = Math.round(Number(parsed.monto || 0) * 100) / 100;
+      if (monto <= 0) {
+        await sendTgMessage(
+          chatId,
+          '⚠️ Detecté un gasto de pauta pero falta el monto. Ejemplo: <i>"Pagué $35 de pauta al anuncio PROMO1"</i>.'
+        );
+        return res.status(200).json({ ok: true });
+      }
+      const allowedPlatforms = ['Meta', 'TikTok', 'Google', 'WhatsApp', 'Otro'] as const;
+      const rawPlat = String(parsed.plataforma || 'Meta').trim();
+      const plataforma =
+        allowedPlatforms.find((p) => p.toLowerCase() === rawPlat.toLowerCase()) || 'Meta';
+
+      const draft: TelegramDraft = {
+        id: `ad_${Date.now().toString(36)}`,
+        kind: 'gasto_pauta',
+        chatId,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        monto,
+        codigo_anuncio:
+          String(parsed.codigo_anuncio || 'GENERAL')
+            .trim()
+            .toUpperCase() || 'GENERAL',
+        plataforma,
+        notas: String(parsed.notas || parsed.descripcion || '').trim(),
+        account_id: chosenAccount.id,
+        account_nombre: chosenAccount.nombre,
+        rawInput: rawText || '[Comprobante pauta]',
+      };
+      await saveDraft(supabase, draft);
+      await sendDraftConfirmationCard(chatId, draft);
+      return res.status(200).json({ ok: true });
+    }
+
+    if (parsed.intent === 'ajuste_inventario') {
+      const candidate =
+        findBestSkuMatch(String(parsed.sku || ''), catalog) ||
+        findBestSkuMatch(String(parsed.raw_name || ''), catalog);
+
+      if (!candidate) {
+        await sendTgMessage(
+          chatId,
+          `⚠️ No encontré qué SKU ajustar en tu mensaje.\nUsa <code>/stock palabra</code> para ver el código exacto.`
+        );
+        return res.status(200).json({ ok: true });
+      }
+
+      const stockActual = Number(candidate.stock_fisico || 0);
+      const rawQty = Math.round(Number(parsed.cantidad || 0));
+      const mode = String(parsed.adjustment_mode || 'merma').toLowerCase();
+
+      let tipoMov: 'merma_dano' | 'ajuste_positivo' | 'ajuste_negativo' = 'merma_dano';
+      let qty = Math.abs(rawQty);
+      let resultante = Math.max(stockActual - qty, 0);
+
+      if (mode === 'conteo_exacto') {
+        const target = Math.max(0, rawQty);
+        const diff = target - stockActual;
+        if (diff === 0) {
+          await sendTgMessage(
+            chatId,
+            `ℹ️ <code>${escapeHtml(candidate.sku)}</code> ya tiene físico exacto de <b>${stockActual}</b>.`
+          );
+          return res.status(200).json({ ok: true });
+        }
+        tipoMov = diff > 0 ? 'ajuste_positivo' : 'ajuste_negativo';
+        qty = Math.abs(diff);
+        resultante = target;
+      } else if (mode === 'delta_positivo') {
+        tipoMov = 'ajuste_positivo';
+        resultante = stockActual + qty;
+      } else if (mode === 'delta_negativo') {
+        tipoMov = 'ajuste_negativo';
+        resultante = Math.max(stockActual - qty, 0);
+      }
+
+      if (qty <= 0) {
+        await sendTgMessage(chatId, '⚠️ Indica cuántas unidades ajustar o reportar como merma.');
+        return res.status(200).json({ ok: true });
+      }
+
+      const draft: TelegramDraft = {
+        id: `a_${Date.now().toString(36)}`,
+        kind: 'ajuste_inventario',
+        chatId,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        sku: candidate.sku,
+        nombre: candidate.nombre || candidate.sku,
+        tipo_movimiento: tipoMov,
+        cantidad: qty,
+        stock_actual: stockActual,
+        stock_resultante: resultante,
+        motivo: String(parsed.motivo || 'Reporte desde Telegram').trim(),
+        rawInput: rawText,
+      };
+      await saveDraft(supabase, draft);
+      await sendDraftConfirmationCard(chatId, draft);
+      return res.status(200).json({ ok: true });
+    }
+
     if (parsed.intent !== 'compra' || !Array.isArray(parsed.items) || parsed.items.length === 0) {
       await sendTgMessage(
         chatId,
         parsed.reply_hint
           ? escapeHtml(parsed.reply_hint)
-          : `No detecté una compra clara en tu mensaje.\n\nPrueba así:\n<i>"Compré 10 cascos negros a $12.50 en MotoParts"</i>\no envía una foto de la factura.`
+          : `No detecté una acción clara.\n\nPrueba:\n• <i>"Compré 10 cascos negros a $12.50"</i>\n• <i>"Pagué $20 de gasolina de caja chica"</i>\n• <i>"¿Cómo va el pedido de Tatiana?"</i>\n• O envía /ayuda.`
       );
       return res.status(200).json({ ok: true });
     }
@@ -2162,15 +2906,12 @@ async function handleTelegramBotRequest(req: any, res: any) {
       return res.status(200).json({ ok: true });
     }
 
-    const chosenAccount =
-      accounts.find((a: any) => a.id === parsed.account_id) ||
-      accounts[0] || { id: 'banco_principal', nombre: 'Banco Principal' };
-
     const totalCompra =
       Math.round(draftItems.reduce((s, it) => s + it.subtotal, 0) * 100) / 100;
 
-    const draft: PurchaseDraft = {
+    const draft: TelegramDraft = {
       id: `p_${Date.now().toString(36)}`,
+      kind: 'compra',
       chatId,
       status: 'pending',
       createdAt: new Date().toISOString(),
@@ -2185,14 +2926,11 @@ async function handleTelegramBotRequest(req: any, res: any) {
       rawInput: rawText || '[Foto de factura]',
     };
 
-    const draftsDoc = await readDocJson<PurchaseDraft[]>(supabase, DRAFTS_DOC_TITLE, []);
-    const nextDrafts = [draft, ...(Array.isArray(draftsDoc.data) ? draftsDoc.data : [])].slice(0, 25);
-    await writeDocJson(supabase, DRAFTS_DOC_TITLE, nextDrafts, draftsDoc.id);
-
+    await saveDraft(supabase, draft);
     await sendDraftConfirmationCard(chatId, draft);
     return res.status(200).json({ ok: true });
   } catch (err: any) {
-    console.error('Error en /api/telegram-webhook:', err);
+    console.error('Error en /api/morning-brief (telegram):', err);
     try {
       const chatId = err?.chatId || req.body?.message?.chat?.id || req.body?.callback_query?.message?.chat?.id;
       if (chatId && process.env.TELEGRAM_BOT_TOKEN && !action) {
