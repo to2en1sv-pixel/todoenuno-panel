@@ -7,6 +7,7 @@ import { fetchStockItems, extractOrderQuantity, fetchProductVariants } from "@/l
 import type { StockItem, ProductVariant } from "@/types/inventory";
 import { resolveCatalogSku, linkRawSkuToProduct, linkAdCodeToProduct } from "@/lib/catalogAliases";
 import { evaluateCustomerRisk, addOrUpdateBlacklist, removeBlacklistEntry, cleanPhone } from "@/lib/blacklist";
+import { useCouriers } from "@/lib/couriers";
 
 interface Props {
   onClose: () => void;
@@ -83,6 +84,7 @@ const labelCls =
   "mb-1 block text-[10px] font-bold uppercase tracking-wider opacity-60";
 
 export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistentes, initialValues }: Props) {
+  const { activeNames: courierOptions } = useCouriers();
   const [form, setForm] = useState({ ...FORM_INICIAL });
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -961,12 +963,14 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
                 onChange={set("courier")}
                 className={inputCls}
               >
-                <option value="Motorista Central 1">Motorista Central 1</option>
-                <option value="Motorista Central 2">Motorista Central 2</option>
-                <option value="Cargo Expreso El Salvador">Cargo Expreso El Salvador</option>
-                <option value="Urbano Express">Urbano Express</option>
-                <option value="C807 Xpress">C807 Xpress</option>
-                <option value="Retiro en Oficina">Retiro en Oficina</option>
+                {form.courier && !courierOptions.includes(form.courier) && (
+                  <option value={form.courier}>{form.courier}</option>
+                )}
+                {courierOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
               </select>
             </div>
 

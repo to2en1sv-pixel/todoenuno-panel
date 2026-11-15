@@ -47,7 +47,8 @@ import {
   Zap,
   ArrowRight,
   ShieldAlert,
-  UserX
+  UserX,
+  Camera
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
@@ -57,6 +58,7 @@ import {
   renderWhatsappTemplate,
   type OrderWhatsappTemplate,
 } from "@/lib/whatsappTemplates";
+import { useCouriers } from "@/lib/couriers";
 import PedidoModal from "@/components/PedidoModal";
 import GuiaEnvio, { type GuiaPedido } from "@/components/GuiaEnvio";
 import ManifiestoDespacho from "@/components/ManifiestoDespacho";
@@ -64,6 +66,7 @@ import {
   DelayRescheduleModal,
   EficienciaRetrasosView,
 } from "@/components/pedidos/EficienciaRetrasosView";
+import { DespachoGuiasView } from "@/components/pedidos/DespachoGuiasView";
 import {
   evaluateOrderSla,
   fetchDispatchSlaSettings,
@@ -136,16 +139,6 @@ const ETIQUETA_ESTADO: Record<Estado, string> = {
   entregado: "Entregado",
   cancelado: "Cancelado",
 };
-
-const COURIERS = [
-  "Todos los Couriers",
-  "Motorista Central 1",
-  "Motorista Central 2",
-  "Cargo Expreso El Salvador",
-  "Urbano Express",
-  "C807 Xpress",
-  "Retiro en Oficina"
-];
 
 const DEPARTAMENTOS = [
   "Todas las Zonas",
@@ -256,7 +249,12 @@ export function PedidosPage() {
   const [mostrarHistorial, setMostrarHistorial] = useState(false);
 
   // Vistas y Filtros Pro
-  const [vista, setVista] = useState<'kanban' | 'tabla' | 'eficiencia' | 'lista_negra'>('kanban');
+  const { activeNames: courierNames } = useCouriers();
+  const courierFilterOptions = useMemo(
+    () => ["Todos los Couriers", ...courierNames],
+    [courierNames]
+  );
+  const [vista, setVista] = useState<'kanban' | 'tabla' | 'despacho' | 'eficiencia' | 'lista_negra'>('kanban');
   const [pestañaEtapa, setPestañaEtapa] = useState<'todas' | Estado>('todas');
   const [filtroEncargos, setFiltroEncargos] = useState<'todos' | 'urgentes' | 'semana' | 'quincena'>('todos');
   const [filtroCourier, setFiltroCourier] = useState("Todos los Couriers");
@@ -926,234 +924,266 @@ export function PedidosPage() {
           </button>
         </div>
       )}
-      {/* Encabezado Principal */}
-      <header className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-4 mb-5">
-        <div className="shrink-0 min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight whitespace-normal sm:whitespace-nowrap">
-              Centro de Pedidos & Logística
-            </h1>
-            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 shrink-0">
-              COD Engine
-            </span>
-          </div>
-          <p className="text-xs md:text-sm opacity-60 mt-0.5 max-w-xl">
-            Despachos, rutas de motoristas, guías en lote y cuadre de efectivo contra entrega en El Salvador.
-          </p>
-        </div>
-
-        {/* Acciones Superiores */}
-        <div className="flex flex-wrap items-center gap-2 2xl:justify-end">
-          {/* Selector de Vista: Kanban vs Tabla vs Lista Negra */}
-          <div className="flex bg-sf p-1 rounded-xl border border-[var(--bd)] text-xs font-bold gap-1 flex-wrap sm:flex-nowrap">
-            <button
-              onClick={() => setVista('kanban')}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                vista === 'kanban' ? 'bg-cd shadow text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
-              }`}
-            >
-              <LayoutGrid size={14} /> Kanban
-            </button>
-            <button
-              onClick={() => setVista('tabla')}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                vista === 'tabla' ? 'bg-cd shadow text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
-              }`}
-            >
-              <TableIcon size={14} /> Tabla ({pedidosFiltrados.length})
-            </button>
-            <button
-              onClick={() => setVista('eficiencia')}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                vista === 'eficiencia'
-                  ? 'bg-amber-500 text-white font-black shadow'
-                  : delayedPendingCount > 0
-                  ? 'text-rose-600 dark:text-rose-400 hover:bg-rose-500/10'
-                  : 'tx-mu hover:text-[var(--tx)]'
-              }`}
-              title="Eficiencia Operativa, Reloj de Despacho y Avisos de Retraso por WhatsApp"
-            >
-              <Clock size={14} />
-              <span>Eficiencia &amp; Retrasos</span>
-              {delayedPendingCount > 0 && (
-                <span
-                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
-                    vista === 'eficiencia'
-                      ? 'bg-white/25 text-white'
-                      : 'bg-rose-600 text-white animate-pulse'
-                  }`}
-                >
-                  {delayedPendingCount}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setVista('lista_negra')}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                vista === 'lista_negra' ? 'bg-rose-600 text-white font-black shadow' : 'text-rose-500 hover:bg-rose-500/10'
-              }`}
-              title="Directorio Anti-Fraude & DICOM Interno"
-            >
-              <ShieldAlert size={14} /> 🛡️ Lista Negra & DICOM
-            </button>
+      {/* Encabezado Principal Reestructurado */}
+      <header className="flex flex-col gap-3 mb-5">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          <div className="shrink-0 min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight whitespace-normal sm:whitespace-nowrap">
+                Centro de Pedidos & Logística
+              </h1>
+              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 shrink-0">
+                COD Engine
+              </span>
+            </div>
+            <p className="text-xs opacity-60 mt-0.5">
+              Despachos, guías con foto por WhatsApp, rutas y cuadre de efectivo contra entrega.
+            </p>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* Acciones Compactas */}
+          <div className="flex items-center gap-2 flex-wrap xl:justify-end">
             <button
               onClick={exportarCSV}
-              className="px-3 py-2 border border-[var(--bd)] hover:bg-sf rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              className="px-3 py-2 border border-[var(--bd)] hover:bg-sf rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
               title="Exportar a Excel / CSV"
             >
-              <Download size={14} /> Exportar CSV
+              <Download size={14} /> <span className="hidden sm:inline">CSV</span>
             </button>
 
             <button
               onClick={() => cargarPedidos(true)}
               disabled={refrescando}
-              className="p-2.5 rounded-xl border border-[var(--bd)] bg-cd hover:bg-sf transition-colors shrink-0"
-              title="Recargar"
+              className="p-2 rounded-xl border border-[var(--bd)] bg-cd hover:bg-sf transition-colors shrink-0"
+              title="Recargar pedidos"
             >
               <RefreshCw className={`w-4 h-4 ${refrescando ? "animate-spin" : ""}`} />
             </button>
 
             <button
               onClick={() => setMostrarHistorial(!mostrarHistorial)}
-              className={`inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-bold transition-colors whitespace-nowrap ${
+              className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors whitespace-nowrap ${
                 mostrarHistorial
                   ? "border-indigo-500 bg-indigo-500/10 text-indigo-500"
                   : "border-[var(--bd)] bg-cd text-[var(--tx)] hover:bg-sf"
               }`}
+              title="Mostrar/ocultar pedidos entregados y cancelados antiguos"
             >
               {mostrarHistorial ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              <span>{mostrarHistorial ? "Ocultar Historial" : "Ver Historial"}</span>
+              <span>{mostrarHistorial ? "Ocultar Historial" : "Historial"}</span>
             </button>
 
             <button
               onClick={() => setModalNuevo(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-xs font-bold text-white shadow-md transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-3.5 py-2 text-xs font-bold text-white shadow-md transition-colors whitespace-nowrap"
             >
               <Plus className="w-4 h-4" /> Nuevo Pedido
             </button>
           </div>
         </div>
+
+        {/* Barra de Navegación de Vistas y Submódulos (en su propia fila limpia) */}
+        <div className="flex items-center gap-1.5 bg-sf p-1.5 rounded-2xl border border-[var(--bd)] text-xs font-bold overflow-x-auto">
+          <button
+            onClick={() => setVista('kanban')}
+            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              vista === 'kanban' ? 'bg-cd shadow text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
+            }`}
+          >
+            <LayoutGrid size={14} /> Kanban
+          </button>
+
+          <button
+            onClick={() => setVista('tabla')}
+            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              vista === 'tabla' ? 'bg-cd shadow text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
+            }`}
+          >
+            <TableIcon size={14} /> Tabla ({pedidosFiltrados.length})
+          </button>
+
+          <div className="h-4 w-px bg-[var(--bd)] mx-1 shrink-0" />
+
+          <button
+            onClick={() => setVista('despacho')}
+            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              vista === 'despacho'
+                ? 'bg-emerald-600 text-white font-black shadow'
+                : 'tx-mu hover:text-emerald-600 hover:bg-emerald-500/10'
+            }`}
+            title="Subir foto de paquete con guía y enviar aviso en lote por Evolution API"
+          >
+            <Camera size={14} />
+            <span>Despacho & Guías</span>
+            {porEstado.por_empacar.length > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                  vista === 'despacho' ? 'bg-white/25 text-white' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                }`}
+              >
+                {porEstado.por_empacar.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setVista('eficiencia')}
+            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              vista === 'eficiencia'
+                ? 'bg-amber-500 text-white font-black shadow'
+                : delayedPendingCount > 0
+                ? 'text-rose-600 dark:text-rose-400 hover:bg-rose-500/10'
+                : 'tx-mu hover:text-[var(--tx)]'
+            }`}
+            title="Eficiencia Operativa, Reloj de Despacho y Avisos de Retraso por WhatsApp"
+          >
+            <Clock size={14} />
+            <span>Eficiencia &amp; Retrasos</span>
+            {delayedPendingCount > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                  vista === 'eficiencia'
+                    ? 'bg-white/25 text-white'
+                    : 'bg-rose-600 text-white animate-pulse'
+                }`}
+              >
+                {delayedPendingCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setVista('lista_negra')}
+            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              vista === 'lista_negra' ? 'bg-rose-600 text-white font-black shadow' : 'text-rose-500 hover:bg-rose-500/10'
+            }`}
+            title="Directorio Anti-Fraude & DICOM Interno"
+          >
+            <ShieldAlert size={14} /> Lista Negra & DICOM
+          </button>
+        </div>
       </header>
 
-      {/* Barra de Filtros Avanzados (Búsqueda + Courier + Departamento) */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-cd p-3 rounded-2xl border border-[var(--bd)] mb-5">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-50" />
-          <input
-            type="text"
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="Buscar por cliente, SKU, teléfono, dirección o anuncio..."
-            className="w-full rounded-xl border border-[var(--bd)] bg-sf pl-9 pr-8 py-2 text-xs outline-none focus:border-indigo-500"
-          />
-          {busqueda && (
-            <button
-              onClick={() => setBusqueda("")}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-black/10 opacity-60"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Selector Courier */}
-          <select
-            value={filtroCourier}
-            onChange={e => setFiltroCourier(e.target.value)}
-            className="p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs font-semibold outline-none focus:border-indigo-500"
-          >
-            {COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-
-          {/* Selector Departamento */}
-          <select
-            value={filtroDepto}
-            onChange={e => setFiltroDepto(e.target.value)}
-            className="p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs font-semibold outline-none focus:border-indigo-500"
-          >
-            {DEPARTAMENTOS.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
-        </div>
-      </div>
-
-      {/* Tarjetas KPI Operativas */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5 mb-5">
-        <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
-            <TrendingUp className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Ventas Hoy</p>
-            <p className="text-lg font-black truncate">{dinero(kpis.ventasHoy)}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-500">
-            <Clock className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Por Despachar</p>
-            <p className="text-lg font-black truncate">{kpis.porDespachar} <span className="text-xs font-normal opacity-60">hoy</span></p>
-          </div>
-        </div>
-
-        {/* KPI 3: Bóveda de Encargos Programados */}
-        <button
-          type="button"
-          onClick={() => setPestañaEtapa('programado')}
-          className={`flex items-center gap-3 rounded-2xl border p-3.5 shadow-sm text-left transition-all ${
-            pestañaEtapa === 'programado'
-              ? 'border-indigo-500 bg-indigo-500/10 ring-2 ring-indigo-500/20'
-              : 'border-[var(--bd)] bg-cd hover:border-indigo-500/40'
-          }`}
-          title="Ver pedidos programados para quincena / fin de mes"
-        >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500 relative">
-            <CalendarClock className="h-5 w-5" />
-            {kpis.encargosUrgentes > 0 && (
-              <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-rose-500 animate-ping" />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-1">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Encargos</p>
-              {kpis.encargosUrgentes > 0 && (
-                <span className="text-[9px] font-black px-1 rounded bg-rose-500 text-white animate-pulse">
-                  {kpis.encargosUrgentes} HOY
-                </span>
+      {/* Barra de Filtros y 5 KPIs solo visibles en Kanban / Tabla para evitar saturación en submódulos */}
+      {(vista === 'kanban' || vista === 'tabla') && (
+        <>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-cd p-3 rounded-2xl border border-[var(--bd)] mb-5">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-50" />
+              <input
+                type="text"
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar por cliente, SKU, teléfono, dirección o anuncio..."
+                className="w-full rounded-xl border border-[var(--bd)] bg-sf pl-9 pr-8 py-2 text-xs outline-none focus:border-indigo-500"
+              />
+              {busqueda && (
+                <button
+                  onClick={() => setBusqueda("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-black/10 opacity-60"
+                >
+                  <X className="w-3 h-3" />
+                </button>
               )}
             </div>
-            <p className="text-lg font-black truncate text-indigo-700 dark:text-indigo-300">
-              {kpis.totalEncargos} <span className="text-xs font-normal opacity-70">({dinero(kpis.montoEncargos)})</span>
-            </p>
-          </div>
-        </button>
 
-        <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500">
-            <DollarSign className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Cobros en Calle</p>
-            <p className="text-lg font-black text-purple-600 dark:text-purple-400 truncate">{dinero(kpis.pendientesLiquidacion)}</p>
-          </div>
-        </div>
+            <div className="flex items-center gap-2">
+              {/* Selector Courier */}
+              <select
+                value={filtroCourier}
+                onChange={e => setFiltroCourier(e.target.value)}
+                className="p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs font-semibold outline-none focus:border-indigo-500"
+              >
+                {courierFilterOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
 
-        <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-500/10 text-zinc-500">
-            <BarChart3 className="h-5 w-5" />
+              {/* Selector Departamento */}
+              <select
+                value={filtroDepto}
+                onChange={e => setFiltroDepto(e.target.value)}
+                className="p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs font-semibold outline-none focus:border-indigo-500"
+              >
+                {DEPARTAMENTOS.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Ticket Promedio</p>
-            <p className="text-lg font-black truncate">{dinero(kpis.ticketPromedio)}</p>
+
+          {/* Tarjetas KPI Operativas */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5 mb-5">
+            <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
+                <TrendingUp className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Ventas Hoy</p>
+                <p className="text-lg font-black truncate">{dinero(kpis.ventasHoy)}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-500">
+                <Clock className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Por Despachar</p>
+                <p className="text-lg font-black truncate">{kpis.porDespachar} <span className="text-xs font-normal opacity-60">hoy</span></p>
+              </div>
+            </div>
+
+            {/* KPI 3: Bóveda de Encargos Programados */}
+            <button
+              type="button"
+              onClick={() => setPestañaEtapa('programado')}
+              className={`flex items-center gap-3 rounded-2xl border p-3.5 shadow-sm text-left transition-all ${
+                pestañaEtapa === 'programado'
+                  ? 'border-indigo-500 bg-indigo-500/10 ring-2 ring-indigo-500/20'
+                  : 'border-[var(--bd)] bg-cd hover:border-indigo-500/40'
+              }`}
+              title="Ver pedidos programados para quincena / fin de mes"
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500 relative">
+                <CalendarClock className="h-5 w-5" />
+                {kpis.encargosUrgentes > 0 && (
+                  <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-rose-500 animate-ping" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-1">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Encargos</p>
+                  {kpis.encargosUrgentes > 0 && (
+                    <span className="text-[9px] font-black px-1 rounded bg-rose-500 text-white animate-pulse">
+                      {kpis.encargosUrgentes} HOY
+                    </span>
+                  )}
+                </div>
+                <p className="text-lg font-black truncate text-indigo-700 dark:text-indigo-300">
+                  {kpis.totalEncargos} <span className="text-xs font-normal opacity-70">({dinero(kpis.montoEncargos)})</span>
+                </p>
+              </div>
+            </button>
+
+            <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500">
+                <DollarSign className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Cobros en Calle</p>
+                <p className="text-lg font-black text-purple-600 dark:text-purple-400 truncate">{dinero(kpis.pendientesLiquidacion)}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-500/10 text-zinc-500">
+                <BarChart3 className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Ticket Promedio</p>
+                <p className="text-lg font-black truncate">{dinero(kpis.ticketPromedio)}</p>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
 
       {error && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-500">
@@ -1356,6 +1386,76 @@ export function PedidosPage() {
           <Loader2 className="w-8 h-8 animate-spin mb-3" />
           <p className="text-sm">Cargando pedidos logísticos...</p>
         </div>
+      ) : vista === 'despacho' ? (
+        <DespachoGuiasView
+          pedidos={pedidos}
+          templates={waTemplates}
+          couriers={courierNames}
+          onRefresh={() => cargarPedidos(true)}
+          onChangeCourier={async (orderId, newCourier) => {
+            await supabase
+              .from('whatsapp_orders')
+              .update({ courier: newCourier })
+              .eq('id', orderId);
+            setPedidos((prev) =>
+              prev.map((p) => (p.id === orderId ? { ...p, courier: newCourier } : p))
+            );
+          }}
+          onOrderDispatched={async (patch) => {
+            const target = pedidos.find((p) => p.id === patch.id);
+            const updatePayload: Record<string, any> = { notas: patch.notas };
+            if (patch.nextEstado) {
+              updatePayload.estado = patch.nextEstado;
+            }
+            const { error: updErr } = await supabase
+              .from('whatsapp_orders')
+              .update(updatePayload)
+              .eq('id', patch.id);
+
+            if (!updErr && target) {
+              if (patch.nextEstado) {
+                try {
+                  await syncOrderInventoryOnStatusChange({
+                    order: target,
+                    prevEstado: normalizarEstado(target.estado),
+                    nextEstado: patch.nextEstado,
+                    usuario: 'Despacho & Guías',
+                    stockItemsCache: stockItems,
+                  });
+                } catch {}
+                try {
+                  const { emitOsEvent } = await import('@/lib/osEvents');
+                  emitOsEvent({
+                    type: 'order.shipped',
+                    source_table: 'whatsapp_orders',
+                    source_id: target.id,
+                    payload: {
+                      order_id: target.id,
+                      nombre_cliente: target.nombre_cliente,
+                      telefono: target.telefono,
+                      sku: target.sku,
+                      catalogo_sku: target.catalogo_sku,
+                      total: target.total,
+                      estado_anterior: target.estado,
+                      estado: patch.nextEstado,
+                    },
+                  });
+                } catch {}
+              }
+              setPedidos((prev) =>
+                prev.map((p) =>
+                  p.id === patch.id
+                    ? {
+                        ...p,
+                        notas: patch.notas,
+                        ...(patch.nextEstado ? { estado: patch.nextEstado } : {}),
+                      }
+                    : p
+                )
+              );
+            }
+          }}
+        />
       ) : vista === 'eficiencia' ? (
         <EficienciaRetrasosView
           pedidos={pedidosFiltrados}

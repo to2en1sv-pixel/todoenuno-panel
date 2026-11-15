@@ -2,21 +2,13 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Printer, X, Truck, FileText, CheckCircle2 } from "lucide-react";
 import type { Pedido } from "@/pages/Pedidos";
+import { useCouriers } from "@/lib/couriers";
 
 interface Props {
   pedidos: Pedido[];
   onClose: () => void;
   courierInicial?: string;
 }
-
-const COURIERS_COMUNES = [
-  "Motorista Central 1",
-  "Motorista Central 2",
-  "Cargo Expreso El Salvador",
-  "Urbano Express",
-  "C807 Xpress",
-  "Retiro en Oficina / Local"
-];
 
 const PRINT_CSS = `
 @media print {
@@ -33,7 +25,8 @@ const PRINT_CSS = `
 `;
 
 export default function ManifiestoDespacho({ pedidos, onClose, courierInicial }: Props) {
-  const [courier, setCourier] = useState(courierInicial || COURIERS_COMUNES[0]);
+  const { activeNames: courierOptions } = useCouriers();
+  const [courier, setCourier] = useState(courierInicial || courierOptions[0] || "Motorista Central 1");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -75,7 +68,10 @@ export default function ManifiestoDespacho({ pedidos, onClose, courierInicial }:
                   onChange={e => setCourier(e.target.value)}
                   className="p-1.5 border border-neutral-300 rounded-lg text-xs font-bold outline-none focus:border-indigo-500 bg-neutral-50"
                 >
-                  {COURIERS_COMUNES.map(c => (
+                  {courier && !courierOptions.includes(courier) && (
+                    <option value={courier}>{courier}</option>
+                  )}
+                  {courierOptions.map(c => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>

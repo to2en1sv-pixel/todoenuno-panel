@@ -35,10 +35,12 @@ import {
   getCachedOrderWhatsappTemplates,
   renderWhatsappTemplate,
 } from "@/lib/whatsappTemplates";
+import { useCouriers } from "@/lib/couriers";
 
 export function ConfirmarEntregaPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { activeNames: courierOptions } = useCouriers();
 
   // Estados de carga
   const [cargando, setCargando] = useState(true);
@@ -397,11 +399,9 @@ export function ConfirmarEntregaPage() {
             className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-900 text-xs font-bold outline-none text-white focus:border-emerald-500"
           >
             <option value="Todos los Couriers">Todos los Motoristas ({todosLosPedidos.length})</option>
-            <option value="Motorista Central 1">Motorista Central 1</option>
-            <option value="Motorista Central 2">Motorista Central 2</option>
-            <option value="Cargo Expreso El Salvador">Cargo Expreso</option>
-            <option value="Urbano Express">Urbano Express</option>
-            <option value="C807 Xpress">C807 Xpress</option>
+            {courierOptions.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
           </select>
         </div>
 

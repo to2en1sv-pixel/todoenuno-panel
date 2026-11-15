@@ -32,6 +32,7 @@ export const WA_TEMPLATE_VARIABLES: Array<{
   { key: '{metodo_pago}', label: 'Pago', example: 'Contra entrega' },
   { key: '{telefono}', label: 'Teléfono', example: '6074-4809' },
   { key: '{codigo}', label: 'Código pedido', example: 'PED-1042' },
+  { key: '{guia}', label: 'N° de guía', example: 'SV-884210' },
 ];
 
 export const DEFAULT_ORDER_WA_TEMPLATES: OrderWhatsappTemplate[] = [
@@ -98,6 +99,17 @@ export const DEFAULT_ORDER_WA_TEMPLATES: OrderWhatsappTemplate[] = [
     descripcion: 'Aviso proactivo cuando un paquete excede el reloj de despacho para confirmar nueva fecha con el cliente.',
     mensaje:
       '¡Hola {nombre}! 👋 Te escribimos de TODOENUNO respecto a tu pedido de *{producto}* ({total}). Tuvimos una demora operativa y reprogramaremos tu entrega para el *{nueva_fecha}*. ¿Nos confirmas si podrás recibirlo ese día en 📍 {direccion}?',
+    activo: true,
+    isDefault: true,
+  },
+  {
+    id: 'paquete_en_ruta',
+    titulo: '7. Paquete Empacado / En Ruta (con Foto)',
+    etiquetaBoton: 'Enviar Foto y Pasar a Ruta',
+    categoria: 'pedidos',
+    descripcion: 'Enviado desde Despacho & Guías junto a la foto del paquete rotulado con su guía.',
+    mensaje:
+      '¡Hola {nombre}! 📦 Tu pedido de *{producto}* ({total}) ya quedó empacado y salió en ruta con *{courier}*. Te compartimos la foto de tu paquete con su guía para tu tranquilidad 🙌 Recuerda tener listo el monto al recibir.',
     activo: true,
     isDefault: true,
   },
@@ -281,6 +293,7 @@ export function renderWhatsappTemplate(
   } | null,
   extra?: {
     nueva_fecha?: string | null;
+    guia?: string | null;
   }
 ): string {
   const numTotal = Number(pedido?.total) || 0;
@@ -306,6 +319,7 @@ export function renderWhatsappTemplate(
     '{metodo_pago}': (pedido?.metodo_pago || 'Contra entrega').trim(),
     '{telefono}': (pedido?.telefono || '').trim(),
     '{codigo}': (pedido?.pedido_codigo || pedido?.id || '').trim(),
+    '{guia}': (extra?.guia || 'adjunta en la foto').trim(),
   };
 
   let out = templateText || '';

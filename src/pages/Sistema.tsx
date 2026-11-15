@@ -14,6 +14,13 @@ import {
   type OrderWhatsappTemplate,
 } from '@/lib/whatsappTemplates';
 import {
+  DEFAULT_COURIERS,
+  fetchCouriers,
+  saveCouriers,
+  type CourierItem,
+  type CourierTipo,
+} from '@/lib/couriers';
+import {
   Activity,
   AlertTriangle,
   Bot,
@@ -39,6 +46,7 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  Truck,
   XCircle,
   Zap,
 } from 'lucide-react';
@@ -62,7 +70,7 @@ type TableHealth = {
   error?: string;
 };
 
-type SistemaTab = 'plantillas' | 'todd' | 'stream' | 'diagnostico' | 'architecture';
+type SistemaTab = 'plantillas' | 'couriers' | 'todd' | 'stream' | 'diagnostico' | 'architecture';
 
 type MetaPagePermStatus = {
   page_id: string;
@@ -135,6 +143,7 @@ ALTER TABLE public.meta_ad_accounts ENABLE ROW LEVEL SECURITY;`;
 
 function resolveTabParam(raw: string | null): SistemaTab {
   if (raw === 'plantillas') return 'plantillas';
+  if (raw === 'couriers' || raw === 'envios') return 'couriers';
   if (raw === 'todd' || raw === 'bot') return 'todd';
   if (raw === 'diagnostico' || raw === 'crons') return 'diagnostico';
   if (raw === 'architecture') return 'architecture';
@@ -215,6 +224,112 @@ export function SistemaPage() {
       active = false;
     };
   }, []);
+
+  /* ------------------------------------------------------------------ */
+  /* 1B. Estado del Gestor de Couriers & Transportistas                 */
+  /* ------------------------------------------------------------------ */
+  const [couriersList, setCouriersList] = useState<CourierItem[]>([]);
+  const [courierSource, setCourierSource] = useState<'supabase' | 'local'>('supabase');
+  const [loadingCouriers, setLoadingCouriers] = useState(true);
+  const [savingCouriers, setSavingCouriers] = useState(false);
+  const [hasUnsavedCouriers, setHasUnsavedCouriers] = useState(false);
+  const [courierNotice, setCourierNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [newCourierName, setNewCourierName] = useState('');
+  const [newCourierTipo, setNewCourierTipo] = useState<CourierTipo>('motorista');
+  const [newCourierZonas, setNewCourierZonas] = useState('');
+  const [newCourierTel, setNewCourierTel] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    setLoadingCouriers(true);
+    fetchCouriers()
+      .then(({ couriers: loaded, source }) => {
+        if (!active) return;
+        setCouriersList(loaded);
+        setCourierSource(source);
+      })
+      .finally(() => {
+        if (active) setLoadingCouriers(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const persistCouriersList = async (nextList: CourierItem[], okMessage?: string) => {
+    setSavingCouriers(true);
+    try {
+      const res = await saveCouriers(nextList);
+      setCouriersList(res.couriers);
+      setCourierSource(res.source);
+      setHasUnsavedCouriers(false);
+      setCourierNotice({
+        type: 'ok',
+        text:
+          okMessage ||
+          (res.source === 'supabase'
+            ? 'Couriers guardados y sincronizados con Pedidos, Despacho & Guías y Portal Repartidor.'
+            : 'Couriers guardados localmente.'),
+      });
+      setTimeout(() => {
+        setCourierNotice((prev) => (prev?.type === 'ok' ? null : prev));
+      }, 4500);
+    } catch (err: any) {
+      setCourierNotice({ type: 'err', text: err?.message || 'Error guardando couriers.' });
+    } finally {
+      setSavingCouriers(false);
+    }
+  };
+
+  const handleAddCourier = async () => {
+    const cleanName = newCourierName.trim();
+    if (!cleanName) {
+      setCourierNotice({ type: 'err', text: 'Escribe el nombre del courier o motorista.' });
+      return;
+    }
+    if (couriersList.some((c) => c.nombre.toLowerCase() === cleanName.toLowerCase())) {
+      setCourierNotice({ type: 'err', text: 'Ya existe un courier con ese nombre.' });
+      return;
+    }
+    const created: CourierItem = {
+      id: `cour_${Date.now().toString(36)}`,
+      nombre: cleanName,
+      tipo: newCourierTipo,
+      zonas: newCourierZonas.trim(),
+      telefono: newCourierTel.trim(),
+      activo: true,
+    };
+    const next = [...couriersList, created];
+    setNewCourierName('');
+    setNewCourierZonas('');
+    setNewCourierTel('');
+    await persistCouriersList(next, `Courier "${cleanName}" agregado y disponible en Pedidos.`);
+  };
+
+  const handleUpdateCourierItem = (id: string, patch: Partial<CourierItem>) => {
+    setCouriersList((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    setHasUnsavedCouriers(true);
+  };
+
+  const handleToggleCourierItem = async (id: string) => {
+    const next = couriersList.map((c) => (c.id === id ? { ...c, activo: !c.activo } : c));
+    await persistCouriersList(next);
+  };
+
+  const handleDeleteCourierItem = async (id: string) => {
+    const next = couriersList.filter((c) => c.id !== id);
+    await persistCouriersList(
+      next.length > 0 ? next : DEFAULT_COURIERS.map((c) => ({ ...c })),
+      next.length > 0 ? 'Courier eliminado.' : 'Se restauraron los couriers base.'
+    );
+  };
+
+  const handleResetCouriers = async () => {
+    await persistCouriersList(
+      DEFAULT_COURIERS.map((c) => ({ ...c })),
+      'Lista base de couriers restaurada.'
+    );
+  };
 
   const selectedTemplate = useMemo(
     () => templates.find((t) => t.id === selectedTplId) || templates[0] || null,
@@ -578,6 +693,17 @@ export function SistemaPage() {
           >
             <MessageSquare size={14} style={{ color: activeTab === 'plantillas' ? 'var(--ac)' : undefined }} />
             Plantillas WhatsApp
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabChange('couriers')}
+            className={`flex-1 lg:flex-none px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'couriers' ? 'bg-cd bd' : 'tx-mu hover:text-[var(--tx)]'
+            }`}
+          >
+            <Truck size={14} style={{ color: activeTab === 'couriers' ? 'var(--ac)' : undefined }} />
+            Couriers & Envíos
           </button>
 
           <button
@@ -1556,6 +1682,209 @@ export function SistemaPage() {
                   Editar Plantillas WhatsApp
                 </button>
               </div>
+            </section>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================== */}
+      {/* PESTAÑA: GESTOR CENTRAL DE COURIERS & TRANSPORTISTAS              */}
+      {/* ================================================================== */}
+      {activeTab === 'couriers' && (
+        <div className="flex flex-col gap-4">
+          {courierNotice && (
+            <div
+              className="bg-cd bd rounded-xl px-4 py-3 text-xs font-medium flex items-center justify-between gap-2"
+              style={{
+                borderColor: courierNotice.type === 'ok' ? 'var(--ok)' : 'var(--er)',
+                color: courierNotice.type === 'ok' ? 'var(--ok)' : 'var(--er)',
+              }}
+            >
+              <span>{courierNotice.text}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            {/* Agregar nuevo courier */}
+            <section className="lg:col-span-4 bg-cd bd rounded-2xl p-5 flex flex-col gap-3">
+              <div>
+                <h2 className="text-sm font-bold flex items-center gap-2">
+                  <Truck size={16} style={{ color: 'var(--ac)' }} />
+                  Agregar Transportista / Courier
+                </h2>
+                <p className="text-[11px] tx-mu mt-0.5">
+                  Aparecerán al instante en <strong>Nuevo Pedido</strong>, <strong>Despacho & Guías</strong>, <strong>Manifiesto</strong> y <strong>Portal Repartidor</strong>.
+                </p>
+              </div>
+
+              <div className="space-y-2.5">
+                <div>
+                  <label className="text-[11px] font-semibold tx-mu block mb-1">Nombre *</label>
+                  <input
+                    type="text"
+                    value={newCourierName}
+                    onChange={(e) => setNewCourierName(e.target.value)}
+                    placeholder="Ej. Boxful, C807, Motorista Juan"
+                    className="w-full bg-sf bd rounded-xl px-3 py-2 text-xs outline-none focus:border-[var(--ac)]"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold tx-mu block mb-1">Tipo</label>
+                  <select
+                    value={newCourierTipo}
+                    onChange={(e) => setNewCourierTipo(e.target.value as CourierTipo)}
+                    className="w-full bg-sf bd rounded-xl px-3 py-2 text-xs font-semibold outline-none focus:border-[var(--ac)]"
+                  >
+                    <option value="motorista">Motorista propio</option>
+                    <option value="externo">Courier externo (Cargo / Urbano / Boxful)</option>
+                    <option value="encomienda">Encomienda / Departamental</option>
+                    <option value="oficina">Retiro en oficina / punto</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold tx-mu block mb-1">Zonas que cubre (opcional)</label>
+                  <input
+                    type="text"
+                    value={newCourierZonas}
+                    onChange={(e) => setNewCourierZonas(e.target.value)}
+                    placeholder="Ej. San Salvador, Santa Tecla, Soyapango"
+                    className="w-full bg-sf bd rounded-xl px-3 py-2 text-xs outline-none focus:border-[var(--ac)]"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold tx-mu block mb-1">Teléfono / Contacto (opcional)</label>
+                  <input
+                    type="text"
+                    value={newCourierTel}
+                    onChange={(e) => setNewCourierTel(e.target.value)}
+                    placeholder="Ej. 7890-1234"
+                    className="w-full bg-sf bd rounded-xl px-3 py-2 text-xs outline-none focus:border-[var(--ac)]"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAddCourier}
+                  disabled={savingCouriers}
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
+                  style={{ background: 'var(--tx)', color: 'var(--cd)' }}
+                >
+                  {savingCouriers ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Agregar Courier
+                </button>
+              </div>
+            </section>
+
+            {/* Lista editable de couriers */}
+            <section className="lg:col-span-8 bg-cd bd rounded-2xl p-5 flex flex-col gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[var(--bd)]">
+                <div>
+                  <h2 className="text-sm font-bold">
+                    Couriers Registrados ({couriersList.filter((c) => c.activo).length} activos)
+                  </h2>
+                  <p className="text-[11px] tx-mu">
+                    Origen: {courierSource === 'supabase' ? 'Nube (Supabase)' : 'Respaldo local'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetCouriers}
+                    disabled={savingCouriers}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sf bd rounded-xl text-xs font-semibold cursor-pointer hover:border-[var(--ac)]"
+                  >
+                    <RotateCcw size={13} /> Restaurar base
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => persistCouriersList(couriersList)}
+                    disabled={savingCouriers || !hasUnsavedCouriers}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-45"
+                    style={{ background: 'var(--ac)', color: '#fff' }}
+                  >
+                    {savingCouriers ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                    {hasUnsavedCouriers ? 'Guardar cambios' : 'Guardado'}
+                  </button>
+                </div>
+              </div>
+
+              {loadingCouriers ? (
+                <div className="py-10 text-center text-xs tx-mu">Cargando couriers...</div>
+              ) : (
+                <div className="space-y-2.5">
+                  {couriersList.map((c) => (
+                    <div
+                      key={c.id}
+                      className={`p-3.5 bg-sf bd rounded-xl flex flex-col gap-2.5 ${
+                        !c.activo ? 'opacity-65' : ''
+                      }`}
+                    >
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                        <input
+                          type="text"
+                          value={c.nombre}
+                          onChange={(e) => handleUpdateCourierItem(c.id, { nombre: e.target.value })}
+                          placeholder="Nombre del courier"
+                          className="sm:col-span-4 bg-cd bd rounded-lg px-2.5 py-1.5 text-xs font-bold outline-none focus:border-[var(--ac)]"
+                        />
+                        <select
+                          value={c.tipo}
+                          onChange={(e) =>
+                            handleUpdateCourierItem(c.id, { tipo: e.target.value as CourierTipo })
+                          }
+                          className="sm:col-span-3 bg-cd bd rounded-lg px-2 py-1.5 text-xs font-semibold outline-none focus:border-[var(--ac)]"
+                        >
+                          <option value="motorista">Motorista propio</option>
+                          <option value="externo">Courier externo</option>
+                          <option value="encomienda">Encomienda</option>
+                          <option value="oficina">Retiro en oficina</option>
+                        </select>
+                        <input
+                          type="text"
+                          value={c.zonas || ''}
+                          onChange={(e) => handleUpdateCourierItem(c.id, { zonas: e.target.value })}
+                          placeholder="Zonas de cobertura"
+                          className="sm:col-span-3 bg-cd bd rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[var(--ac)]"
+                        />
+                        <input
+                          type="text"
+                          value={c.telefono || ''}
+                          onChange={(e) => handleUpdateCourierItem(c.id, { telefono: e.target.value })}
+                          placeholder="Teléfono"
+                          className="sm:col-span-2 bg-cd bd rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[var(--ac)]"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="tx-mu">
+                          ID: <code className="mono">{c.id}</code>
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleCourierItem(c.id)}
+                            className="px-2.5 py-1 rounded-lg bg-cd bd font-semibold cursor-pointer"
+                            style={{ color: c.activo ? 'var(--ok)' : 'var(--mu)' }}
+                          >
+                            {c.activo ? 'Activo' : 'Pausado'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCourierItem(c.id)}
+                            className="p-1.5 rounded-lg bg-cd bd tx-mu hover:text-rose-500 cursor-pointer"
+                            title="Eliminar courier"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           </div>
         </div>
