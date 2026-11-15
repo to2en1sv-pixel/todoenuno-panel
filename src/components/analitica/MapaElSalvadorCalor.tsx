@@ -366,97 +366,133 @@ export function MapaElSalvadorCalor({
             </div>
           )}
 
-          {/* SVG Map con curvas orgánicas realistas */}
-          <div className="w-full flex-1 flex items-center justify-center p-2">
+          {/* SVG Map con geometría geográfica real de El Salvador (CNR) */}
+          <div className="w-full flex-1 flex items-center justify-center p-1 sm:p-2">
             <svg
-              viewBox="0 0 960 520"
-              className="w-full h-auto max-h-[380px] drop-shadow-md select-none"
+              viewBox="0 0 960 515"
+              className="w-full h-auto max-h-[430px] select-none"
             >
-              {/* Océano Pacífico (Guía costera inferior sutil) */}
-              <path
-                d="M 30,480 Q 250,450 500,470 T 930,480"
-                stroke="rgba(56, 189, 248, 0.3)"
-                strokeWidth="2"
-                strokeDasharray="6 4"
-                fill="none"
-              />
-              <text x="45" y="495" fill="rgba(56, 189, 248, 0.5)" fontSize="11" fontFamily="sans-serif" fontWeight="bold">
-                🌊 OCÉANO PACÍFICO (COSTA SALVADOREÑA)
+              {/* Referencias marítimas limpias */}
+              <text
+                x="220"
+                y="455"
+                textAnchor="middle"
+                fill="currentColor"
+                opacity="0.32"
+                fontSize="10"
+                fontFamily="sans-serif"
+                fontWeight="700"
+                letterSpacing="2.5"
+              >
+                OCÉANO PACÍFICO
+              </text>
+              <text
+                x="845"
+                y="500"
+                textAnchor="middle"
+                fill="currentColor"
+                opacity="0.3"
+                fontSize="9"
+                fontFamily="sans-serif"
+                fontWeight="700"
+                letterSpacing="1.6"
+              >
+                GOLFO DE FONSECA
               </text>
 
-              {/* Renders de los 14 Departamentos con Geometría Curva Natural */}
-              {DEPARTAMENTOS_EL_SALVADOR.map(depto => {
-                const stats = statsPorDepto.get(depto.nombre);
-                const isSelected = deptoSeleccionado === depto.nombre;
-                const isHovered = hoveredDepto === depto.nombre;
-                const fillColor = getDeptoFillColor(depto.nombre);
+              {/* Renders de los 14 Departamentos (el activo/hover se dibuja al final para resaltar su borde) */}
+              {[...DEPARTAMENTOS_EL_SALVADOR]
+                .sort((a, b) => {
+                  const score = (n: string) =>
+                    deptoSeleccionado === n ? 2 : hoveredDepto === n ? 1 : 0;
+                  return score(a.nombre) - score(b.nombre);
+                })
+                .map(depto => {
+                  const stats = statsPorDepto.get(depto.nombre);
+                  const isSelected = deptoSeleccionado === depto.nombre;
+                  const isHovered = hoveredDepto === depto.nombre;
+                  const fillColor = getDeptoFillColor(depto.nombre);
+                  const isCompactDepto =
+                    depto.nombre === 'San Salvador' ||
+                    depto.nombre === 'Cuscatlán' ||
+                    depto.nombre === 'Cabañas';
+                  const hasOrders = Boolean(stats && stats.pedidos > 0);
 
-                return (
-                  <g
-                    key={depto.id}
-                    onClick={() => onSeleccionarDepto(isSelected ? null : depto.nombre)}
-                    onMouseEnter={() => setHoveredDepto(depto.nombre)}
-                    onMouseLeave={() => setHoveredDepto(null)}
-                    className="cursor-pointer transition-all duration-200"
-                  >
-                    <path
-                      d={depto.path}
-                      fill={fillColor}
-                      stroke={isSelected ? '#6366f1' : isHovered ? '#818cf8' : 'rgba(255, 255, 255, 0.8)'}
-                      strokeWidth={isSelected ? 3.5 : isHovered ? 2.5 : 1.4}
-                      strokeLinejoin="round"
-                      className="transition-all duration-200 hover:brightness-110"
-                      style={{
-                        filter: isSelected ? 'drop-shadow(0 0 10px rgba(99, 102, 241, 0.8))' : undefined
-                      }}
-                    />
-
-                    {/* Etiqueta con Nombre del Departamento (Contraste Perfecto con stroke outline) */}
-                    <text
-                      x={depto.labelX}
-                      y={depto.labelY}
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      fill="#ffffff"
-                      stroke="rgba(15, 23, 42, 0.9)"
-                      strokeWidth="3"
-                      strokeLinejoin="round"
-                      style={{ paintOrder: 'stroke fill' }}
-                      fontSize={depto.nombre === 'San Salvador' || depto.nombre === 'Cuscatlán' ? '10' : '11'}
-                      fontWeight="bold"
-                      className="pointer-events-none select-none tracking-tight"
+                  return (
+                    <g
+                      key={depto.id}
+                      onClick={() => onSeleccionarDepto(isSelected ? null : depto.nombre)}
+                      onMouseEnter={() => setHoveredDepto(depto.nombre)}
+                      onMouseLeave={() => setHoveredDepto(null)}
+                      className="cursor-pointer transition-all duration-150"
                     >
-                      {depto.nombre}
-                    </text>
+                      <path
+                        d={depto.path}
+                        fill={fillColor}
+                        fillRule="evenodd"
+                        stroke={
+                          isSelected
+                            ? '#4f46e5'
+                            : isHovered
+                            ? '#6366f1'
+                            : 'var(--cd)'
+                        }
+                        strokeWidth={isSelected ? 2.8 : isHovered ? 2.2 : 1.35}
+                        strokeLinejoin="round"
+                        className="transition-all duration-150 hover:brightness-105"
+                        style={{
+                          filter: isSelected
+                            ? 'drop-shadow(0 0 8px rgba(79, 70, 229, 0.45))'
+                            : undefined,
+                        }}
+                      />
 
-                    {/* Indicador numérico de volumen */}
-                    <text
-                      x={depto.labelX}
-                      y={depto.labelY + 13}
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      fill={stats && stats.pedidos > 0 ? '#38bdf8' : '#cbd5e1'}
-                      stroke="rgba(15, 23, 42, 0.9)"
-                      strokeWidth="2.5"
-                      strokeLinejoin="round"
-                      style={{ paintOrder: 'stroke fill' }}
-                      fontSize="9"
-                      fontFamily="monospace"
-                      fontWeight="bold"
-                      className="pointer-events-none select-none"
-                    >
-                      {stats && stats.pedidos > 0 ? (
-                        metrica === 'pedidos' ? `${stats.pedidos} ord` :
-                        metrica === 'ventas' ? formatCurrency(stats.ventas) :
-                        metrica === 'tasaEntrega' ? `${stats.tasaEntrega.toFixed(0)}%` :
-                        formatCurrency(stats.ticketPromedio)
-                      ) : (
-                        '0 ord'
-                      )}
-                    </text>
-                  </g>
-                );
-              })}
+                      {/* Etiqueta con Nombre del Departamento */}
+                      <text
+                        x={depto.labelX}
+                        y={depto.labelY - 4}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fill="#ffffff"
+                        stroke="rgba(15, 23, 42, 0.85)"
+                        strokeWidth="2.8"
+                        strokeLinejoin="round"
+                        style={{ paintOrder: 'stroke fill' }}
+                        fontSize={isCompactDepto ? '9.5' : '11'}
+                        fontWeight="700"
+                        className="pointer-events-none select-none tracking-tight"
+                      >
+                        {depto.nombre}
+                      </text>
+
+                      {/* Indicador numérico de volumen */}
+                      <text
+                        x={depto.labelX}
+                        y={depto.labelY + 9}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fill={hasOrders ? '#e0e7ff' : '#e2e8f0'}
+                        stroke="rgba(15, 23, 42, 0.88)"
+                        strokeWidth="2.4"
+                        strokeLinejoin="round"
+                        style={{ paintOrder: 'stroke fill' }}
+                        fontSize={isCompactDepto ? '8.5' : '9.5'}
+                        fontFamily="monospace"
+                        fontWeight="700"
+                        className="pointer-events-none select-none"
+                      >
+                        {hasOrders && stats ? (
+                          metrica === 'pedidos' ? `${stats.pedidos} ord` :
+                          metrica === 'ventas' ? formatCurrency(stats.ventas) :
+                          metrica === 'tasaEntrega' ? `${stats.tasaEntrega.toFixed(0)}%` :
+                          formatCurrency(stats.ticketPromedio)
+                        ) : (
+                          '0 ord'
+                        )}
+                      </text>
+                    </g>
+                  );
+                })}
             </svg>
           </div>
 
