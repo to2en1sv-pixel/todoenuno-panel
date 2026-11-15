@@ -658,12 +658,15 @@ async function handleBriefCommand(req: any, chatId: string | number, argRaw: str
   await sendTgMessage(chatId, data.mensaje);
 }
 
-export default async function handler(req: any, res: any) {
-  const action = String(req.query?.action || '').trim().toLowerCase();
+export async function handleTelegramBotRequest(req: any, res: any) {
+  const action = String(req.query?.telegram_mode || req.query?.action || '')
+    .trim()
+    .toLowerCase();
 
   try {
     const baseUrl = getBaseUrl(req);
-    const webhookUrl = `${baseUrl}/api/telegram-webhook`;
+    const webhookUrl = `${baseUrl}/api/morning-brief?telegram_mode=webhook`;
+    const legacyWebhookUrl = `${baseUrl}/api/telegram-webhook`;
     const allowedChatIds = getAllowedChatIds();
     const hasBotToken = Boolean(process.env.TELEGRAM_BOT_TOKEN);
     const hasOpenAiKey = Boolean(process.env.OPENAI_API_KEY);
@@ -682,7 +685,7 @@ export default async function handler(req: any, res: any) {
             pending_update_count: Number(info?.pending_update_count || 0),
             last_error_message: info?.last_error_message || null,
             last_error_date: info?.last_error_date || null,
-            isMatchingCurrentHost: info?.url === webhookUrl,
+            isMatchingCurrentHost: info?.url === webhookUrl || info?.url === legacyWebhookUrl,
           };
         } catch (err: any) {
           webhookError = err?.message || 'Error consultando getWebhookInfo';

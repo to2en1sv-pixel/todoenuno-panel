@@ -16,6 +16,10 @@
   ],
   "rewrites": [
     {
+      "source": "/api/telegram-webhook",
+      "destination": "/api/morning-brief?telegram_mode=webhook"
+    },
+    {
       "source": "/((?!api/|sw\\.js$|registerSW\\.js$|manifest\\.webmanifest$|workbox-|assets/|.*\\.(?:png|jpg|jpeg|svg|ico|webp|js|css|json|woff2?)$).*)",
       "destination": "/index.html"
     }

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { handleTelegramBotRequest } from './_telegramBot';
 
 type BriefType = 'morning' | 'evening' | 'full';
 
@@ -225,6 +226,14 @@ function buildMorningBriefWorkflow(panelOrigin: string) {
 }
 
 export default async function handler(req: any, res: any) {
+  if (
+    req.query?.telegram_mode ||
+    req.body?.update_id !== undefined ||
+    (req.method === 'POST' && (req.body?.message || req.body?.callback_query))
+  ) {
+    return handleTelegramBotRequest(req, res);
+  }
+
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

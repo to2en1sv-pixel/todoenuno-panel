@@ -409,7 +409,7 @@ export function SistemaPage() {
     setCheckingTelegram(true);
     setTelegramApiUnavailable(false);
     try {
-      const res = await fetch('/api/telegram-webhook?action=status');
+      const res = await fetch('/api/morning-brief?telegram_mode=status');
       const ct = res.headers.get('content-type') || '';
       if (!ct.includes('application/json')) {
         setTelegramApiUnavailable(true);
@@ -432,7 +432,7 @@ export function SistemaPage() {
     setRegisteringTelegram(true);
     setTelegramNotice(null);
     try {
-      const res = await fetch('/api/telegram-webhook?action=register_webhook', { method: 'POST' });
+      const res = await fetch('/api/morning-brief?telegram_mode=register_webhook', { method: 'POST' });
       const ct = res.headers.get('content-type') || '';
       if (!ct.includes('application/json')) {
         setTelegramNotice({
@@ -1306,7 +1306,7 @@ export function SistemaPage() {
                 <div className="p-3 bg-sf bd rounded-xl text-xs tx-mu flex items-center gap-2">
                   <AlertTriangle size={14} style={{ color: 'var(--wa)' }} />
                   <span>
-                    El webhook <code className="mono">/api/telegram-webhook</code> corre en Vercel. Una vez desplegado, agrega <code className="mono">TELEGRAM_BOT_TOKEN</code> en tus variables de Vercel y pulsa <strong>Conectar Webhook</strong>.
+                    El webhook (<code className="mono">/api/morning-brief?telegram_mode=webhook</code>) corre en Vercel. Una vez desplegado, agrega <code className="mono">TELEGRAM_BOT_TOKEN</code> en tus variables de Vercel y pulsa <strong>Conectar Webhook</strong>.
                   </span>
                 </div>
               )}
