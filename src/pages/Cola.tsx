@@ -15,6 +15,7 @@ import {
   Clock,
   Copy,
   ExternalLink,
+  Film,
   Image as ImageIcon,
   Layers,
   Loader2,
@@ -29,6 +30,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { BodegaContenidoView } from '@/components/cola/BodegaContenidoView';
 
 type QueueItem = {
   id: string;
@@ -68,6 +70,7 @@ function formatMoney(n: number): string {
 export function ColaPage() {
   const queryClient = useQueryClient();
 
+  const [colaView, setColaView] = useState<'bodega' | 'clasica'>('bodega');
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [fbLeads, setFbLeads] = useState<FbLeadLite[]>([]);
@@ -515,64 +518,112 @@ export function ColaPage() {
   return (
     <div className="max-w-6xl mx-auto flex flex-col gap-5 pb-12">
       {/* ENCABEZADO OPERATIVO */}
-      <section className="bg-cd bd rounded-2xl p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 text-xs tx-mu tabular-nums">
-            <span>Automatización de Redes</span>
-            <span aria-hidden="true">·</span>
-            <span>
-              Último post:{' '}
-              {metrics.lastPostedItem?.posted_at
-                ? fmtAgo(metrics.lastPostedItem.posted_at)
-                : 'Sin registros'}
-            </span>
-            <span aria-hidden="true">·</span>
-            <span>{metrics.postedToday} hoy</span>
+      <section className="bg-cd bd rounded-2xl p-5 sm:p-6 flex flex-col gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-xs tx-mu tabular-nums">
+              <span>Distribuidora Omnicanal · Fase 1</span>
+              <span aria-hidden="true">·</span>
+              <span>
+                Último post legado:{' '}
+                {metrics.lastPostedItem?.posted_at
+                  ? fmtAgo(metrics.lastPostedItem.posted_at)
+                  : 'Sin registros'}
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>{metrics.postedToday} hoy</span>
+            </div>
+            <h1
+              className="text-xl sm:text-2xl font-bold mt-1.5 tracking-tight"
+              style={{ textWrap: 'balance' }}
+            >
+              {colaView === 'bodega'
+                ? 'Bodega de Contenido & Distribuidora'
+                : 'Cola Clásica de Productos (post_queue)'}
+            </h1>
+            <p className="text-xs tx-mu mt-1">
+              {colaView === 'bodega'
+                ? 'Sube piezas de marca, videos y productos; genera copies IA y distribuye a Facebook + Instagram Business evitando SKUs agotados.'
+                : 'Vista clásica conectada a la tabla post_queue para compatibilidad con flujos anteriores.'}
+            </p>
           </div>
-          <h1
-            className="text-xl sm:text-2xl font-bold mt-1.5 tracking-tight"
-            style={{ textWrap: 'balance' }}
-          >
-            Cola de Publicación Social
-          </h1>
-          <p className="text-xs tx-mu mt-1">
-            Controla qué productos esperan turno para publicarse, detecta SKUs agotados antes de pautar y revisa los leads captados.
-          </p>
+
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => loadData(true)}
+              disabled={refreshing}
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-sf bd text-xs font-medium hover:opacity-85 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+              Actualizar
+            </button>
+
+            <Link
+              to="/social-inbox"
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-sf bd text-xs font-medium hover:opacity-85 transition-opacity whitespace-nowrap shrink-0"
+            >
+              <MessageSquare size={14} />
+              Social Inbox
+            </Link>
+
+            {colaView === 'clasica' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setAddMode('catalog');
+                  setShowAddModal(true);
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
+                style={{ background: 'var(--tx)', color: 'var(--cd)' }}
+              >
+                <Plus size={14} />
+                Agregar a Cola
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => loadData(true)}
-            disabled={refreshing}
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-sf bd text-xs font-medium hover:opacity-85 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-            Actualizar
-          </button>
+        {/* Selector de vistas */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[var(--bd)]">
+          <div className="inline-flex items-center gap-1 p-1 bg-sf bd rounded-xl">
+            <button
+              type="button"
+              onClick={() => setColaView('bodega')}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                colaView === 'bodega' ? 'bg-cd bd font-semibold' : 'tx-mu hover:text-[var(--tx)]'
+              }`}
+            >
+              <Film size={14} style={{ color: colaView === 'bodega' ? 'var(--ac)' : undefined }} />
+              Bodega & Distribuidora (FB + IG)
+            </button>
+            <button
+              type="button"
+              onClick={() => setColaView('clasica')}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                colaView === 'clasica' ? 'bg-cd bd font-semibold' : 'tx-mu hover:text-[var(--tx)]'
+              }`}
+            >
+              <Layers size={14} />
+              Cola Clásica ({metrics.pending} pend.)
+            </button>
+          </div>
 
-          <Link
-            to="/social-inbox"
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-sf bd text-xs font-medium hover:opacity-85 transition-opacity whitespace-nowrap shrink-0"
-          >
-            <MessageSquare size={14} />
-            Social Inbox
-          </Link>
-
-          <button
-            type="button"
-            onClick={() => {
-              setAddMode('catalog');
-              setShowAddModal(true);
-            }}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
-            style={{ background: 'var(--tx)', color: 'var(--cd)' }}
-          >
-            <Plus size={14} />
-            Agregar a Cola
-          </button>
+          <span className="text-[11px] tx-mu">
+            Endpoint automatizado: <code className="mono">POST /api/content-distribute?action=run_next</code>
+          </span>
         </div>
       </section>
+
+      {colaView === 'bodega' ? (
+        <BodegaContenidoView
+          stockItems={stockItems}
+          totalLinkedLeads={metrics.totalLinkedLeads}
+          legacyItemsToImport={queueItems}
+          onSyncLegacyQueue={syncAfterMutation}
+        />
+      ) : (
+        <>
 
       {/* AVISO / FEEDBACK */}
       {banner && (
@@ -1125,6 +1176,8 @@ export function ColaPage() {
           </div>
         )}
       </section>
+        </>
+      )}
 
       {/* MODAL AGREGAR A COLA */}
       {showAddModal && (
