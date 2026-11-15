@@ -412,7 +412,15 @@ export function SistemaPage() {
       const res = await fetch('/api/morning-brief?telegram_mode=status');
       const ct = res.headers.get('content-type') || '';
       if (!ct.includes('application/json')) {
-        setTelegramApiUnavailable(true);
+        const raw = await res.text().catch(() => '');
+        if (res.ok && raw.trim().toLowerCase().startsWith('<!doctype')) {
+          setTelegramApiUnavailable(true);
+        } else {
+          setTelegramNotice({
+            type: 'err',
+            text: `Respuesta inesperada de /api/morning-brief (HTTP ${res.status}): ${raw.slice(0, 140)}`,
+          });
+        }
         return;
       }
       const json = await res.json().catch(() => null);
@@ -435,9 +443,13 @@ export function SistemaPage() {
       const res = await fetch('/api/morning-brief?telegram_mode=register_webhook', { method: 'POST' });
       const ct = res.headers.get('content-type') || '';
       if (!ct.includes('application/json')) {
+        const raw = await res.text().catch(() => '');
         setTelegramNotice({
           type: 'err',
-          text: 'Esta acción se ejecuta una vez desplegado en Vercel.',
+          text:
+            res.ok && raw.trim().toLowerCase().startsWith('<!doctype')
+              ? 'Esta acción se ejecuta una vez desplegado en Vercel.'
+              : `Error HTTP ${res.status} en /api/morning-brief: ${raw.slice(0, 160) || 'Sin detalle'}`,
         });
         return;
       }

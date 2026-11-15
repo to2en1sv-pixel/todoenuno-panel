@@ -418,31 +418,68 @@ export default async function handler(req: any, res: any) {
             };
           }
           try {
-            const pRes = await fetch(
-              `https://graph.facebook.com/${GRAPH_VERSION}/me/permissions?access_token=${encodeURIComponent(
+            // 1. Validar que el token esté vivo (sirve tanto para Page Token como System User Token)
+            const meRes = await fetch(
+              `https://graph.facebook.com/${GRAPH_VERSION}/me?fields=id,name&access_token=${encodeURIComponent(
                 access_token
               )}`
             );
-            const pJson = await pRes.json().catch(() => ({}));
-            if (!pRes.ok || pJson?.error) {
+            const meJson = await meRes.json().catch(() => ({}));
+            if (!meRes.ok || meJson?.error) {
               return {
                 ...safe,
                 tokenValid: false,
                 canPublish: false,
                 canInbox: false,
                 permissions: [] as string[],
-                error: pJson?.error?.message || `Meta HTTP ${pRes.status}`,
+                error: meJson?.error?.message || `Meta HTTP ${meRes.status}`,
               };
             }
-            const granted = (Array.isArray(pJson?.data) ? pJson.data : [])
-              .filter((x: any) => x.status === 'granted')
-              .map((x: any) => String(x.permission));
+
+            // 2. Intentar leer scopes reales vía debug_token (funciona incluso con Page Tokens de la misma app)
+            let granted: string[] = [];
+            try {
+              const dbgRes = await fetch(
+                `https://graph.facebook.com/${GRAPH_VERSION}/debug_token?input_token=${encodeURIComponent(
+                  access_token
+                )}&access_token=${encodeURIComponent(access_token)}`
+              );
+              const dbgJson = await dbgRes.json().catch(() => ({}));
+              if (dbgRes.ok && Array.isArray(dbgJson?.data?.scopes)) {
+                granted = dbgJson.data.scopes.map((s: any) => String(s));
+              }
+            } catch {}
+
+            // 3. Fallback a /me/permissions solo si no devolvió scopes (p. ej. User Token)
+            if (granted.length === 0) {
+              try {
+                const pRes = await fetch(
+                  `https://graph.facebook.com/${GRAPH_VERSION}/me/permissions?access_token=${encodeURIComponent(
+                    access_token
+                  )}`
+                );
+                const pJson = await pRes.json().catch(() => ({}));
+                if (pRes.ok && Array.isArray(pJson?.data)) {
+                  granted = pJson.data
+                    .filter((x: any) => x.status === 'granted')
+                    .map((x: any) => String(x.permission));
+                }
+              } catch {}
+            }
+
+            const hasKnownScopes = granted.length > 0;
+            const canPublish = hasKnownScopes
+              ? granted.includes('pages_manage_posts')
+              : safe.token_source === 'fb_publish_pages';
+            const canInbox = hasKnownScopes
+              ? granted.includes('pages_messaging')
+              : true; // /me?fields=id,name respondió OK y proviene de fb_pages/Inbox
 
             return {
               ...safe,
               tokenValid: true,
-              canPublish: granted.includes('pages_manage_posts'),
-              canInbox: granted.includes('pages_messaging'),
+              canPublish,
+              canInbox,
               canIgPublish: granted.includes('instagram_content_publish'),
               permissions: granted,
               error: null,
