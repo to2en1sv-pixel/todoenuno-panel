@@ -253,6 +253,55 @@ export async function saveSocialDistConfig(cfg: SocialDistConfig): Promise<boole
   }
 }
 
+async function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function compressLargeImageIfNeeded(file: File): Promise<{ dataUrl: string; mimeType: string }> {
+  const raw = await readFileAsDataUrl(file);
+  if (file.size <= 3 * 1024 * 1024) {
+    return { dataUrl: raw, mimeType: file.type || 'image/jpeg' };
+  }
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxDim = 1600;
+      let w = img.width;
+      let h = img.height;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve({ dataUrl: raw, mimeType: file.type || 'image/jpeg' });
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve({
+        dataUrl: canvas.toDataURL('image/jpeg', 0.88),
+        mimeType: 'image/jpeg',
+      });
+    };
+    img.onerror = () => resolve({ dataUrl: raw, mimeType: file.type || 'image/jpeg' });
+    img.src = raw;
+  });
+}
+
 export async function uploadMediaToVault(file: File): Promise<{
   ok: boolean;
   publicUrl?: string;
@@ -263,11 +312,22 @@ export async function uploadMediaToVault(file: File): Promise<{
   const mediaType: 'imagen' | 'video' = isVideo ? 'video' : 'imagen';
 
   // 1. Asegurar bucket en backend (usa service role)
+  let ensureError = '';
+  let apiReachable = false;
   try {
-    await fetch('/api/content-distribute?action=ensure_bucket', { method: 'POST' });
+    const ensureResp = await fetch('/api/content-distribute?action=ensure_bucket', { method: 'POST' });
+    const ct = ensureResp.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      apiReachable = true;
+      const ensureJson = await ensureResp.json().catch(() => ({}));
+      if (!ensureResp.ok && ensureJson?.error) {
+        ensureError = String(ensureJson.error);
+      }
+    }
   } catch {}
 
   // 2. Intentar subida directa a Supabase Storage (permite videos grandes > 4MB)
+  let directError = '';
   try {
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const path = `uploads/${Date.now()}-${safeName}`;
@@ -280,26 +340,30 @@ export async function uploadMediaToVault(file: File): Promise<{
       if (pub?.publicUrl) {
         return { ok: true, publicUrl: pub.publicUrl, mediaType };
       }
+    } else {
+      directError = upErr.message || '';
     }
-  } catch {}
+  } catch (err: any) {
+    directError = err?.message || '';
+  }
 
-  // 3. Respaldo via servidor (para archivos <= 4 MB si RLS bloquea subida anon desde navegador)
-  if (file.size > 4 * 1024 * 1024) {
+  // 3. Respaldo via servidor (si es imagen grande se optimiza para caber en <= 4MB)
+  if (isVideo && file.size > 4 * 1024 * 1024) {
     return {
       ok: false,
       mediaType,
       error:
-        'Archivo > 4 MB y Storage público bloqueado por políticas RLS. Sube el video a tu Storage/Drive o habilita INSERT público en el bucket "content-vault" y pega la URL directa.',
+        ensureError ||
+        (directError.toLowerCase().includes('bucket')
+          ? 'No existe el bucket "content-vault" en Supabase Storage. Créalo en Supabase → Storage como público (Public = ON) o despliega en Vercel con SUPABASE_SERVICE_ROLE_KEY.'
+          : 'Video > 4 MB y Storage directo bloqueado por políticas RLS. Habilita INSERT público en el bucket "content-vault" o pega la URL directa del MP4.'),
     };
   }
 
   try {
-    const base64Data = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
-      reader.readAsDataURL(file);
-    });
+    const prepared = isVideo
+      ? { dataUrl: await readFileAsDataUrl(file), mimeType: file.type || 'video/mp4' }
+      : await compressLargeImageIfNeeded(file);
 
     const resp = await fetch('/api/content-distribute', {
       method: 'POST',
@@ -307,16 +371,32 @@ export async function uploadMediaToVault(file: File): Promise<{
       body: JSON.stringify({
         action: 'upload_base64',
         fileName: file.name,
-        mimeType: file.type,
-        base64Data,
+        mimeType: prepared.mimeType,
+        base64Data: prepared.dataUrl,
       }),
     });
+
+    const ct = resp.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      return {
+        ok: false,
+        mediaType,
+        error: !apiReachable
+          ? 'El bucket "content-vault" aún no existe en Supabase Storage y este preview local no ejecuta /api/*. Créalo manualmente en Supabase → Storage (Public = ON) o prueba desde tu dominio en Vercel.'
+          : ensureError || directError || 'Respuesta inválida del servidor al subir',
+      };
+    }
+
     const data = await resp.json().catch(() => ({}));
     if (resp.ok && data?.publicUrl) {
       return { ok: true, publicUrl: data.publicUrl, mediaType };
     }
-    return { ok: false, mediaType, error: data?.error || 'No se pudo subir el archivo' };
+    return {
+      ok: false,
+      mediaType,
+      error: data?.error || ensureError || directError || 'No se pudo subir el archivo',
+    };
   } catch (err: any) {
-    return { ok: false, mediaType, error: err?.message || 'Error subiendo archivo' };
+    return { ok: false, mediaType, error: err?.message || directError || 'Error subiendo archivo' };
   }
 }

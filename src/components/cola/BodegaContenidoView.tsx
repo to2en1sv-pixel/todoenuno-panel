@@ -114,6 +114,7 @@ export function BodegaContenidoView({
   const [formCopyIg, setFormCopyIg] = useState('');
   const [formCopyShort, setFormCopyShort] = useState('');
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadFeedback, setUploadFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [generatingAi, setGeneratingAi] = useState(false);
   const [savingItem, setSavingItem] = useState(false);
 
@@ -250,6 +251,7 @@ export function BodegaContenidoView({
     setFormSku('');
     setFormMediaType('imagen');
     setFormMediaUrl('');
+    setUploadFeedback(null);
     setFormEvergreen(true);
     setFormStatus('listo');
     setFormTargets({ ...config.defaultTargets });
@@ -266,6 +268,7 @@ export function BodegaContenidoView({
     setFormSku(it.sku || '');
     setFormMediaType(it.mediaType);
     setFormMediaUrl(it.mediaUrl);
+    setUploadFeedback(null);
     setFormEvergreen(it.evergreen);
     setFormStatus(it.status);
     setFormTargets({ ...it.targets });
@@ -279,6 +282,7 @@ export function BodegaContenidoView({
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadingFile(true);
+    setUploadFeedback(null);
     const res = await uploadMediaToVault(file);
     setUploadingFile(false);
     if (res.ok && res.publicUrl) {
@@ -287,9 +291,13 @@ export function BodegaContenidoView({
       if (!formTitulo.trim()) {
         setFormTitulo(file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '));
       }
-      notify('ok', 'Archivo subido a Supabase Storage con URL pública lista para FB/IG.');
+      const msg = 'Archivo subido a Supabase Storage con URL pública lista para FB/IG.';
+      setUploadFeedback({ type: 'ok', text: msg });
+      notify('ok', msg);
     } else {
-      notify('err', res.error || 'No se pudo subir el archivo.');
+      const errMsg = res.error || 'No se pudo subir el archivo.';
+      setUploadFeedback({ type: 'err', text: errMsg });
+      notify('err', errMsg);
     }
     e.target.value = '';
   };
@@ -1207,6 +1215,18 @@ export function BodegaContenidoView({
                       className="sm:col-span-3 px-3 py-2 rounded-xl bg-cd bd text-xs outline-none"
                     />
                   </div>
+
+                  {uploadFeedback && (
+                    <div
+                      className="text-[11px] px-2.5 py-2 rounded-lg bg-cd bd"
+                      style={{
+                        borderColor: uploadFeedback.type === 'ok' ? 'var(--ok)' : 'var(--er)',
+                        color: uploadFeedback.type === 'ok' ? 'var(--ok)' : 'var(--er)',
+                      }}
+                    >
+                      {uploadFeedback.text}
+                    </div>
+                  )}
                 </div>
 
                 {/* SKU opcional + Destinos + Evergreen */}

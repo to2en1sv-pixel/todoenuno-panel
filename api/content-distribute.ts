@@ -81,18 +81,30 @@ async function writeDocJson(supabase: any, titulo: string, payload: unknown, exi
   }
 }
 
-async function ensureStorageBucket(supabase: any) {
+async function ensureStorageBucket(supabase: any): Promise<{ ok: boolean; error?: string }> {
   try {
-    const { data: buckets } = await supabase.storage.listBuckets();
-    const exists = Array.isArray(buckets) && buckets.some((b: any) => b.name === STORAGE_BUCKET || b.id === STORAGE_BUCKET);
-    if (!exists) {
-      await supabase.storage.createBucket(STORAGE_BUCKET, {
-        public: true,
-        fileSizeLimit: 104857600, // 100 MB
-      });
+    const { data: existing, error: getErr } = await supabase.storage.getBucket(STORAGE_BUCKET);
+    if (existing && !getErr) {
+      return { ok: true };
     }
-  } catch (err) {
-    console.warn('No se pudo verificar/crear bucket Storage:', err);
+
+    const { data: buckets, error: listErr } = await supabase.storage.listBuckets();
+    if (!listErr && Array.isArray(buckets)) {
+      const exists = buckets.some((b: any) => b.name === STORAGE_BUCKET || b.id === STORAGE_BUCKET);
+      if (exists) return { ok: true };
+    }
+
+    const { error: createErr } = await supabase.storage.createBucket(STORAGE_BUCKET, {
+      public: true,
+    });
+
+    if (!createErr || /already exists/i.test(createErr.message || '')) {
+      return { ok: true };
+    }
+
+    return { ok: false, error: createErr.message || 'No se pudo crear el bucket' };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Error verificando Storage' };
   }
 }
 
@@ -350,7 +362,14 @@ export default async function handler(req: any, res: any) {
 
     /* 2. ASEGURAR BUCKET DE SUPABASE STORAGE */
     if (action === 'ensure_bucket') {
-      await ensureStorageBucket(supabase);
+      const bucketRes = await ensureStorageBucket(supabase);
+      if (!bucketRes.ok) {
+        return res.status(400).json({
+          ok: false,
+          bucket: STORAGE_BUCKET,
+          error: `No se pudo inicializar el bucket "${STORAGE_BUCKET}": ${bucketRes.error}. Verifica SUPABASE_SERVICE_ROLE_KEY en Vercel o créalo como público en Supabase → Storage.`,
+        });
+      }
       return res.status(200).json({ ok: true, bucket: STORAGE_BUCKET });
     }
 
@@ -361,7 +380,7 @@ export default async function handler(req: any, res: any) {
       if (!base64Data) {
         return res.status(400).json({ error: 'Falta base64Data' });
       }
-      await ensureStorageBucket(supabase);
+      const bucketCheck = await ensureStorageBucket(supabase);
       const rawB64 = String(base64Data).includes('base64,')
         ? String(base64Data).split('base64,')[1]
         : String(base64Data);
@@ -375,7 +394,10 @@ export default async function handler(req: any, res: any) {
       });
 
       if (upErr) {
-        return res.status(500).json({ error: `Error subiendo archivo: ${upErr.message}` });
+        const extraHint = !bucketCheck.ok
+          ? ` (${bucketCheck.error}). Verifica SUPABASE_SERVICE_ROLE_KEY o crea el bucket público "${STORAGE_BUCKET}" en Supabase → Storage.`
+          : '';
+        return res.status(500).json({ error: `Error subiendo archivo: ${upErr.message}${extraHint}` });
       }
 
       const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
