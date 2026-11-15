@@ -34,6 +34,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  Send,
   Server,
   ShieldCheck,
   Sparkles,
@@ -92,6 +93,21 @@ type MetaAdsStatusData = {
     has_token: boolean;
     last_synced_at?: string | null;
   }>;
+};
+
+type TelegramBotStatusData = {
+  hasBotToken: boolean;
+  hasOpenAiKey: boolean;
+  hasSecret: boolean;
+  allowedChatIds: string[];
+  expectedWebhookUrl: string;
+  telegramWebhook?: {
+    url?: string;
+    pending_update_count?: number;
+    last_error_message?: string | null;
+    isMatchingCurrentHost?: boolean;
+  } | null;
+  webhookError?: string | null;
 };
 
 const META_TOKENS_SETUP_SQL = `-- TODOENUNO OS · Tablas Seguras para Tokens (RLS sin políticas para anon)
@@ -382,6 +398,67 @@ export function SistemaPage() {
     }
   }, []);
 
+  // Bot Telegram de Compras & Brief (Vercel + GPT)
+  const [checkingTelegram, setCheckingTelegram] = useState(false);
+  const [registeringTelegram, setRegisteringTelegram] = useState(false);
+  const [telegramApiUnavailable, setTelegramApiUnavailable] = useState(false);
+  const [telegramStatus, setTelegramStatus] = useState<TelegramBotStatusData | null>(null);
+  const [telegramNotice, setTelegramNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  const checkTelegramBot = useCallback(async () => {
+    setCheckingTelegram(true);
+    setTelegramApiUnavailable(false);
+    try {
+      const res = await fetch('/api/telegram-webhook?action=status');
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        setTelegramApiUnavailable(true);
+        return;
+      }
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.ok) {
+        setTelegramStatus(json);
+      } else if (json?.error) {
+        setTelegramNotice({ type: 'err', text: json.error });
+      }
+    } catch (err: any) {
+      setTelegramNotice({ type: 'err', text: err?.message || 'Error consultando bot de Telegram' });
+    } finally {
+      setCheckingTelegram(false);
+    }
+  }, []);
+
+  const handleRegisterTelegramWebhook = async () => {
+    setRegisteringTelegram(true);
+    setTelegramNotice(null);
+    try {
+      const res = await fetch('/api/telegram-webhook?action=register_webhook', { method: 'POST' });
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        setTelegramNotice({
+          type: 'err',
+          text: 'Esta acción se ejecuta una vez desplegado en Vercel.',
+        });
+        return;
+      }
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        setTelegramNotice({
+          type: 'err',
+          text: json?.error || 'No se pudo registrar el webhook en Telegram.',
+        });
+      } else {
+        setTelegramNotice({
+          type: 'ok',
+          text: `Webhook y comandos (/compra, /stock, /cajas, /brief) conectados a ${json.webhookUrl}.`,
+        });
+        await checkTelegramBot();
+      }
+    } finally {
+      setRegisteringTelegram(false);
+    }
+  };
+
   const checkCrons = useCallback(async () => {
     setIsCheckingCrons(true);
     setCronError('');
@@ -453,8 +530,9 @@ export function SistemaPage() {
       void checkCrons();
       void runSystemHealthCheck();
       void checkMetaInfra();
+      void checkTelegramBot();
     }
-  }, [activeTab, checkCrons, runSystemHealthCheck, checkMetaInfra]);
+  }, [activeTab, checkCrons, runSystemHealthCheck, checkMetaInfra, checkTelegramBot]);
 
   const fmtTime = (ts: number) => {
     if (!ts) return '—';
@@ -1174,6 +1252,115 @@ export function SistemaPage() {
                 <div className="p-2 rounded-lg bg-cd bd text-[11px] mono truncate tx-mu">
                   {metaCronUrl}
                 </div>
+              </div>
+            </section>
+
+            {/* Bot Telegram Compras & Consultas (Vercel + GPT-4o-mini) */}
+            <section className="bg-cd bd rounded-2xl p-5 flex flex-col gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Send size={16} style={{ color: 'var(--ac)' }} />
+                    <h2 className="text-sm font-semibold">Bot Telegram Compras & Brief (Vercel + GPT)</h2>
+                  </div>
+                  <p className="text-[11px] tx-mu mt-0.5">
+                    Permite registrar compras enviando texto natural o foto de factura al bot, más <code className="mono">/stock</code>, <code className="mono">/cajas</code> y <code className="mono">/brief</code>.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto shrink-0">
+                  <button
+                    type="button"
+                    onClick={checkTelegramBot}
+                    disabled={checkingTelegram}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sf bd text-xs font-medium rounded-xl disabled:opacity-50 cursor-pointer"
+                  >
+                    <RefreshCw size={13} className={checkingTelegram ? 'animate-spin' : ''} />
+                    Verificar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRegisterTelegramWebhook}
+                    disabled={registeringTelegram}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl disabled:opacity-50 cursor-pointer"
+                    style={{ background: 'var(--tx)', color: 'var(--cd)' }}
+                  >
+                    {registeringTelegram ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                    Conectar Webhook
+                  </button>
+                </div>
+              </div>
+
+              {telegramNotice && (
+                <div
+                  className="p-3 bg-sf bd text-xs rounded-xl"
+                  style={{
+                    borderColor: telegramNotice.type === 'ok' ? 'var(--ok)' : 'var(--er)',
+                    color: telegramNotice.type === 'ok' ? 'var(--ok)' : 'var(--er)',
+                  }}
+                >
+                  {telegramNotice.text}
+                </div>
+              )}
+
+              {telegramApiUnavailable && (
+                <div className="p-3 bg-sf bd rounded-xl text-xs tx-mu flex items-center gap-2">
+                  <AlertTriangle size={14} style={{ color: 'var(--wa)' }} />
+                  <span>
+                    El webhook <code className="mono">/api/telegram-webhook</code> corre en Vercel. Una vez desplegado, agrega <code className="mono">TELEGRAM_BOT_TOKEN</code> en tus variables de Vercel y pulsa <strong>Conectar Webhook</strong>.
+                  </span>
+                </div>
+              )}
+
+              {!telegramApiUnavailable && telegramStatus && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div className="p-3 bg-sf bd rounded-xl">
+                    <div className="text-[11px] tx-mu">TELEGRAM_BOT_TOKEN</div>
+                    <div
+                      className="text-xs font-bold mt-0.5"
+                      style={{ color: telegramStatus.hasBotToken ? 'var(--ok)' : 'var(--er)' }}
+                    >
+                      {telegramStatus.hasBotToken ? 'Configurado en Vercel' : 'Falta en Vercel'}
+                    </div>
+                  </div>
+                  <div className="p-3 bg-sf bd rounded-xl">
+                    <div className="text-[11px] tx-mu">OPENAI_API_KEY (GPT)</div>
+                    <div
+                      className="text-xs font-bold mt-0.5"
+                      style={{ color: telegramStatus.hasOpenAiKey ? 'var(--ok)' : 'var(--er)' }}
+                    >
+                      {telegramStatus.hasOpenAiKey ? 'Conectado (gpt-4o-mini)' : 'Falta en Vercel'}
+                    </div>
+                  </div>
+                  <div className="p-3 bg-sf bd rounded-xl">
+                    <div className="text-[11px] tx-mu">Webhook activo</div>
+                    <div
+                      className="text-xs font-bold mt-0.5 truncate"
+                      style={{
+                        color: telegramStatus.telegramWebhook?.isMatchingCurrentHost
+                          ? 'var(--ok)'
+                          : 'var(--wa)',
+                      }}
+                      title={telegramStatus.telegramWebhook?.url || 'Sin registrar'}
+                    >
+                      {telegramStatus.telegramWebhook?.url
+                        ? telegramStatus.telegramWebhook.isMatchingCurrentHost
+                          ? 'Conectado'
+                          : 'Otra URL'
+                        : 'Sin conectar'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="p-3 bg-sf bd rounded-xl text-[11px] tx-mu space-y-1">
+                <div>
+                  <strong className="text-[var(--tx)]">Uso en Telegram:</strong> escribe natural (ej. <em>"Compré 10 cascos negros a $12.50 en MotoParts"</em>), envía foto de factura, o usa <code className="mono">/compra SKU CANT COSTO</code> · <code className="mono">/stock</code> · <code className="mono">/cajas</code> · <code className="mono">/brief</code>.
+                </div>
+                {telegramStatus?.allowedChatIds?.length ? (
+                  <div>
+                    Chats autorizados: <code className="mono">{telegramStatus.allowedChatIds.join(', ')}</code>
+                  </div>
+                ) : null}
               </div>
             </section>
           </div>
