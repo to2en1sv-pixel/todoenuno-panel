@@ -16,10 +16,15 @@ import {
 import {
   DEFAULT_COURIERS,
   fetchCouriers,
+  fetchDriverAccessConfig,
+  getCachedDriverAccessConfig,
   saveCouriers,
+  saveDriverAccessConfig,
   type CourierItem,
   type CourierTipo,
+  type DriverAccessConfig,
 } from '@/lib/couriers';
+import { ensureOrdersEvidenceBucket } from '@/lib/orderStorage';
 import {
   Activity,
   AlertTriangle,
@@ -33,6 +38,8 @@ import {
   Copy,
   Database,
   ExternalLink,
+  HardDrive,
+  KeyRound,
   Layers,
   Loader2,
   MessageSquare,
@@ -238,15 +245,26 @@ export function SistemaPage() {
   const [newCourierTipo, setNewCourierTipo] = useState<CourierTipo>('motorista');
   const [newCourierZonas, setNewCourierZonas] = useState('');
   const [newCourierTel, setNewCourierTel] = useState('');
+  const [newCourierPin, setNewCourierPin] = useState('');
+  const [driverAccess, setDriverAccess] = useState<DriverAccessConfig>(() =>
+    getCachedDriverAccessConfig()
+  );
+  const [savingDriverAccess, setSavingDriverAccess] = useState(false);
+  const [bucketStatus, setBucketStatus] = useState<{
+    checking: boolean;
+    ok?: boolean;
+    message?: string;
+  }>({ checking: false });
 
   useEffect(() => {
     let active = true;
     setLoadingCouriers(true);
-    fetchCouriers()
-      .then(({ couriers: loaded, source }) => {
+    Promise.all([fetchCouriers(), fetchDriverAccessConfig()])
+      .then(([{ couriers: loaded, source }, accessCfg]) => {
         if (!active) return;
         setCouriersList(loaded);
         setCourierSource(source);
+        setDriverAccess(accessCfg);
       })
       .finally(() => {
         if (active) setLoadingCouriers(false);
@@ -297,13 +315,43 @@ export function SistemaPage() {
       tipo: newCourierTipo,
       zonas: newCourierZonas.trim(),
       telefono: newCourierTel.trim(),
+      pin: newCourierPin.replace(/\D/g, '').slice(0, 6),
       activo: true,
     };
     const next = [...couriersList, created];
     setNewCourierName('');
     setNewCourierZonas('');
     setNewCourierTel('');
+    setNewCourierPin('');
     await persistCouriersList(next, `Courier "${cleanName}" agregado y disponible en Pedidos.`);
+  };
+
+  const handleSaveDriverAccess = async () => {
+    setSavingDriverAccess(true);
+    try {
+      const res = await saveDriverAccessConfig(driverAccess);
+      setDriverAccess(res.config);
+      setCourierNotice({
+        type: 'ok',
+        text: res.config.requirePin
+          ? `Acceso protegido con PIN Maestro (${res.config.adminPin}) y PIN individual por courier.`
+          : 'PIN desactivado: cualquier motorista puede abrir su ruta directamente.',
+      });
+    } finally {
+      setSavingDriverAccess(false);
+    }
+  };
+
+  const handleInitOrdersBucket = async () => {
+    setBucketStatus({ checking: true });
+    const res = await ensureOrdersEvidenceBucket();
+    setBucketStatus({
+      checking: false,
+      ok: res.ok,
+      message: res.ok
+        ? 'Bucket "orders-evidence" activo y listo en Supabase Storage.'
+        : res.error || 'No se pudo verificar el bucket.',
+    });
   };
 
   const handleUpdateCourierItem = (id: string, patch: Partial<CourierItem>) => {
@@ -430,7 +478,10 @@ export function SistemaPage() {
 
   const liveRenderedPreview = useMemo(() => {
     if (!selectedTemplate) return '';
-    return renderWhatsappTemplate(selectedTemplate.mensaje, sampleOrder);
+    return renderWhatsappTemplate(selectedTemplate.mensaje, sampleOrder, {
+      guia: 'SV-884210',
+      tiempo: '30 minutos',
+    });
   }, [selectedTemplate, sampleOrder]);
 
   /* ------------------------------------------------------------------ */
@@ -1754,15 +1805,29 @@ export function SistemaPage() {
                   />
                 </div>
 
-                <div>
-                  <label className="text-[11px] font-semibold tx-mu block mb-1">Teléfono / Contacto (opcional)</label>
-                  <input
-                    type="text"
-                    value={newCourierTel}
-                    onChange={(e) => setNewCourierTel(e.target.value)}
-                    placeholder="Ej. 7890-1234"
-                    className="w-full bg-sf bd rounded-xl px-3 py-2 text-xs outline-none focus:border-[var(--ac)]"
-                  />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] font-semibold tx-mu block mb-1">Teléfono (opcional)</label>
+                    <input
+                      type="text"
+                      value={newCourierTel}
+                      onChange={(e) => setNewCourierTel(e.target.value)}
+                      placeholder="7890-1234"
+                      className="w-full bg-sf bd rounded-xl px-3 py-2 text-xs outline-none focus:border-[var(--ac)]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold tx-mu block mb-1">PIN QR (4-6 dígitos)</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={newCourierPin}
+                      onChange={(e) => setNewCourierPin(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Ej. 1003"
+                      className="w-full bg-sf bd rounded-xl px-3 py-2 text-xs mono font-bold outline-none focus:border-[var(--ac)]"
+                    />
+                  </div>
                 </div>
 
                 <button
@@ -1776,6 +1841,91 @@ export function SistemaPage() {
                   Agregar Courier
                 </button>
               </div>
+
+              {/* Seguridad PIN Portal Repartidor & Bucket Storage */}
+              <div className="pt-3 mt-1 border-t border-[var(--bd)] space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xs font-bold flex items-center gap-1.5">
+                    <KeyRound size={14} style={{ color: 'var(--ac)' }} />
+                    Seguridad Portal Repartidor
+                  </h3>
+                  <Link
+                    to="/repartidor"
+                    className="text-[11px] font-bold hover:underline inline-flex items-center gap-1"
+                    style={{ color: 'var(--ac)' }}
+                  >
+                    Abrir Portal <ExternalLink size={11} />
+                  </Link>
+                </div>
+
+                <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={driverAccess.requirePin}
+                    onChange={(e) =>
+                      setDriverAccess((prev) => ({ ...prev, requirePin: e.target.checked }))
+                    }
+                  />
+                  <span>Exigir PIN al abrir /repartidor o escanear QR</span>
+                </label>
+
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <label className="text-[10px] font-bold uppercase tx-mu block mb-1">
+                      PIN Maestro Admin (ve todos)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={driverAccess.adminPin}
+                      onChange={(e) =>
+                        setDriverAccess((prev) => ({
+                          ...prev,
+                          adminPin: e.target.value.replace(/\D/g, ''),
+                        }))
+                      }
+                      className="w-full bg-sf bd rounded-xl px-3 py-1.5 text-xs mono font-bold outline-none focus:border-[var(--ac)]"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSaveDriverAccess}
+                    disabled={savingDriverAccess}
+                    className="mt-4 px-3 py-1.5 rounded-xl bg-sf bd hover:border-[var(--ac)] text-xs font-bold cursor-pointer"
+                  >
+                    {savingDriverAccess ? '...' : 'Guardar PIN'}
+                  </button>
+                </div>
+
+                <div className="p-3 rounded-xl bg-sf bd space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold flex items-center gap-1.5">
+                      <HardDrive size={13} className="text-emerald-500" />
+                      Bucket Fotos & Evidencias
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleInitOrdersBucket}
+                      disabled={bucketStatus.checking}
+                      className="px-2.5 py-1 rounded-lg bg-cd bd text-[11px] font-semibold cursor-pointer hover:border-emerald-500"
+                    >
+                      {bucketStatus.checking ? 'Creando...' : 'Activar bucket'}
+                    </button>
+                  </div>
+                  <p className="text-[10px] tx-mu">
+                    Bucket <code className="mono">orders-evidence</code> en Supabase Storage para fotos de guía, entrega y firma.
+                  </p>
+                  {bucketStatus.message && (
+                    <div
+                      className="text-[11px] font-semibold"
+                      style={{ color: bucketStatus.ok ? 'var(--ok)' : 'var(--er)' }}
+                    >
+                      {bucketStatus.message}
+                    </div>
+                  )}
+                </div>
+              </div>
             </section>
 
             {/* Lista editable de couriers */}
@@ -1786,7 +1936,7 @@ export function SistemaPage() {
                     Couriers Registrados ({couriersList.filter((c) => c.activo).length} activos)
                   </h2>
                   <p className="text-[11px] tx-mu">
-                    Origen: {courierSource === 'supabase' ? 'Nube (Supabase)' : 'Respaldo local'}
+                    Origen: {courierSource === 'supabase' ? 'Nube (Supabase)' : 'Respaldo local'} · Asigna PIN numérico a cada motorista para entrar por QR.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1828,14 +1978,14 @@ export function SistemaPage() {
                           value={c.nombre}
                           onChange={(e) => handleUpdateCourierItem(c.id, { nombre: e.target.value })}
                           placeholder="Nombre del courier"
-                          className="sm:col-span-4 bg-cd bd rounded-lg px-2.5 py-1.5 text-xs font-bold outline-none focus:border-[var(--ac)]"
+                          className="sm:col-span-3 bg-cd bd rounded-lg px-2.5 py-1.5 text-xs font-bold outline-none focus:border-[var(--ac)]"
                         />
                         <select
                           value={c.tipo}
                           onChange={(e) =>
                             handleUpdateCourierItem(c.id, { tipo: e.target.value as CourierTipo })
                           }
-                          className="sm:col-span-3 bg-cd bd rounded-lg px-2 py-1.5 text-xs font-semibold outline-none focus:border-[var(--ac)]"
+                          className="sm:col-span-2 bg-cd bd rounded-lg px-2 py-1.5 text-xs font-semibold outline-none focus:border-[var(--ac)]"
                         >
                           <option value="motorista">Motorista propio</option>
                           <option value="externo">Courier externo</option>
@@ -1856,11 +2006,30 @@ export function SistemaPage() {
                           placeholder="Teléfono"
                           className="sm:col-span-2 bg-cd bd rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[var(--ac)]"
                         />
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={6}
+                          value={c.pin || ''}
+                          onChange={(e) =>
+                            handleUpdateCourierItem(c.id, {
+                              pin: e.target.value.replace(/\D/g, ''),
+                            })
+                          }
+                          placeholder="PIN QR"
+                          title="PIN numérico para iniciar sesión en /repartidor o al escanear QR"
+                          className="sm:col-span-2 bg-cd bd rounded-lg px-2.5 py-1.5 text-xs mono font-bold outline-none focus:border-[var(--ac)]"
+                        />
                       </div>
 
                       <div className="flex items-center justify-between gap-2 text-[11px]">
                         <span className="tx-mu">
                           ID: <code className="mono">{c.id}</code>
+                          {c.pin ? (
+                            <span className="ml-2 font-semibold text-emerald-600 dark:text-emerald-400">
+                              · PIN: <code className="mono">{c.pin}</code>
+                            </span>
+                          ) : null}
                         </span>
                         <div className="flex items-center gap-2">
                           <button

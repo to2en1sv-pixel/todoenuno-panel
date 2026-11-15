@@ -59,6 +59,7 @@ import {
   type OrderWhatsappTemplate,
 } from "@/lib/whatsappTemplates";
 import { useCouriers } from "@/lib/couriers";
+import { useOrdersEvidenceMap } from "@/lib/orderStorage";
 import PedidoModal from "@/components/PedidoModal";
 import GuiaEnvio, { type GuiaPedido } from "@/components/GuiaEnvio";
 import ManifiestoDespacho from "@/components/ManifiestoDespacho";
@@ -943,6 +944,14 @@ export function PedidosPage() {
 
           {/* Acciones Compactas */}
           <div className="flex items-center gap-2 flex-wrap xl:justify-end">
+            <Link
+              to="/repartidor"
+              className="px-3 py-2 border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              title="Abrir Portal Repartidor (/repartidor)"
+            >
+              <Truck size={14} /> <span className="hidden sm:inline">Portal Repartidor</span>
+            </Link>
+
             <button
               onClick={exportarCSV}
               className="px-3 py-2 border border-[var(--bd)] hover:bg-sf rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
@@ -2778,6 +2787,10 @@ function PedidoCard({
 /* ------------------------------------------------------------------ */
 
 function DetallePedido({ pedido, onClose }: { pedido: Pedido; onClose: () => void }) {
+  const { evidenceMap } = useOrdersEvidenceMap();
+  const evidence = evidenceMap[pedido.id];
+  const [zoomUrl, setZoomUrl] = useState<{ label: string; url: string } | null>(null);
+
   const filas: { icon: React.ReactNode; label: string; valor: string }[] = [
     { icon: <User className="w-4 h-4" />, label: "Cliente", valor: pedido.nombre_cliente || "—" },
     { icon: <Phone className="w-4 h-4" />, label: "Teléfono", valor: pedido.telefono || "—" },
@@ -2806,6 +2819,12 @@ function DetallePedido({ pedido, onClose }: { pedido: Pedido; onClose: () => voi
       valor: pedido.motivo_cancelacion
     });
   }
+
+  const evidencePhotos = [
+    evidence?.guiaUrl ? { label: evidence.guiaNumber ? `Guía ${evidence.guiaNumber}` : "Paquete + Guía", url: evidence.guiaUrl } : null,
+    evidence?.entregaUrl ? { label: "Foto Entrega", url: evidence.entregaUrl } : null,
+    evidence?.firmaUrl ? { label: "Firma Cliente", url: evidence.firmaUrl } : null,
+  ].filter(Boolean) as Array<{ label: string; url: string }>;
 
   return (
     <div
@@ -2846,12 +2865,71 @@ function DetallePedido({ pedido, onClose }: { pedido: Pedido; onClose: () => voi
             </div>
           ))}
 
+          {evidencePhotos.length > 0 && (
+            <div className="pt-2 border-t border-[var(--bd)] space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider opacity-60 flex items-center gap-1">
+                <Camera className="w-3.5 h-3.5 text-emerald-500" />
+                Evidencias en Bucket (Supabase Storage)
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {evidencePhotos.map((ev) => (
+                  <button
+                    key={ev.label}
+                    type="button"
+                    onClick={() => setZoomUrl(ev)}
+                    className="rounded-xl border border-[var(--bd)] bg-sf overflow-hidden text-left hover:border-emerald-500 transition-colors cursor-zoom-in"
+                  >
+                    <img
+                      src={ev.url}
+                      alt={ev.label}
+                      className={`w-full h-20 object-cover ${ev.label === 'Firma Cliente' ? 'bg-white object-contain p-1' : ''}`}
+                    />
+                    <span className="block px-1.5 py-1 text-[10px] font-bold truncate">
+                      {ev.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between rounded-xl border border-[var(--bd)] bg-sf px-4 py-3">
             <span className="text-xs font-bold uppercase tracking-wider opacity-60">Total Contra Entrega</span>
             <span className="text-xl font-black text-emerald-600 font-mono">{dinero(pedido.total)}</span>
           </div>
         </div>
       </div>
+
+      {zoomUrl && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/85 flex items-center justify-center p-4"
+          onClick={(e) => {
+            e.stopPropagation();
+            setZoomUrl(null);
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-cd bd rounded-2xl max-w-lg w-full p-4 space-y-3"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold">{zoomUrl.label}</span>
+              <button
+                type="button"
+                onClick={() => setZoomUrl(null)}
+                className="p-1 rounded-lg bg-sf bd"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <img
+              src={zoomUrl.url}
+              alt={zoomUrl.label}
+              className="w-full max-h-[75vh] object-contain rounded-xl bg-white/5"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

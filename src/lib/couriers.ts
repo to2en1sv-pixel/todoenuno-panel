@@ -9,12 +9,34 @@ export interface CourierItem {
   tipo: CourierTipo;
   zonas?: string;
   telefono?: string;
+  pin?: string;
   activo: boolean;
 }
 
+export interface DriverAccessConfig {
+  requirePin: boolean;
+  adminPin: string;
+}
+
+export interface DriverPortalSession {
+  role: 'courier' | 'admin';
+  courierId?: string;
+  courierName?: string;
+  loggedInAt: number;
+}
+
 export const SYSTEM_COURIERS_DOC_TITLE = '__SYSTEM_COURIERS_V1__';
+export const SYSTEM_DRIVER_ACCESS_DOC_TITLE = '__SYSTEM_DRIVER_ACCESS_V1__';
 const LOCAL_COURIERS_KEY = 'todoenuno_couriers_v1';
+const LOCAL_DRIVER_ACCESS_KEY = 'todoenuno_driver_access_v1';
+const LOCAL_DRIVER_SESSION_KEY = 'todoenuno_driver_session_v1';
 const COURIERS_UPDATED_EVENT = 'todoenuno:couriers-updated';
+const DRIVER_SESSION_TTL_MS = 1000 * 60 * 60 * 24;
+
+export const DEFAULT_DRIVER_ACCESS_CONFIG: DriverAccessConfig = {
+  requirePin: true,
+  adminPin: '2026',
+};
 
 export const DEFAULT_COURIERS: CourierItem[] = [
   {
@@ -22,6 +44,7 @@ export const DEFAULT_COURIERS: CourierItem[] = [
     nombre: 'Motorista Central 1',
     tipo: 'motorista',
     zonas: 'San Salvador / AMSS',
+    pin: '1001',
     activo: true,
   },
   {
@@ -29,6 +52,7 @@ export const DEFAULT_COURIERS: CourierItem[] = [
     nombre: 'Motorista Central 2',
     tipo: 'motorista',
     zonas: 'Santa Tecla / La Libertad',
+    pin: '1002',
     activo: true,
   },
   {
@@ -61,6 +85,10 @@ export const DEFAULT_COURIERS: CourierItem[] = [
   },
 ];
 
+function sanitizePin(raw: unknown): string {
+  return String(raw || '').replace(/\D/g, '').slice(0, 6);
+}
+
 function sanitizeCouriers(raw: unknown): CourierItem[] {
   if (!Array.isArray(raw) || raw.length === 0) {
     return DEFAULT_COURIERS.map((c) => ({ ...c }));
@@ -83,12 +111,18 @@ function sanitizeCouriers(raw: unknown): CourierItem[] {
         ? rawTipo
         : 'motorista';
 
+    const id = String((item as any).id || `cour_${Date.now()}_${clean.length}`);
+    const defaultPin =
+      id === 'motorista-1' ? '1001' : id === 'motorista-2' ? '1002' : '';
+    const pin = sanitizePin((item as any).pin) || defaultPin;
+
     clean.push({
-      id: String((item as any).id || `cour_${Date.now()}_${clean.length}`),
+      id,
       nombre,
       tipo,
       zonas: String((item as any).zonas || '').trim(),
       telefono: String((item as any).telefono || '').trim(),
+      pin,
       activo: (item as any).activo !== false,
     });
   }
@@ -193,6 +227,115 @@ export async function saveCouriers(
   } catch (err: any) {
     return { ok: true, couriers: clean, source: 'local', error: err?.message };
   }
+}
+
+export function getCachedDriverAccessConfig(): DriverAccessConfig {
+  try {
+    const raw = localStorage.getItem(LOCAL_DRIVER_ACCESS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        requirePin: parsed?.requirePin !== false,
+        adminPin: sanitizePin(parsed?.adminPin) || DEFAULT_DRIVER_ACCESS_CONFIG.adminPin,
+      };
+    }
+  } catch {}
+  return { ...DEFAULT_DRIVER_ACCESS_CONFIG };
+}
+
+export async function fetchDriverAccessConfig(): Promise<DriverAccessConfig> {
+  try {
+    const { data, error } = await supabase
+      .from('panel_docs')
+      .select('contenido')
+      .eq('titulo', SYSTEM_DRIVER_ACCESS_DOC_TITLE)
+      .maybeSingle();
+
+    if (!error && data?.contenido) {
+      const parsed = JSON.parse(data.contenido);
+      const clean: DriverAccessConfig = {
+        requirePin: parsed?.requirePin !== false,
+        adminPin: sanitizePin(parsed?.adminPin) || DEFAULT_DRIVER_ACCESS_CONFIG.adminPin,
+      };
+      try {
+        localStorage.setItem(LOCAL_DRIVER_ACCESS_KEY, JSON.stringify(clean));
+      } catch {}
+      return clean;
+    }
+  } catch {}
+  return getCachedDriverAccessConfig();
+}
+
+export async function saveDriverAccessConfig(
+  cfg: DriverAccessConfig
+): Promise<{ ok: boolean; config: DriverAccessConfig }> {
+  const clean: DriverAccessConfig = {
+    requirePin: cfg.requirePin !== false,
+    adminPin: sanitizePin(cfg.adminPin) || DEFAULT_DRIVER_ACCESS_CONFIG.adminPin,
+  };
+  try {
+    localStorage.setItem(LOCAL_DRIVER_ACCESS_KEY, JSON.stringify(clean));
+  } catch {}
+
+  try {
+    const serialized = JSON.stringify(clean);
+    const { data: existing } = await supabase
+      .from('panel_docs')
+      .select('id')
+      .eq('titulo', SYSTEM_DRIVER_ACCESS_DOC_TITLE)
+      .maybeSingle();
+
+    if (existing?.id) {
+      await supabase
+        .from('panel_docs')
+        .update({
+          contenido: serialized,
+          categoria: 'Sistema',
+          estado: 'Completado',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id);
+    } else {
+      await supabase.from('panel_docs').insert({
+        titulo: SYSTEM_DRIVER_ACCESS_DOC_TITLE,
+        contenido: serialized,
+        categoria: 'Sistema',
+        estado: 'Completado',
+        updated_at: new Date().toISOString(),
+      });
+    }
+    return { ok: true, config: clean };
+  } catch {
+    return { ok: false, config: clean };
+  }
+}
+
+export function getDriverSession(): DriverPortalSession | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_DRIVER_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DriverPortalSession;
+    if (!parsed || (parsed.role !== 'courier' && parsed.role !== 'admin')) return null;
+    if (Date.now() - Number(parsed.loggedInAt || 0) > DRIVER_SESSION_TTL_MS) {
+      localStorage.removeItem(LOCAL_DRIVER_SESSION_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function setDriverSession(session: DriverPortalSession) {
+  try {
+    localStorage.setItem(LOCAL_DRIVER_SESSION_KEY, JSON.stringify(session));
+  } catch {}
+}
+
+export function clearDriverSession() {
+  try {
+    localStorage.removeItem(LOCAL_DRIVER_SESSION_KEY);
+  } catch {}
 }
 
 export function getActiveCourierNames(couriers: CourierItem[]): string[] {

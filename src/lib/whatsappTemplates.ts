@@ -33,6 +33,7 @@ export const WA_TEMPLATE_VARIABLES: Array<{
   { key: '{telefono}', label: 'Teléfono', example: '6074-4809' },
   { key: '{codigo}', label: 'Código pedido', example: 'PED-1042' },
   { key: '{guia}', label: 'N° de guía', example: 'SV-884210' },
+  { key: '{tiempo}', label: 'Tiempo estimado', example: '30 minutos' },
 ];
 
 export const DEFAULT_ORDER_WA_TEMPLATES: OrderWhatsappTemplate[] = [
@@ -85,9 +86,9 @@ export const DEFAULT_ORDER_WA_TEMPLATES: OrderWhatsappTemplate[] = [
     titulo: '5. Motorista Llegando (Panel Repartidor)',
     etiquetaBoton: 'Avisar Llegada',
     categoria: 'repartidor',
-    descripcion: 'Botón directo de WhatsApp usado por el motorista en /entregar y /repartidor.',
+    descripcion: 'Botón directo de WhatsApp usado por el motorista en /entregar y /repartidor con selector rápido de {tiempo}.',
     mensaje:
-      'Hola {nombre}, soy el repartidor de To2en1.app. Estoy llegando a tu dirección con tu pedido de *{producto}*. ¿Te encuentras disponible para recibir? 🛵',
+      'Hola {nombre}, soy el repartidor de To2en1.app. Llegaré a tu dirección en aproximadamente *{tiempo}* con tu pedido de *{producto}* (Total: *{total}*). ¿Te encuentras disponible para recibir? 🛵',
     activo: true,
     isDefault: true,
   },
@@ -294,6 +295,7 @@ export function renderWhatsappTemplate(
   extra?: {
     nueva_fecha?: string | null;
     guia?: string | null;
+    tiempo?: string | null;
   }
 ): string {
   const numTotal = Number(pedido?.total) || 0;
@@ -320,6 +322,7 @@ export function renderWhatsappTemplate(
     '{telefono}': (pedido?.telefono || '').trim(),
     '{codigo}': (pedido?.pedido_codigo || pedido?.id || '').trim(),
     '{guia}': (extra?.guia || 'adjunta en la foto').trim(),
+    '{tiempo}': (extra?.tiempo || '30 minutos').trim(),
   };
 
   let out = templateText || '';

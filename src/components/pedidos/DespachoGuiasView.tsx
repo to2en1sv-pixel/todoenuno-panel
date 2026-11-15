@@ -22,6 +22,11 @@ import {
 } from 'lucide-react';
 import { emitOsEvent } from '@/lib/osEvents';
 import { renderWhatsappTemplate, type OrderWhatsappTemplate } from '@/lib/whatsappTemplates';
+import {
+  saveOrderEvidence,
+  uploadOrderDataUrlToBucket,
+  useOrdersEvidenceMap,
+} from '@/lib/orderStorage';
 
 export interface DespachoOrderItem {
   id: string;
@@ -48,6 +53,9 @@ interface AttachedPhoto {
   dataUrl: string;
   fileName: string;
   sizeKb: number;
+  bucketUrl?: string;
+  uploading?: boolean;
+  bucketErr?: string;
 }
 
 interface DespachoGuiasViewProps {
@@ -162,6 +170,7 @@ export function DespachoGuiasView({
   const [autoMoveToRoute, setAutoMoveToRoute] = useState<boolean>(true);
   const [pauseBot, setPauseBot] = useState<boolean>(false);
 
+  const { evidenceMap } = useOrdersEvidenceMap();
   const [photosByOrder, setPhotosByOrder] = useState<Record<string, AttachedPhoto>>({});
   const [guidesByOrder, setGuidesByOrder] = useState<Record<string, string>>({});
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
@@ -196,12 +205,17 @@ export function DespachoGuiasView({
     });
   }, [pedidos]);
 
+  const hasOrderPhoto = (orderId: string) =>
+    Boolean(photosByOrder[orderId]?.dataUrl || photosByOrder[orderId]?.bucketUrl || evidenceMap[orderId]?.guiaUrl);
+
   const counts = useMemo(() => {
     const porEmpacar = dispatchPool.filter((p) => String(p.estado || '').toLowerCase() === 'por_empacar').length;
     const enCamino = dispatchPool.filter((p) => String(p.estado || '').toLowerCase() === 'en_camino').length;
-    const withPhoto = dispatchPool.filter((p) => Boolean(photosByOrder[p.id])).length;
+    const withPhoto = dispatchPool.filter((p) =>
+      Boolean(photosByOrder[p.id]?.dataUrl || photosByOrder[p.id]?.bucketUrl || evidenceMap[p.id]?.guiaUrl)
+    ).length;
     return { porEmpacar, enCamino, withPhoto };
-  }, [dispatchPool, photosByOrder]);
+  }, [dispatchPool, photosByOrder, evidenceMap]);
 
   const visibleOrders = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -238,9 +252,12 @@ export function DespachoGuiasView({
   const readySelectedOrders = useMemo(
     () =>
       visibleOrders.filter(
-        (o) => selectedIds[o.id] && Boolean(photosByOrder[o.id]) && Boolean(normalizePhone(o.telefono))
+        (o) =>
+          selectedIds[o.id] &&
+          Boolean(photosByOrder[o.id]?.dataUrl || photosByOrder[o.id]?.bucketUrl || evidenceMap[o.id]?.guiaUrl) &&
+          Boolean(normalizePhone(o.telefono))
       ),
-    [visibleOrders, selectedIds, photosByOrder]
+    [visibleOrders, selectedIds, photosByOrder, evidenceMap]
   );
 
   const previewSampleOrder = readySelectedOrders[0] || visibleOrders[0] || null;
@@ -262,13 +279,48 @@ export function DespachoGuiasView({
 
     try {
       const compressed = await compressImageFile(file);
-      setPhotosByOrder((prev) => ({ ...prev, [orderId]: compressed }));
+      setPhotosByOrder((prev) => ({
+        ...prev,
+        [orderId]: { ...compressed, uploading: true },
+      }));
       setSelectedIds((prev) => ({ ...prev, [orderId]: true }));
       setRowFeedback((prev) => {
         const next = { ...prev };
         delete next[orderId];
         return next;
       });
+
+      const upRes = await uploadOrderDataUrlToBucket({
+        orderId,
+        kind: 'guia',
+        dataUrl: compressed.dataUrl,
+        fileName: compressed.fileName,
+      });
+
+      if (upRes.ok && upRes.publicUrl) {
+        setPhotosByOrder((prev) => ({
+          ...prev,
+          [orderId]: {
+            ...(prev[orderId] || compressed),
+            bucketUrl: upRes.publicUrl,
+            uploading: false,
+          },
+        }));
+        await saveOrderEvidence(orderId, {
+          guiaUrl: upRes.publicUrl,
+          guiaFileName: compressed.fileName,
+          guiaNumber: (guidesByOrder[orderId] || '').trim() || undefined,
+        });
+      } else {
+        setPhotosByOrder((prev) => ({
+          ...prev,
+          [orderId]: {
+            ...(prev[orderId] || compressed),
+            uploading: false,
+            bucketErr: upRes.error || 'Respaldo local listo',
+          },
+        }));
+      }
     } catch (err: any) {
       setRowFeedback((prev) => ({
         ...prev,
@@ -302,10 +354,12 @@ export function DespachoGuiasView({
   };
 
   const sendSingleOrderPhoto = async (order: DespachoOrderItem): Promise<boolean> => {
-    const photo = photosByOrder[order.id];
+    const localPhoto = photosByOrder[order.id];
+    const savedEv = evidenceMap[order.id];
+    let publicBucketUrl = localPhoto?.bucketUrl || savedEv?.guiaUrl || '';
     const cleanPhone = normalizePhone(order.telefono);
 
-    if (!photo) {
+    if (!localPhoto?.dataUrl && !publicBucketUrl) {
       setRowFeedback((prev) => ({
         ...prev,
         [order.id]: { type: 'err', text: 'Adjunta primero la foto del paquete con guía.' },
@@ -320,7 +374,24 @@ export function DespachoGuiasView({
       return false;
     }
 
-    const guia = (guidesByOrder[order.id] || '').trim();
+    // Si aún no se subió al bucket, intentarlo ahora antes de enviar por Evolution
+    if (!publicBucketUrl && localPhoto?.dataUrl) {
+      const upRes = await uploadOrderDataUrlToBucket({
+        orderId: order.id,
+        kind: 'guia',
+        dataUrl: localPhoto.dataUrl,
+        fileName: localPhoto.fileName,
+      });
+      if (upRes.ok && upRes.publicUrl) {
+        publicBucketUrl = upRes.publicUrl;
+        setPhotosByOrder((prev) => ({
+          ...prev,
+          [order.id]: { ...(prev[order.id] || localPhoto), bucketUrl: publicBucketUrl, uploading: false },
+        }));
+      }
+    }
+
+    const guia = (guidesByOrder[order.id] || savedEv?.guiaNumber || '').trim();
     const messageText = renderWhatsappTemplate(rawMessagePattern, order, {
       guia: guia || undefined,
     });
@@ -333,9 +404,9 @@ export function DespachoGuiasView({
           contactPhone: cleanPhone,
           contactName: order.nombre_cliente || cleanPhone,
           text: messageText,
-          mediaBase64: photo.dataUrl,
+          ...(publicBucketUrl ? { mediaUrl: publicBucketUrl } : { mediaBase64: localPhoto?.dataUrl }),
           mediaType: 'image',
-          fileName: photo.fileName,
+          fileName: localPhoto?.fileName || savedEv?.guiaFileName || 'paquete-guia.jpg',
           productSku: order.catalogo_sku || undefined,
           sendVideoAfterImage: false,
           pauseBot,
@@ -345,6 +416,14 @@ export function DespachoGuiasView({
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.success) {
         throw new Error(data?.details || data?.error || `HTTP ${res.status}`);
+      }
+
+      if (publicBucketUrl || guia) {
+        await saveOrderEvidence(order.id, {
+          ...(publicBucketUrl ? { guiaUrl: publicBucketUrl } : {}),
+          ...(guia ? { guiaNumber: guia } : {}),
+          guiaSentAt: new Date().toISOString(),
+        });
       }
 
       const stamp = `[Foto guía enviada ${getSvDateTimeStamp()}${guia ? ` · Guía: ${guia}` : ''}]`;
@@ -370,6 +449,7 @@ export function DespachoGuiasView({
             cliente: order.nombre_cliente,
             courier: order.courier || 'Motorista Central 1',
             guia: guia || null,
+            foto_guia_url: publicBucketUrl || null,
             moved_to_route: shouldMove,
           },
         });
@@ -381,8 +461,8 @@ export function DespachoGuiasView({
         [order.id]: {
           type: 'ok',
           text: shouldMove
-            ? 'Foto enviada por Evolution y pedido pasado a En Ruta.'
-            : 'Foto y aviso enviados por Evolution.',
+            ? 'Foto guardada, enviada por Evolution y pedido pasado a En Ruta.'
+            : 'Foto guardada y enviada por Evolution.',
         },
       }));
       return true;
@@ -454,7 +534,7 @@ export function DespachoGuiasView({
   };
 
   const toggleSelectAllWithPhoto = () => {
-    const withPhoto = visibleOrders.filter((o) => Boolean(photosByOrder[o.id]) && Boolean(normalizePhone(o.telefono)));
+    const withPhoto = visibleOrders.filter((o) => hasOrderPhoto(o.id) && Boolean(normalizePhone(o.telefono)));
     if (withPhoto.length === 0) return;
     const allSelected = withPhoto.every((o) => Boolean(selectedIds[o.id]));
     const next = { ...selectedIds };
@@ -726,10 +806,13 @@ export function DespachoGuiasView({
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3.5">
           {visibleOrders.map((order) => {
-            const photo = photosByOrder[order.id];
+            const localPhoto = photosByOrder[order.id];
+            const savedEv = evidenceMap[order.id];
+            const previewUrl = localPhoto?.dataUrl || localPhoto?.bucketUrl || savedEv?.guiaUrl || '';
+            const hasPhoto = Boolean(previewUrl);
             const isSelected = Boolean(selectedIds[order.id]);
             const cleanPhone = normalizePhone(order.telefono);
-            const alreadySent = hasPhotoNoticeSent(order.notas);
+            const alreadySent = hasPhotoNoticeSent(order.notas) || Boolean(savedEv?.guiaSentAt);
             const feedback = rowFeedback[order.id];
             const isSendingThis = sendingOrderId === order.id;
             const orderCode = order.pedido_codigo || order.id.slice(0, 8).toUpperCase();
@@ -823,28 +906,28 @@ export function DespachoGuiasView({
                     onDragLeave={() => setDragOverOrderId(null)}
                     onDrop={(e) => handleDropOnOrder(order.id, e)}
                     className={`sm:col-span-6 rounded-xl border-2 border-dashed p-2.5 flex items-center justify-center min-h-[112px] transition-colors ${
-                      photo
+                      hasPhoto
                         ? 'border-emerald-500/50 bg-emerald-500/5'
                         : dragOverOrderId === order.id
                         ? 'border-indigo-500 bg-indigo-500/10'
                         : 'border-[var(--bd)] bg-sf'
                     }`}
                   >
-                    {photo ? (
+                    {hasPhoto ? (
                       <div className="w-full flex items-center gap-2.5">
                         <button
                           type="button"
                           onClick={() =>
                             setZoomPhoto({
-                              title: `${order.nombre_cliente || orderCode} · ${photo.fileName}`,
-                              url: photo.dataUrl,
+                              title: `${order.nombre_cliente || orderCode} · ${localPhoto?.fileName || savedEv?.guiaFileName || 'Paquete con guía'}`,
+                              url: previewUrl,
                             })
                           }
                           className="relative group shrink-0 rounded-lg overflow-hidden border border-[var(--bd)] cursor-zoom-in"
                           title="Ampliar foto del paquete"
                         >
                           <img
-                            src={photo.dataUrl}
+                            src={previewUrl}
                             alt="Foto paquete con guía"
                             className="w-20 h-20 object-cover"
                           />
@@ -855,9 +938,23 @@ export function DespachoGuiasView({
 
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                            <ImageIcon size={12} /> Foto lista ({photo.sizeKb} KB)
+                            {localPhoto?.uploading ? (
+                              <>
+                                <Loader2 size={12} className="animate-spin" /> Subiendo al bucket...
+                              </>
+                            ) : localPhoto?.bucketUrl || savedEv?.guiaUrl ? (
+                              <>
+                                <ImageIcon size={12} /> Guardada en nube
+                              </>
+                            ) : (
+                              <>
+                                <ImageIcon size={12} /> Foto lista ({localPhoto?.sizeKb || 'OK'} KB)
+                              </>
+                            )}
                           </div>
-                          <p className="text-[10px] tx-mu truncate">{photo.fileName}</p>
+                          <p className="text-[10px] tx-mu truncate">
+                            {localPhoto?.fileName || savedEv?.guiaFileName || 'paquete-guia.jpg'}
+                          </p>
                           <div className="flex items-center gap-1.5">
                             <label className="px-2 py-1 rounded-lg bg-cd bd text-[10px] font-semibold cursor-pointer hover:border-indigo-500">
                               Cambiar
@@ -873,21 +970,23 @@ export function DespachoGuiasView({
                                 }}
                               />
                             </label>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPhotosByOrder((prev) => {
-                                  const next = { ...prev };
-                                  delete next[order.id];
-                                  return next;
-                                });
-                                setSelectedIds((prev) => ({ ...prev, [order.id]: false }));
-                              }}
-                              className="p-1 rounded-lg bg-cd bd text-rose-500 hover:bg-rose-500/10 cursor-pointer"
-                              title="Quitar foto"
-                            >
-                              <Trash2 size={12} />
-                            </button>
+                            {localPhoto && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPhotosByOrder((prev) => {
+                                    const next = { ...prev };
+                                    delete next[order.id];
+                                    return next;
+                                  });
+                                  setSelectedIds((prev) => ({ ...prev, [order.id]: false }));
+                                }}
+                                className="p-1 rounded-lg bg-cd bd text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                                title="Quitar foto temporal"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -950,7 +1049,7 @@ export function DespachoGuiasView({
                         </label>
                         <input
                           type="text"
-                          value={guidesByOrder[order.id] || ''}
+                          value={guidesByOrder[order.id] ?? savedEv?.guiaNumber ?? ''}
                           onChange={(e) =>
                             setGuidesByOrder((prev) => ({ ...prev, [order.id]: e.target.value }))
                           }
@@ -964,7 +1063,7 @@ export function DespachoGuiasView({
                       <button
                         type="button"
                         onClick={() => handleSendSingle(order)}
-                        disabled={!photo || !cleanPhone || isSendingThis || Boolean(batchProgress?.active)}
+                        disabled={!hasPhoto || !cleanPhone || isSendingThis || Boolean(batchProgress?.active)}
                         className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white text-xs font-bold cursor-pointer transition-colors"
                       >
                         {isSendingThis ? (

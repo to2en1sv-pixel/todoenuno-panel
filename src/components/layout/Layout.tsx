@@ -23,6 +23,7 @@ import {
   ListChecks,
   PanelLeftClose,
   PanelLeftOpen,
+  Truck,
 } from 'lucide-react';
 import { PWAInstallButton } from '@/components/pwa/PWAComponents';
 import {
@@ -50,6 +51,7 @@ const navGroups: NavGroup[] = [
       { to: '/', label: 'Hoy', icon: LayoutDashboard },
       { to: '/unichat', label: 'UniChat', icon: MessageSquare },
       { to: '/pedidos', label: 'Pedidos', icon: ClipboardList },
+      { to: '/repartidor', label: 'Portal Repartidor', icon: Truck },
       { to: '/social-inbox', label: 'Social Inbox', icon: Inbox },
       { to: '/cola', label: 'Cola', icon: ListChecks },
     ],

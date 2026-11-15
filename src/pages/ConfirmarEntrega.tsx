@@ -1,13 +1,13 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
-import { 
-  CheckCircle2, 
-  Loader2, 
-  ArrowLeft, 
-  MapPin, 
-  User, 
-  Phone, 
+import {
+  CheckCircle2,
+  Loader2,
+  ArrowLeft,
+  MapPin,
+  User,
+  Phone,
   MessageCircle,
   Package,
   AlertTriangle,
@@ -15,17 +15,19 @@ import {
   Compass,
   Camera,
   Edit3,
-  DollarSign,
   Calculator,
   Truck,
   RotateCcw,
-  Clock,
-  ChevronRight,
   X,
-  Check,
   Send,
-  FileText,
-  ShieldAlert
+  ShieldAlert,
+  Search,
+  Calendar,
+  Wallet,
+  Landmark,
+  Copy,
+  Check,
+  ClipboardList,
 } from "lucide-react";
 import { compressImageFile, syncOrderInventoryOnStatusChange } from "@/lib/inventory";
 import { hydrateCutoffsFromOsEvents } from "@/lib/catalogAliases";
@@ -37,10 +39,110 @@ import {
 } from "@/lib/whatsappTemplates";
 import { useCouriers } from "@/lib/couriers";
 
+const DRIVER_COURIER_STORAGE_KEY = "todoenuno_driver_courier_v1";
+
+type RutaTab = "en_ruta" | "por_empacar" | "entregados_hoy" | "novedades";
+type CobroTipo = "efectivo" | "transferencia";
+
+function getElSalvadorDateKey(iso?: string | null): string {
+  try {
+    const d = iso ? new Date(iso) : new Date();
+    if (Number.isNaN(d.getTime())) return "";
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/El_Salvador",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(d);
+  } catch {
+    return "";
+  }
+}
+
+function getElSalvadorTimeLabel(): string {
+  try {
+    return new Intl.DateTimeFormat("es-SV", {
+      timeZone: "America/El_Salvador",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(new Date());
+  } catch {
+    return "";
+  }
+}
+
+function addDaysSv(days: number): string {
+  const base = new Date(Date.now() + days * 86_400_000);
+  return getElSalvadorDateKey(base.toISOString());
+}
+
+function formatSvWaPhone(raw?: string | null): string {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 8) return `503${digits}`;
+  return digits;
+}
+
+function formatTelHref(raw?: string | null): string {
+  const wa = formatSvWaPhone(raw);
+  if (!wa) return "";
+  return `tel:+${wa}`;
+}
+
+function isOrderPrepaid(pedido: any): boolean {
+  const mp = String(pedido?.metodo_pago || "").toLowerCase();
+  if (!mp) return false;
+  if (mp.includes("contra")) return false;
+  return mp.includes("pagado") || mp.includes("anticip") || mp.includes("transfer") || mp.includes("tarjeta");
+}
+
+function getOrderCobroKind(pedido: any): "efectivo" | "transferencia" | "prepagado" {
+  const notas = String(pedido?.notas || "").toLowerCase();
+  if (notas.includes("[cobro: transferencia]")) return "transferencia";
+  if (notas.includes("[cobro: efectivo]")) return "efectivo";
+  if (isOrderPrepaid(pedido)) return "prepagado";
+  return "efectivo";
+}
+
+function isDeliveredTodaySv(pedido: any, todaySv: string): boolean {
+  if (pedido?.estado !== "entregado") return false;
+  const notas = String(pedido?.notas || "");
+  const stampMatch = notas.match(/\[Entregado[^\]]*(\d{4}-\d{2}-\d{2})/i);
+  if (stampMatch?.[1]) {
+    return stampMatch[1] === todaySv;
+  }
+  const updatedKey = pedido?.updated_at ? getElSalvadorDateKey(pedido.updated_at) : "";
+  if (updatedKey) return updatedKey === todaySv;
+  return getElSalvadorDateKey(pedido?.created_at) === todaySv;
+}
+
+function hasOrderIssue(pedido: any): boolean {
+  const notas = String(pedido?.notas || "").toUpperCase();
+  return Boolean(pedido?.motivo_cancelacion) || notas.includes("[NOVEDAD");
+}
+
+function getOrderProductLabel(pedido: any): string {
+  if (pedido?.producto) return String(pedido.producto);
+  if (Array.isArray(pedido?.items) && pedido.items.length > 0) {
+    return pedido.items
+      .map((i: any) => `${i?.cantidad || 1}x ${i?.nombre || i?.sku || "Producto"}`)
+      .join(", ");
+  }
+  return String(pedido?.sku || pedido?.catalogo_sku || "Producto");
+}
+
+const MOTIVOS_BOLETINAR_DEFAULT = new Set([
+  "Cliente no contestó llamadas/mensajes",
+  "Cliente canceló / rechaza producto",
+]);
+
 export function ConfirmarEntregaPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { activeNames: courierOptions } = useCouriers();
+
+  const todaySv = useMemo(() => getElSalvadorDateKey(), []);
 
   // Estados de carga
   const [cargando, setCargando] = useState(true);
@@ -48,6 +150,7 @@ export function ConfirmarEntregaPage() {
   const [todosLosPedidos, setTodosLosPedidos] = useState<any[]>([]);
   const [actualizando, setActualizando] = useState(false);
   const [exito, setExito] = useState(false);
+
   const [driverTemplate, setDriverTemplate] = useState<string>(() => {
     const cached = getCachedOrderWhatsappTemplates().find((t) => t.id === "repartidor_llegando");
     return (
@@ -65,9 +168,27 @@ export function ConfirmarEntregaPage() {
 
   // Vista de Hoja de Ruta vs Entrega Individual
   const [modoRuta, setModoRuta] = useState(!id);
-  const [courierSeleccionado, setCourierSeleccionado] = useState("Todos los Couriers");
+  const [courierSeleccionado, setCourierSeleccionado] = useState<string>(() => {
+    try {
+      return localStorage.getItem(DRIVER_COURIER_STORAGE_KEY) || "Todos los Couriers";
+    } catch {
+      return "Todos los Couriers";
+    }
+  });
+  const [rutaTab, setRutaTab] = useState<RutaTab>("en_ruta");
+  const [busquedaRuta, setBusquedaRuta] = useState("");
 
-  // Calculadora de Vuelto
+  // Notificaciones Evolution en 1 clic
+  const [sendingWaId, setSendingWaId] = useState<string | null>(null);
+  const [notificadosWaIds, setNotificadosWaIds] = useState<Record<string, boolean>>({});
+  const [toastInfo, setToastInfo] = useState<{ tipo: "ok" | "warn" | "err"; texto: string } | null>(null);
+
+  // Modal Cuadre / Cierre del Día
+  const [mostrarCuadreModal, setMostrarCuadreModal] = useState(false);
+  const [cuadreCopiado, setCuadreCopiado] = useState(false);
+
+  // Cobro y Calculadora de Vuelto
+  const [cobroTipo, setCobroTipo] = useState<CobroTipo>("efectivo");
   const [pagaCon, setPagaCon] = useState<string>("");
   const [mostrarCalculadora, setMostrarCalculadora] = useState(false);
 
@@ -76,28 +197,62 @@ export function ConfirmarEntregaPage() {
   const [tipoNovedad, setTipoNovedad] = useState("Cliente no contestó llamadas/mensajes");
   const [notaNovedad, setNotaNovedad] = useState("");
   const [boletinarEnListaNegra, setBoletinarEnListaNegra] = useState(true);
+  const [nuevaFechaReprogramar, setNuevaFechaReprogramar] = useState(() => addDaysSv(1));
+  const [moverAProgramado, setMoverAProgramado] = useState(true);
+  const [cancelarPorRechazo, setCancelarPorRechazo] = useState(false);
   const [enviandoNovedad, setEnviandoNovedad] = useState(false);
-  const [novedadToast, setNovedadToast] = useState<string | null>(null);
 
   // Prueba de Entrega (Foto y Firma)
   const [fotoEntrega, setFotoEntrega] = useState<string | null>(null);
+  const [enviarFotoCliente, setEnviarFotoCliente] = useState(false);
   const [mostrarFirma, setMostrarFirma] = useState(false);
   const [hayFirma, setHayFirma] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawing = useRef(false);
 
+  const showToast = (tipo: "ok" | "warn" | "err", texto: string) => {
+    setToastInfo({ tipo, texto });
+    setTimeout(() => {
+      setToastInfo((prev) => (prev?.texto === texto ? null : prev));
+    }, 5500);
+  };
+
+  const handleCourierChange = (value: string) => {
+    setCourierSeleccionado(value);
+    try {
+      localStorage.setItem(DRIVER_COURIER_STORAGE_KEY, value);
+    } catch {}
+  };
+
+  const resetDeliveryFormState = (targetOrder?: any) => {
+    setFotoEntrega(null);
+    setEnviarFotoCliente(false);
+    setMostrarFirma(false);
+    setHayFirma(false);
+    setPagaCon("");
+    setMostrarCalculadora(false);
+    setExito(false);
+    setCobroTipo(isOrderPrepaid(targetOrder) ? "transferencia" : "efectivo");
+  };
+
+  const openOrderForDelivery = (targetOrder: any) => {
+    resetDeliveryFormState(targetOrder);
+    setPedido(targetOrder);
+    setModoRuta(false);
+  };
+
   // Cargar pedidos y pedido activo
   const cargarDatos = async () => {
     setCargando(true);
 
-    // Hidratar corte de inventario y cargar pedidos activos para la ruta
     const [, { data: todos }] = await Promise.all([
       hydrateCutoffsFromOsEvents(supabase),
       supabase
         .from("whatsapp_orders")
         .select("*")
         .order("created_at", { ascending: false })
+        .limit(450),
     ]);
 
     if (todos) {
@@ -105,18 +260,17 @@ export function ConfirmarEntregaPage() {
     }
 
     if (id) {
-      const p = todos?.find(item => item.id === id);
+      const p = todos?.find((item) => item.id === id);
       if (p) {
-        setPedido(p);
+        openOrderForDelivery(p);
       } else {
         const { data: individual } = await supabase
           .from("whatsapp_orders")
           .select("*")
           .eq("id", id)
           .single();
-        setPedido(individual);
+        openOrderForDelivery(individual);
       }
-      setModoRuta(false);
     } else {
       setModoRuta(true);
     }
@@ -128,29 +282,40 @@ export function ConfirmarEntregaPage() {
     cargarDatos();
   }, [id]);
 
-  // Manejo de canvas de firma táctil
+  // Manejo de canvas de firma táctil con escalado exacto
   useEffect(() => {
     if (mostrarFirma && canvasRef.current) {
       const canvas = canvasRef.current;
       const ctx = canvas.getContext("2d");
       if (ctx) {
-        ctx.strokeStyle = "#000000";
-        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = "#0f172a";
+        ctx.lineWidth = 2.6;
         ctx.lineCap = "round";
+        ctx.lineJoin = "round";
       }
     }
   }, [mostrarFirma]);
+
+  const getScaledCanvasPoint = (e: any, canvas: HTMLCanvasElement) => {
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
+    const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  };
 
   const startDrawing = (e: any) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     isDrawing.current = true;
     const ctx = canvas.getContext("2d");
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const pt = getScaledCanvasPoint(e, canvas);
     ctx?.beginPath();
-    ctx?.moveTo(clientX - rect.left, clientY - rect.top);
+    ctx?.moveTo(pt.x, pt.y);
   };
 
   const draw = (e: any) => {
@@ -158,10 +323,8 @@ export function ConfirmarEntregaPage() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    ctx?.lineTo(clientX - rect.left, clientY - rect.top);
+    const pt = getScaledCanvasPoint(e, canvas);
+    ctx?.lineTo(pt.x, pt.y);
     ctx?.stroke();
     setHayFirma(true);
   };
@@ -183,10 +346,66 @@ export function ConfirmarEntregaPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const compressed = await compressImageFile(file, 800, 800, 0.75);
+      const compressed = await compressImageFile(file, 960, 960, 0.78);
       setFotoEntrega(compressed);
     } catch (err) {
       console.error("Error al capturar foto:", err);
+      showToast("err", "No se pudo procesar la foto de entrega.");
+    } finally {
+      e.target.value = "";
+    }
+  };
+
+  // Enviar aviso de llegada directo vía Evolution API
+  const handleAvisarLlegadaEvolution = async (targetOrder: any) => {
+    if (!targetOrder?.telefono) {
+      showToast("err", "Este pedido no tiene teléfono registrado.");
+      return;
+    }
+
+    const waPhone = formatSvWaPhone(targetOrder.telefono);
+    const text = renderWhatsappTemplate(driverTemplate, targetOrder);
+    setSendingWaId(targetOrder.id);
+
+    try {
+      const res = await fetch("/api/send-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contactPhone: waPhone,
+          contactName: targetOrder.nombre_cliente || "Cliente",
+          text,
+          pauseBot: false,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(json?.details || json?.error || `HTTP ${res.status}`);
+      }
+
+      setNotificadosWaIds((prev) => ({ ...prev, [targetOrder.id]: true }));
+      const stamp = `[Aviso llegada ${getElSalvadorTimeLabel()}]`;
+      const nextNotas = targetOrder.notas ? `${targetOrder.notas} • ${stamp}` : stamp;
+
+      await supabase.from("whatsapp_orders").update({ notas: nextNotas }).eq("id", targetOrder.id);
+
+      setTodosLosPedidos((prev) =>
+        prev.map((item) => (item.id === targetOrder.id ? { ...item, notas: nextNotas } : item))
+      );
+      if (pedido?.id === targetOrder.id) {
+        setPedido((prev: any) => (prev ? { ...prev, notas: nextNotas } : prev));
+      }
+
+      showToast("ok", `Aviso de llegada enviado por WhatsApp a ${targetOrder.nombre_cliente || "cliente"}.`);
+    } catch (err: any) {
+      console.error("Error enviando aviso de llegada:", err);
+      showToast(
+        "warn",
+        `Evolution no respondió (${err?.message || "error"}). Usa el botón WhatsApp manual si lo necesitas.`
+      );
+    } finally {
+      setSendingWaId(null);
     }
   };
 
@@ -194,52 +413,112 @@ export function ConfirmarEntregaPage() {
   const handleEntregar = async () => {
     if (!pedido?.id) return;
     setActualizando(true);
-    const prevEstado = pedido.estado || 'en_camino';
+    const prevEstado = pedido.estado || "en_camino";
+    const prepagado = isOrderPrepaid(pedido);
+    const cobroEtiqueta = prepagado
+      ? "Prepagado"
+      : cobroTipo === "transferencia"
+      ? "Transferencia"
+      : "Efectivo";
+
+    const hora = getElSalvadorTimeLabel();
+    const stampParts = [
+      `Entregado en ruta ${todaySv} ${hora}`,
+      `Cobro: ${cobroEtiqueta}`,
+      fotoEntrega ? "Foto: Sí" : null,
+      hayFirma ? "Firma: Sí" : null,
+    ]
+      .filter(Boolean)
+      .join(" • ");
+    const notaEntrega = `[${stampParts}]`;
+    const nextNotas = pedido.notas ? `${pedido.notas} • ${notaEntrega}` : notaEntrega;
 
     try {
-      await supabase
+      const { error: updErr } = await supabase
         .from("whatsapp_orders")
         .update({
           estado: "entregado",
-          notas: pedido.notas ? `${pedido.notas} • [Entregado en ruta con app móvil]` : "[Entregado en ruta con app móvil]"
+          notas: nextNotas,
         })
         .eq("id", pedido.id);
+
+      if (updErr) throw updErr;
 
       // Descontar unidad física / consumir reserva en Inventario & Kárdex
       try {
         await syncOrderInventoryOnStatusChange({
           order: pedido,
           prevEstado,
-          nextEstado: 'entregado',
-          usuario: pedido.courier || 'Motorista Móvil'
+          nextEstado: "entregado",
+          usuario: pedido.courier || "Motorista Móvil",
         });
       } catch (invErr) {
-        console.warn('Error sincronizando inventario en entrega móvil:', invErr);
+        console.warn("Error sincronizando inventario en entrega móvil:", invErr);
+      }
+
+      // Envío opcional de comprobante fotográfico por WhatsApp (Evolution API)
+      if (fotoEntrega && enviarFotoCliente && pedido.telefono) {
+        try {
+          const waPhone = formatSvWaPhone(pedido.telefono);
+          const prodLabel = getOrderProductLabel(pedido);
+          await fetch("/api/send-message", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contactPhone: waPhone,
+              contactName: pedido.nombre_cliente || "Cliente",
+              text: `✅ ¡Entrega completada, ${pedido.nombre_cliente || ""}! Tu pedido de *${prodLabel}* ha sido entregado. Adjuntamos tu comprobante fotográfico. ¡Gracias por tu compra! 🙌`,
+              mediaBase64: fotoEntrega,
+              mediaType: "image",
+              fileName: `entrega-${String(pedido.id).slice(0, 8)}.jpg`,
+              sendVideoAfterImage: false,
+              pauseBot: false,
+            }),
+          });
+        } catch (mediaErr) {
+          console.warn("No se pudo enviar comprobante fotográfico por WhatsApp:", mediaErr);
+        }
       }
 
       // Emitir evento al OS Event Store
       try {
-        const { emitOsEvent } = await import('@/lib/osEvents');
+        const { emitOsEvent } = await import("@/lib/osEvents");
         emitOsEvent({
-          type: 'order.delivered',
-          source_table: 'whatsapp_orders',
+          type: "order.delivered",
+          source_table: "whatsapp_orders",
           source_id: pedido.id,
           payload: {
             order_id: pedido.id,
             total: pedido.total,
             cliente: pedido.nombre_cliente,
-            repartidor: pedido.courier || 'Motorista Móvil',
-            foto_entrega: fotoEntrega ? 'capturada' : 'sin_foto',
-            con_firma: hayFirma
-          }
+            repartidor: pedido.courier || "Motorista Móvil",
+            cobro_tipo: cobroEtiqueta,
+            foto_entrega: fotoEntrega ? "capturada" : "sin_foto",
+            con_firma: hayFirma,
+          },
         });
       } catch {}
 
+      const updatedOrder = { ...pedido, estado: "entregado", notas: nextNotas };
+      setPedido(updatedOrder);
+      setTodosLosPedidos((prev) =>
+        prev.map((item) => (item.id === pedido.id ? updatedOrder : item))
+      );
       setExito(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error confirmando entrega:", err);
+      showToast("err", err?.message || "Error al confirmar la entrega.");
     } finally {
       setActualizando(false);
+    }
+  };
+
+  // Cambio inteligente de defaults al seleccionar tipo de novedad
+  const handleSelectTipoNovedad = (nuevoTipo: string) => {
+    setTipoNovedad(nuevoTipo);
+    setBoletinarEnListaNegra(MOTIVOS_BOLETINAR_DEFAULT.has(nuevoTipo));
+    if (nuevoTipo !== "Cliente canceló / rechaza producto") {
+      setCancelarPorRechazo(false);
     }
   };
 
@@ -249,60 +528,112 @@ export function ConfirmarEntregaPage() {
     setEnviandoNovedad(true);
 
     try {
-      const notaFinal = `[NOVEDAD REPARTIDOR]: ${tipoNovedad}. ${notaNovedad}`.trim();
+      const esReprogramacion = tipoNovedad === "Cliente pide reprogramar entrega";
+      const esRechazo = tipoNovedad === "Cliente canceló / rechaza producto";
+      const prevEstado = pedido.estado || "en_camino";
 
-      await supabase
+      const extraReprog = esReprogramacion && nuevaFechaReprogramar ? ` (Reprogramar: ${nuevaFechaReprogramar})` : "";
+      const notaFinal = `[NOVEDAD REPARTIDOR ${todaySv} ${getElSalvadorTimeLabel()}]: ${tipoNovedad}${extraReprog}. ${notaNovedad}`.trim();
+      const nextNotas = pedido.notas ? `${pedido.notas} • ${notaFinal}` : notaFinal;
+
+      let nextEstado = prevEstado;
+      if (esReprogramacion && moverAProgramado) {
+        nextEstado = "programado";
+      } else if (esRechazo && cancelarPorRechazo) {
+        nextEstado = "cancelado";
+      }
+
+      const updatePayload: Record<string, any> = {
+        motivo_cancelacion: tipoNovedad,
+        notas: nextNotas,
+      };
+      if (esReprogramacion && nuevaFechaReprogramar) {
+        updatePayload.fecha_programada = nuevaFechaReprogramar;
+      }
+      if (nextEstado !== prevEstado) {
+        updatePayload.estado = nextEstado;
+      }
+
+      const { error: updErr } = await supabase
         .from("whatsapp_orders")
-        .update({
-          motivo_cancelacion: tipoNovedad,
-          notas: pedido.notas ? `${pedido.notas} • ${notaFinal}` : notaFinal
-        })
+        .update(updatePayload)
         .eq("id", pedido.id);
+
+      if (updErr) throw updErr;
+
+      // Sincronizar Kárdex si cambió el estado (ej. cancelado o programado)
+      if (nextEstado !== prevEstado) {
+        try {
+          await syncOrderInventoryOnStatusChange({
+            order: pedido,
+            prevEstado,
+            nextEstado,
+            usuario: pedido.courier || "Motorista Móvil",
+          });
+        } catch (invErr) {
+          console.warn("Error sincronizando inventario en novedad:", invErr);
+        }
+      }
 
       // Boletinar cliente en la Lista Negra / DICOM interno si el motorista lo marcó
       if (boletinarEnListaNegra && pedido.telefono) {
-        const prod = pedido.producto || (pedido.items && pedido.items.length > 0 ? pedido.items.map((i: any) => `${i.cantidad || 1}x ${i.nombre}`).join(', ') : pedido.sku) || '';
-        const dir = [pedido.direccion, pedido.municipio, pedido.departamento].filter(Boolean).join(', ') || '';
+        const prod = getOrderProductLabel(pedido);
+        const dir = [pedido.direccion, pedido.municipio, pedido.departamento].filter(Boolean).join(", ") || "";
 
         addOrUpdateBlacklist({
           telefono: pedido.telefono,
-          nombreCliente: pedido.nombre_cliente || 'Cliente en Ruta',
+          nombreCliente: pedido.nombre_cliente || "Cliente en Ruta",
           aliasNombres: pedido.nombre_cliente ? [pedido.nombre_cliente] : [],
-          motivo: `[Reporte Motorista ${pedido.courier || 'Móvil'}]: ${tipoNovedad}. ${notaNovedad}`.trim(),
-          severidad: 'alta',
-          reportadoPor: pedido.courier || 'Motorista en Ruta',
+          motivo: `[Reporte Motorista ${pedido.courier || "Móvil"}]: ${tipoNovedad}. ${notaNovedad}`.trim(),
+          severidad: "alta",
+          reportadoPor: pedido.courier || "Motorista en Ruta",
           fecha: new Date().toISOString(),
           pedidoId: pedido.id,
           producto: prod,
-          direccion: dir
+          direccion: dir,
         });
       }
 
       // Emitir evento de alerta
       try {
-        const { emitOsEvent } = await import('@/lib/osEvents');
+        const { emitOsEvent } = await import("@/lib/osEvents");
         emitOsEvent({
-          type: 'order.delivery_issue',
-          source_table: 'whatsapp_orders',
+          type: "order.delivery_issue",
+          source_table: "whatsapp_orders",
           source_id: pedido.id,
           payload: {
             order_id: pedido.id,
             cliente: pedido.nombre_cliente,
             tipo_novedad: tipoNovedad,
             notas: notaNovedad,
-            boletinado: boletinarEnListaNegra
-          }
+            nueva_fecha: esReprogramacion ? nuevaFechaReprogramar : null,
+            nuevo_estado: nextEstado,
+            boletinado: boletinarEnListaNegra,
+          },
         });
       } catch {}
 
+      const updatedOrder = { ...pedido, ...updatePayload };
+      setTodosLosPedidos((prev) =>
+        prev.map((item) => (item.id === pedido.id ? updatedOrder : item))
+      );
+
       setMostrarNovedadModal(false);
-      const msgExtra = boletinarEnListaNegra ? " y el cliente ha sido boletinado en la Lista Negra interna" : "";
-      setNovedadToast(`Novedad registrada${msgExtra}. La oficina y el Bot Todd han sido notificados.`);
-      setTimeout(() => setNovedadToast(null), 5000);
-      navigate("/repartidor");
-      await cargarDatos();
-    } catch (err) {
+      setNotaNovedad("");
+      const extras: string[] = [];
+      if (esReprogramacion && nuevaFechaReprogramar) extras.push(`reprogramado para ${nuevaFechaReprogramar}`);
+      if (nextEstado === "cancelado") extras.push("marcado como cancelado");
+      if (boletinarEnListaNegra) extras.push("boletinado en Lista Negra");
+
+      showToast(
+        "warn",
+        `Novedad registrada${extras.length ? ` (${extras.join(", ")})` : ""}. Oficina notificada.`
+      );
+      setModoRuta(true);
+      if (id) navigate("/repartidor");
+    } catch (err: any) {
       console.error("Error registrando novedad:", err);
+      showToast("err", err?.message || "No se pudo guardar la novedad.");
     } finally {
       setEnviandoNovedad(false);
     }
@@ -313,38 +644,153 @@ export function ConfirmarEntregaPage() {
   const pagaConNum = parseFloat(pagaCon || "0");
   const cambio = pagaConNum >= totalNum ? pagaConNum - totalNum : 0;
 
-  // KPIs de la Ruta
-  const pedidosRuta = useMemo(() => {
-    let list = todosLosPedidos;
-    if (courierSeleccionado !== "Todos los Couriers") {
-      list = list.filter(p => (p.courier || "Motorista Central 1") === courierSeleccionado);
-    }
-    return list;
+  // Filtrado por courier seleccionado
+  const pedidosDelCourier = useMemo(() => {
+    if (courierSeleccionado === "Todos los Couriers") return todosLosPedidos;
+    return todosLosPedidos.filter((p) => (p.courier || "Motorista Central 1") === courierSeleccionado);
   }, [todosLosPedidos, courierSeleccionado]);
 
-  const kpisRuta = useMemo(() => {
-    let entregados = 0;
-    let pendientes = 0;
-    let efectivoRecaudado = 0;
+  // Clasificación operativa del día
+  const { enRutaList, porEmpacarList, entregadosHoyList, novedadesList } = useMemo(() => {
+    const enRuta: any[] = [];
+    const porEmpacar: any[] = [];
+    const entregadosHoy: any[] = [];
+    const novedades: any[] = [];
 
-    pedidosRuta.forEach(p => {
-      if (p.estado === "entregado") {
-        entregados++;
-        efectivoRecaudado += Number(p.total || 0);
-      } else if (p.estado === "en_camino" || p.estado === "nuevo" || p.estado === "por_empacar") {
-        pendientes++;
+    for (const p of pedidosDelCourier) {
+      const est = p.estado || "";
+      if (est === "entregado") {
+        if (isDeliveredTodaySv(p, todaySv)) {
+          entregadosHoy.push(p);
+        }
+      } else if (est === "en_camino") {
+        enRuta.push(p);
+        if (hasOrderIssue(p)) novedades.push(p);
+      } else if (est === "por_empacar") {
+        porEmpacar.push(p);
+        if (hasOrderIssue(p)) novedades.push(p);
+      } else if (est === "cancelado") {
+        if (getElSalvadorDateKey(p.updated_at || p.created_at) === todaySv && hasOrderIssue(p)) {
+          novedades.push(p);
+        }
+      } else if (hasOrderIssue(p)) {
+        novedades.push(p);
       }
+    }
+
+    return {
+      enRutaList: enRuta,
+      porEmpacarList: porEmpacar,
+      entregadosHoyList: entregadosHoy,
+      novedadesList: novedades,
+    };
+  }, [pedidosDelCourier, todaySv]);
+
+  const kpisRuta = useMemo(() => {
+    let efectivoHoy = 0;
+    let transferenciasHoy = 0;
+
+    for (const p of entregadosHoyList) {
+      const monto = Number(p.total || 0);
+      const kind = getOrderCobroKind(p);
+      if (kind === "efectivo") {
+        efectivoHoy += monto;
+      } else {
+        transferenciasHoy += monto;
+      }
+    }
+
+    return {
+      enRuta: enRutaList.length,
+      porEmpacar: porEmpacarList.length,
+      entregadosHoy: entregadosHoyList.length,
+      novedades: novedadesList.length,
+      efectivoHoy,
+      transferenciasHoy,
+      totalRecaudadoHoy: efectivoHoy + transferenciasHoy,
+    };
+  }, [enRutaList, porEmpacarList, entregadosHoyList, novedadesList]);
+
+  const listaTabActiva = useMemo(() => {
+    const base =
+      rutaTab === "en_ruta"
+        ? enRutaList
+        : rutaTab === "por_empacar"
+        ? porEmpacarList
+        : rutaTab === "entregados_hoy"
+        ? entregadosHoyList
+        : novedadesList;
+
+    const q = busquedaRuta.trim().toLowerCase();
+    if (!q) return base;
+
+    return base.filter((p) => {
+      const hay = [
+        p.nombre_cliente,
+        p.telefono,
+        p.direccion,
+        p.departamento,
+        p.sku,
+        p.producto,
+        p.pedido_codigo,
+        p.id,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
     });
+  }, [rutaTab, enRutaList, porEmpacarList, entregadosHoyList, novedadesList, busquedaRuta]);
 
-    return { total: pedidosRuta.length, entregados, pendientes, efectivoRecaudado };
-  }, [pedidosRuta]);
+  const selectCourierOptions = useMemo(() => {
+    if (
+      courierSeleccionado !== "Todos los Couriers" &&
+      !courierOptions.includes(courierSeleccionado)
+    ) {
+      return [courierSeleccionado, ...courierOptions];
+    }
+    return courierOptions;
+  }, [courierOptions, courierSeleccionado]);
 
-  const telefonoLimpio = (pedido?.telefono ?? "").replace(/\D/g, "");
+  const handleCopyCuadre = async () => {
+    const labelCourier =
+      courierSeleccionado === "Todos los Couriers" ? "Todos los Motoristas" : courierSeleccionado;
+    const lines = [
+      `🛵 *CUADRE DE RUTA — ${todaySv}*`,
+      `Motorista: *${labelCourier}*`,
+      `✅ Entregados hoy: ${kpisRuta.entregadosHoy}`,
+      `💵 Efectivo a entregar a caja: *$${kpisRuta.efectivoHoy.toFixed(2)}*`,
+      `🏦 Transferencias / Prepagados: *$${kpisRuta.transferenciasHoy.toFixed(2)}*`,
+      `📦 Pendientes en ruta: ${kpisRuta.enRuta} | ⚠️ Novedades: ${kpisRuta.novedades}`,
+      "",
+      ...(entregadosHoyList.length > 0
+        ? [
+            "*Detalle de entregas:*",
+            ...entregadosHoyList.slice(0, 25).map((p, idx) => {
+              const kind = getOrderCobroKind(p);
+              const tag = kind === "efectivo" ? "Efectivo" : kind === "transferencia" ? "Transfer" : "Pagado";
+              return `${idx + 1}. ${p.nombre_cliente || "Cliente"} — $${Number(p.total || 0).toFixed(2)} (${tag})`;
+            }),
+          ]
+        : ["Sin entregas completadas hoy todavía."]),
+    ];
+
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setCuadreCopiado(true);
+      setTimeout(() => setCuadreCopiado(false), 2500);
+    } catch {
+      showToast("warn", "No se pudo copiar automáticamente al portapapeles.");
+    }
+  };
+
+  const telefonoWaPedido = formatSvWaPhone(pedido?.telefono);
+  const telHrefPedido = formatTelHref(pedido?.telefono);
   const direccionCodificada = encodeURIComponent(`${pedido?.direccion || ""}, El Salvador`);
   const urlWaze = `https://waze.com/ul?q=${direccionCodificada}`;
   const urlMaps = `https://www.google.com/maps/search/?api=1&query=${direccionCodificada}`;
   const mensajeWa = renderWhatsappTemplate(driverTemplate, pedido);
-  const urlWa = telefonoLimpio ? `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensajeWa)}` : undefined;
+  const urlWa = telefonoWaPedido ? `https://wa.me/${telefonoWaPedido}?text=${encodeURIComponent(mensajeWa)}` : undefined;
 
   if (cargando) {
     return (
@@ -362,76 +808,171 @@ export function ConfirmarEntregaPage() {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col p-4 sm:p-6 max-w-lg mx-auto">
         {/* Cabecera */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+        <div className="flex items-center justify-between gap-2 pb-4 border-b border-slate-800">
           <div>
             <div className="flex items-center gap-2">
               <Truck className="text-emerald-400" size={20} />
               <h1 className="text-lg font-black tracking-tight uppercase">Mi Ruta de Hoy</h1>
             </div>
-            <p className="text-[11px] text-slate-400 mt-0.5">Gestión de entregas y recaudación en El Salvador</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Operación El Salvador · {todaySv}
+            </p>
           </div>
 
-          <button
-            onClick={() => cargarDatos()}
-            className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300"
-            title="Recargar ruta"
-          >
-            <RotateCcw size={15} />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setMostrarCuadreModal(true)}
+              className="px-3 py-2 rounded-xl bg-emerald-600/20 border border-emerald-500/40 hover:bg-emerald-600/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition-colors"
+              title="Ver resumen de cuadre y efectivo del día"
+            >
+              <ClipboardList size={14} /> Cuadre
+            </button>
+
+            <button
+              type="button"
+              onClick={() => cargarDatos()}
+              className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300"
+              title="Recargar ruta"
+            >
+              <RotateCcw size={15} />
+            </button>
+          </div>
         </div>
 
-        {/* Banner de confirmación de novedad */}
-        {novedadToast && (
-          <div className="mt-4 p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs font-bold flex items-center justify-between gap-2">
-            <span>{novedadToast}</span>
-            <button onClick={() => setNovedadToast(null)} className="opacity-70 hover:opacity-100">
+        {/* Toast flotante / inline */}
+        {toastInfo && (
+          <div
+            className={`mt-4 p-3 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 ${
+              toastInfo.tipo === "ok"
+                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-200"
+                : toastInfo.tipo === "err"
+                ? "bg-rose-500/15 border-rose-500/40 text-rose-200"
+                : "bg-amber-500/15 border-amber-500/40 text-amber-200"
+            }`}
+          >
+            <span>{toastInfo.texto}</span>
+            <button onClick={() => setToastInfo(null)} className="opacity-70 hover:opacity-100">
               <X size={14} />
             </button>
           </div>
         )}
 
-        {/* Selector de Courier */}
-        <div className="mt-4">
-          <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Filtrar por Motorista:</label>
-          <select
-            value={courierSeleccionado}
-            onChange={e => setCourierSeleccionado(e.target.value)}
-            className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-900 text-xs font-bold outline-none text-white focus:border-emerald-500"
-          >
-            <option value="Todos los Couriers">Todos los Motoristas ({todosLosPedidos.length})</option>
-            {courierOptions.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
+        {/* Selector de Courier + Buscador */}
+        <div className="mt-4 grid grid-cols-1 gap-2.5">
+          <div>
+            <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+              Motorista / Courier:
+            </label>
+            <select
+              value={courierSeleccionado}
+              onChange={(e) => handleCourierChange(e.target.value)}
+              className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-900 text-xs font-bold outline-none text-white focus:border-emerald-500"
+            >
+              <option value="Todos los Couriers">Todos los Motoristas</option>
+              {selectCourierOptions.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              type="text"
+              value={busquedaRuta}
+              onChange={(e) => setBusquedaRuta(e.target.value)}
+              placeholder="Buscar cliente, teléfono, zona o código..."
+              className="w-full pl-9 pr-8 py-2.5 rounded-xl border border-slate-800 bg-slate-900 text-xs text-white placeholder:text-slate-500 outline-none focus:border-emerald-500"
+            />
+            {busquedaRuta && (
+              <button
+                type="button"
+                onClick={() => setBusquedaRuta("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Tarjetas de Resumen en Calle */}
-        <div className="grid grid-cols-3 gap-2.5 mt-4">
+        {/* Tarjetas de Resumen del Día */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
           <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center">
-            <span className="text-[9px] uppercase font-bold text-slate-400 block">Pendientes</span>
-            <span className="text-xl font-black text-amber-400 mt-0.5 block">{kpisRuta.pendientes}</span>
+            <span className="text-[9px] uppercase font-bold text-slate-400 block">En Ruta</span>
+            <span className="text-xl font-black text-amber-400 mt-0.5 block">{kpisRuta.enRuta}</span>
           </div>
 
           <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center">
-            <span className="text-[9px] uppercase font-bold text-slate-400 block">Entregados</span>
-            <span className="text-xl font-black text-emerald-400 mt-0.5 block">{kpisRuta.entregados}</span>
+            <span className="text-[9px] uppercase font-bold text-slate-400 block">Entregados Hoy</span>
+            <span className="text-xl font-black text-emerald-400 mt-0.5 block">{kpisRuta.entregadosHoy}</span>
           </div>
 
           <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center">
-            <span className="text-[9px] uppercase font-bold text-slate-400 block">En Mano ($)</span>
+            <span className="text-[9px] uppercase font-bold text-slate-400 block">Efectivo Mano</span>
             <span className="text-base font-black text-emerald-400 font-mono mt-1 block">
-              ${kpisRuta.efectivoRecaudado.toFixed(2)}
+              ${kpisRuta.efectivoHoy.toFixed(2)}
+            </span>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center">
+            <span className="text-[9px] uppercase font-bold text-slate-400 block">Transfer / Pagado</span>
+            <span className="text-base font-black text-sky-400 font-mono mt-1 block">
+              ${kpisRuta.transferenciasHoy.toFixed(2)}
             </span>
           </div>
         </div>
 
+        {/* Pestañas de Etapa */}
+        <div className="mt-4 grid grid-cols-4 gap-1.5 bg-slate-900 p-1 rounded-2xl border border-slate-800">
+          {[
+            { id: "en_ruta" as RutaTab, label: "En Ruta", count: enRutaList.length },
+            { id: "por_empacar" as RutaTab, label: "Empaque", count: porEmpacarList.length },
+            { id: "entregados_hoy" as RutaTab, label: "Hoy ✓", count: entregadosHoyList.length },
+            { id: "novedades" as RutaTab, label: "Novedad", count: novedadesList.length },
+          ].map((tab) => {
+            const active = rutaTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setRutaTab(tab.id)}
+                className={`py-2 px-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1 ${
+                  active
+                    ? "bg-emerald-600 text-white shadow"
+                    : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                }`}
+              >
+                <span className="truncate">{tab.label}</span>
+                <span
+                  className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono ${
+                    active ? "bg-black/25 text-white" : "bg-slate-800 text-slate-400"
+                  }`}
+                >
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
         {/* Lista de Paquetes en Ruta */}
-        <div className="mt-5 space-y-3 flex-1 pb-10">
+        <div className="mt-4 space-y-3 flex-1 pb-10">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Paquetes de la Ruta ({pedidosRuta.length})
+              {rutaTab === "en_ruta"
+                ? `Paquetes en Ruta (${listaTabActiva.length})`
+                : rutaTab === "por_empacar"
+                ? `Por Empacar (${listaTabActiva.length})`
+                : rutaTab === "entregados_hoy"
+                ? `Entregados Hoy (${listaTabActiva.length})`
+                : `Con Novedad (${listaTabActiva.length})`}
             </h2>
             <button
+              type="button"
               onClick={() => navigate("/pedidos")}
               className="text-[11px] text-emerald-400 font-bold hover:underline"
             >
@@ -439,62 +980,274 @@ export function ConfirmarEntregaPage() {
             </button>
           </div>
 
-          {pedidosRuta.length === 0 ? (
+          {listaTabActiva.length === 0 ? (
             <div className="p-8 text-center text-xs text-slate-500 bg-slate-900/60 rounded-2xl border border-slate-800">
-              No hay paquetes asignados para este motorista hoy.
+              {busquedaRuta
+                ? "No hay paquetes que coincidan con tu búsqueda."
+                : rutaTab === "en_ruta"
+                ? "No hay paquetes pendientes en ruta para este motorista."
+                : rutaTab === "por_empacar"
+                ? "No hay pedidos por empacar asignados."
+                : rutaTab === "entregados_hoy"
+                ? "Aún no se registran entregas hoy para este motorista."
+                : "Sin novedades registradas."}
             </div>
           ) : (
-            pedidosRuta.map(p => {
+            listaTabActiva.map((p) => {
               const entregado = p.estado === "entregado";
+              const novedad = hasOrderIssue(p);
+              const prepagado = isOrderPrepaid(p);
+              const cobroKind = getOrderCobroKind(p);
+              const risk = evaluateCustomerRisk(p.telefono, todosLosPedidos);
+              const avisado =
+                notificadosWaIds[p.id] ||
+                String(p.notas || "").includes("[Aviso llegada");
+              const wazeQuickUrl = `https://waze.com/ul?q=${encodeURIComponent(
+                `${p.direccion || ""}, El Salvador`
+              )}`;
 
               return (
                 <div
                   key={p.id}
-                  onClick={() => {
-                    setPedido(p);
-                    setModoRuta(false);
-                    setExito(false);
-                  }}
+                  onClick={() => openOrderForDelivery(p)}
                   className={`p-4 rounded-2xl border cursor-pointer transition-all ${
-                    entregado 
-                      ? 'bg-slate-900/40 border-slate-800 opacity-60' 
-                      : 'bg-slate-900 border-slate-800 hover:border-emerald-500/50 shadow-lg'
+                    entregado
+                      ? "bg-slate-900/50 border-slate-800/80"
+                      : novedad
+                      ? "bg-slate-900 border-amber-500/40 shadow-lg"
+                      : "bg-slate-900 border-slate-800 hover:border-emerald-500/50 shadow-lg"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="text-[10px] font-mono font-bold text-slate-400">#{p.id.slice(0, 8).toUpperCase()}</span>
-                      <h3 className="font-bold text-sm text-white leading-tight mt-0.5">{p.nombre_cliente || "Sin nombre"}</h3>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-mono font-bold text-slate-400">
+                          {p.pedido_codigo || `#${String(p.id).slice(0, 8).toUpperCase()}`}
+                        </span>
+                        {risk.nivelRiesgo === "rojo" && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-rose-500/20 border border-rose-500/40 text-rose-300 text-[9px] font-bold">
+                            ⚠️ Riesgo Alto
+                          </span>
+                        )}
+                        {risk.nivelRiesgo === "amarillo" && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-bold">
+                            Precaución
+                          </span>
+                        )}
+                        {novedad && !entregado && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[9px] font-bold">
+                            Novedad
+                          </span>
+                        )}
+                      </div>
+                      <h3 className="font-bold text-sm text-white leading-tight mt-1 truncate">
+                        {p.nombre_cliente || "Sin nombre"}
+                      </h3>
                     </div>
 
-                    <span className="text-base font-black font-mono text-emerald-400">
-                      ${Number(p.total || 0).toFixed(2)}
-                    </span>
+                    <div className="text-right shrink-0">
+                      <span className="text-base font-black font-mono text-emerald-400 block">
+                        ${Number(p.total || 0).toFixed(2)}
+                      </span>
+                      <span className="text-[9px] font-bold text-slate-400">
+                        {entregado
+                          ? cobroKind === "efectivo"
+                            ? "💵 Efectivo"
+                            : cobroKind === "transferencia"
+                            ? "🏦 Transfer."
+                            : "✓ Prepagado"
+                          : prepagado
+                          ? "✓ Ya pagado"
+                          : "💰 Contra entrega"}
+                      </span>
+                    </div>
                   </div>
 
                   <p className="text-xs text-slate-300 mt-2 flex items-start gap-1.5 leading-snug">
                     <MapPin size={13} className="text-slate-400 shrink-0 mt-0.5" />
-                    <span>{p.direccion || "Sin dirección"}</span>
+                    <span>
+                      {p.direccion || "Sin dirección"}
+                      {p.departamento ? ` · ${p.departamento}` : ""}
+                    </span>
                   </p>
 
-                  <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between text-xs">
-                    <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
-                      <Package size={12} /> {p.sku || "Producto"}
+                  <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between gap-2 text-xs">
+                    <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1 truncate">
+                      <Package size={12} className="shrink-0" />
+                      <span className="truncate">{getOrderProductLabel(p)}</span>
                     </span>
 
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      entregado 
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                        : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                    }`}>
-                      {entregado ? "✓ Entregado" : "Pendiente"}
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      {!entregado && p.telefono && (
+                        <button
+                          type="button"
+                          disabled={sendingWaId === p.id}
+                          onClick={() => handleAvisarLlegadaEvolution(p)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 transition-colors ${
+                            avisado
+                              ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
+                              : "bg-slate-800 border-slate-700 hover:bg-emerald-600 hover:border-emerald-500 text-slate-200 hover:text-white"
+                          }`}
+                          title="Enviar aviso automático de llegada por WhatsApp"
+                        >
+                          {sendingWaId === p.id ? (
+                            <Loader2 size={11} className="animate-spin" />
+                          ) : avisado ? (
+                            <Check size={11} />
+                          ) : (
+                            <Send size={11} />
+                          )}
+                          {avisado ? "Avisado" : "Voy llegando"}
+                        </button>
+                      )}
+
+                      {!entregado && p.direccion && (
+                        <a
+                          href={wazeQuickUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="p-1.5 rounded-lg bg-sky-600/20 border border-sky-500/30 text-sky-300 hover:bg-sky-600/30"
+                          title="Abrir en Waze"
+                        >
+                          <Compass size={12} />
+                        </a>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
             })
           )}
         </div>
+
+        {/* MODAL: CUADRE / CIERRE DEL DÍA */}
+        {mostrarCuadreModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+            onClick={() => setMostrarCuadreModal(false)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 text-white shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
+            >
+              <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
+                <div className="flex items-center gap-2 text-emerald-400">
+                  <ClipboardList size={18} />
+                  <div>
+                    <h3 className="font-bold text-sm text-white">Cuadre de Ruta · {todaySv}</h3>
+                    <p className="text-[10px] text-slate-400">
+                      {courierSeleccionado === "Todos los Couriers"
+                        ? "Todos los motoristas"
+                        : courierSeleccionado}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMostrarCuadreModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-4 space-y-3 overflow-y-auto">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="p-3 rounded-2xl bg-emerald-950/30 border border-emerald-500/30">
+                    <span className="text-[10px] uppercase font-bold text-emerald-400 block">
+                      💵 Efectivo a Entregar
+                    </span>
+                    <span className="text-2xl font-black font-mono text-white mt-0.5 block">
+                      ${kpisRuta.efectivoHoy.toFixed(2)}
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-sky-950/30 border border-sky-500/30">
+                    <span className="text-[10px] uppercase font-bold text-sky-400 block">
+                      🏦 Transferencias / Ya Pagado
+                    </span>
+                    <span className="text-2xl font-black font-mono text-white mt-0.5 block">
+                      ${kpisRuta.transferenciasHoy.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center bg-slate-950 p-3 rounded-2xl border border-slate-800">
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Entregados</span>
+                    <span className="text-base font-black text-emerald-400">{kpisRuta.entregadosHoy}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">En Ruta</span>
+                    <span className="text-base font-black text-amber-400">{kpisRuta.enRuta}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Novedades</span>
+                    <span className="text-base font-black text-rose-400">{kpisRuta.novedades}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                    Entregas Completadas Hoy ({entregadosHoyList.length})
+                  </span>
+                  {entregadosHoyList.length === 0 ? (
+                    <p className="text-xs text-slate-500 py-4 text-center bg-slate-950 rounded-xl border border-slate-800">
+                      Todavía no hay paquetes entregados hoy.
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                      {entregadosHoyList.map((p) => {
+                        const kind = getOrderCobroKind(p);
+                        return (
+                          <div
+                            key={p.id}
+                            className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-bold text-white truncate">
+                                {p.nombre_cliente || "Cliente"}
+                              </p>
+                              <p className="text-[10px] text-slate-400 truncate">
+                                {p.pedido_codigo || `#${String(p.id).slice(0, 8)}`} ·{" "}
+                                {kind === "efectivo"
+                                  ? "Efectivo"
+                                  : kind === "transferencia"
+                                  ? "Transferencia"
+                                  : "Prepagado"}
+                              </p>
+                            </div>
+                            <span className="font-mono font-bold text-emerald-400 shrink-0">
+                              ${Number(p.total || 0).toFixed(2)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-slate-800 bg-slate-950 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMostrarCuadreModal(false)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-800 text-xs font-bold text-slate-400 hover:text-white"
+                >
+                  Cerrar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyCuadre}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  {cuadreCopiado ? <Check size={14} /> : <Copy size={14} />}
+                  {cuadreCopiado ? "¡Resumen Copiado!" : "Copiar Resumen de Cuadre"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -507,16 +1260,29 @@ export function ConfirmarEntregaPage() {
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-rose-500 p-6 text-center max-w-md mx-auto">
         <AlertTriangle className="w-14 h-14 mb-3" />
         <h1 className="text-xl font-black">Pedido no encontrado</h1>
-        <p className="text-xs mt-1 text-slate-400">El código escaneado puede ser inválido o el pedido ya fue retirado.</p>
-        <button onClick={() => setModoRuta(true)} className="mt-5 px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs font-bold">
+        <p className="text-xs mt-1 text-slate-400">
+          El código escaneado puede ser inválido o el pedido ya fue retirado.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setModoRuta(true);
+            if (id) navigate("/repartidor");
+          }}
+          className="mt-5 px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs font-bold"
+        >
           Ver Mi Ruta del Día
         </button>
       </div>
     );
   }
 
-  const esContraEntrega = (pedido.metodo_pago ?? "").toLowerCase().includes("contra");
+  const esPrepagado = isOrderPrepaid(pedido);
+  const esContraEntrega = !esPrepagado;
   const yaEntregado = pedido.estado === "entregado";
+  const yaAvisado =
+    notificadosWaIds[pedido.id] || String(pedido.notas || "").includes("[Aviso llegada");
+  const riskPedido = evaluateCustomerRisk(pedido.telefono, todosLosPedidos);
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-start p-4 sm:p-6 pb-20">
@@ -534,14 +1300,38 @@ export function ConfirmarEntregaPage() {
         {/* Cabecera Móvil */}
         <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
           <button
-            onClick={() => setModoRuta(true)}
+            type="button"
+            onClick={() => {
+              setModoRuta(true);
+              if (id) navigate("/repartidor");
+            }}
             className="p-1.5 rounded-xl hover:bg-slate-900 text-slate-400 flex items-center gap-1 text-xs font-bold"
           >
             <ArrowLeft size={16} /> Volver a Ruta
           </button>
 
-          <span className="font-mono font-bold text-xs text-slate-400">#{pedido.id.slice(0, 8).toUpperCase()}</span>
+          <span className="font-mono font-bold text-xs text-slate-400">
+            {pedido.pedido_codigo || `#${String(pedido.id).slice(0, 8).toUpperCase()}`}
+          </span>
         </div>
+
+        {/* Toast inline en vista de entrega */}
+        {toastInfo && (
+          <div
+            className={`mx-4 mt-4 p-3 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 ${
+              toastInfo.tipo === "ok"
+                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-200"
+                : toastInfo.tipo === "err"
+                ? "bg-rose-500/15 border-rose-500/40 text-rose-200"
+                : "bg-amber-500/15 border-amber-500/40 text-amber-200"
+            }`}
+          >
+            <span>{toastInfo.texto}</span>
+            <button onClick={() => setToastInfo(null)} className="opacity-70 hover:opacity-100">
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         {/* PANTALLA DE ÉXITO */}
         {exito || yaEntregado ? (
@@ -553,8 +1343,8 @@ export function ConfirmarEntregaPage() {
               {exito ? "¡Entrega Confirmada!" : "Pedido Ya Entregado"}
             </h2>
             <p className="text-xs text-slate-400 mt-2 mb-6 max-w-xs">
-              {exito 
-                ? "El paquete se marcó como entregado y el cobro ha sido registrado en el sistema." 
+              {exito
+                ? `Entrega registrada (${esPrepagado ? "Prepagado" : cobroTipo === "transferencia" ? "Transferencia" : "Efectivo"}).`
                 : "Este pedido ya fue completado previamente."}
             </p>
 
@@ -564,8 +1354,13 @@ export function ConfirmarEntregaPage() {
               </div>
             )}
 
-            <button 
-              onClick={() => setModoRuta(true)} 
+            <button
+              type="button"
+              onClick={() => {
+                resetDeliveryFormState();
+                setModoRuta(true);
+                if (id) navigate("/repartidor");
+              }}
               className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 rounded-2xl transition-colors text-xs uppercase tracking-wider"
             >
               Ir al Siguiente Paquete →
@@ -574,41 +1369,93 @@ export function ConfirmarEntregaPage() {
         ) : (
           /* FORMULARIO DE ACCIÓN EN CALLE */
           <div className="p-5 space-y-4">
+            {/* Alerta de Riesgo si aplica */}
+            {riskPedido.nivelRiesgo === "rojo" && (
+              <div className="p-3 rounded-2xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs flex items-start gap-2">
+                <ShieldAlert size={16} className="text-rose-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold block">Cliente con Alerta / Lista Negra</span>
+                  <span className="text-[11px] opacity-90">
+                    {riskPedido.motivoListaNegra || "Verifica pago completo antes de entregar el paquete."}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Recuadro de Cobro Destacado */}
             <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-center">
-              <span className={`text-[10px] font-bold uppercase tracking-widest ${esContraEntrega ? 'text-amber-400' : 'text-emerald-400'}`}>
-                {esContraEntrega ? "💰 Cobrar al Entregar en Efectivo" : "✓ Pedido Ya Pagado"}
+              <span
+                className={`text-[10px] font-bold uppercase tracking-widest ${
+                  esContraEntrega ? "text-amber-400" : "text-emerald-400"
+                }`}
+              >
+                {esContraEntrega ? "💰 Cobrar Contra Entrega" : "✓ Pedido Ya Pagado / Transferencia Previa"}
               </span>
               <div className="text-3xl font-black font-mono mt-1 text-white">
-                ${Number(pedido.total || 0).toFixed(2)} <span className="text-xs font-normal text-slate-500">USD</span>
+                ${Number(pedido.total || 0).toFixed(2)}{" "}
+                <span className="text-xs font-normal text-slate-500">USD</span>
               </div>
 
-              {/* Botón de Calculadora de Cambio */}
               {esContraEntrega && (
-                <button
-                  type="button"
-                  onClick={() => setMostrarCalculadora(!mostrarCalculadora)}
-                  className="mt-2 text-xs font-bold text-emerald-400 hover:underline flex items-center justify-center gap-1 mx-auto"
-                >
-                  <Calculator size={13} /> {mostrarCalculadora ? "Ocultar Calculadora" : "Calcular Cambio / Vuelto"}
-                </button>
+                <>
+                  <div className="grid grid-cols-2 gap-1.5 mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setCobroTipo("efectivo")}
+                      className={`py-2 px-2.5 rounded-xl text-[11px] font-bold border flex items-center justify-center gap-1.5 transition-colors ${
+                        cobroTipo === "efectivo"
+                          ? "bg-emerald-600/20 border-emerald-500 text-emerald-300"
+                          : "bg-slate-900 border-slate-800 text-slate-400"
+                      }`}
+                    >
+                      <Wallet size={13} /> Efectivo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCobroTipo("transferencia");
+                        setMostrarCalculadora(false);
+                      }}
+                      className={`py-2 px-2.5 rounded-xl text-[11px] font-bold border flex items-center justify-center gap-1.5 transition-colors ${
+                        cobroTipo === "transferencia"
+                          ? "bg-sky-600/20 border-sky-500 text-sky-300"
+                          : "bg-slate-900 border-slate-800 text-slate-400"
+                      }`}
+                    >
+                      <Landmark size={13} /> Transferencia
+                    </button>
+                  </div>
+
+                  {cobroTipo === "efectivo" && (
+                    <button
+                      type="button"
+                      onClick={() => setMostrarCalculadora(!mostrarCalculadora)}
+                      className="mt-2.5 text-xs font-bold text-emerald-400 hover:underline flex items-center justify-center gap-1 mx-auto"
+                    >
+                      <Calculator size={13} />{" "}
+                      {mostrarCalculadora ? "Ocultar Calculadora" : "Calcular Cambio / Vuelto"}
+                    </button>
+                  )}
+                </>
               )}
             </div>
 
             {/* Calculadora de Vuelto Desplegable */}
-            {mostrarCalculadora && esContraEntrega && (
-              <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2 animate-in slide-in-from-top duration-150">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">¿Con cuánto paga el cliente?</span>
+            {mostrarCalculadora && esContraEntrega && cobroTipo === "efectivo" && (
+              <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                  ¿Con cuánto paga el cliente?
+                </span>
                 <div className="grid grid-cols-4 gap-1.5">
-                  {[20, 25, 30, 50].map(monto => (
+                  {[5, 10, 20, 50].map((monto) => (
                     <button
                       key={monto}
                       type="button"
                       onClick={() => setPagaCon(String(monto))}
                       className={`py-1.5 rounded-lg text-xs font-mono font-bold border ${
-                        pagaCon === String(monto) 
-                          ? 'bg-emerald-600 border-emerald-500 text-white' 
-                          : 'bg-slate-900 border-slate-800 text-slate-300'
+                        pagaCon === String(monto)
+                          ? "bg-emerald-600 border-emerald-500 text-white"
+                          : "bg-slate-900 border-slate-800 text-slate-300"
                       }`}
                     >
                       ${monto}
@@ -622,16 +1469,18 @@ export function ConfirmarEntregaPage() {
                     step="0.50"
                     placeholder="Otro valor (ej. 100)"
                     value={pagaCon}
-                    onChange={e => setPagaCon(e.target.value)}
+                    onChange={(e) => setPagaCon(e.target.value)}
                     className="flex-1 p-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold outline-none text-white focus:border-emerald-500"
                   />
                 </div>
 
                 {pagaConNum > 0 && (
                   <div className="p-2.5 bg-emerald-950/30 border border-emerald-500/30 rounded-xl text-center">
-                    <span className="text-[10px] uppercase font-bold text-emerald-400 block">Dar de Cambio / Vuelto:</span>
+                    <span className="text-[10px] uppercase font-bold text-emerald-400 block">
+                      {pagaConNum >= totalNum ? "Dar de Cambio / Vuelto:" : "Falta por completar:"}
+                    </span>
                     <span className="text-2xl font-black font-mono text-emerald-400">
-                      ${cambio.toFixed(2)} USD
+                      ${Math.abs(pagaConNum >= totalNum ? cambio : totalNum - pagaConNum).toFixed(2)} USD
                     </span>
                   </div>
                 )}
@@ -646,7 +1495,12 @@ export function ConfirmarEntregaPage() {
                 </div>
                 <div className="min-w-0">
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Cliente</span>
-                  <p className="text-sm font-bold text-white truncate">{pedido.nombre_cliente || "Sin nombre"}</p>
+                  <p className="text-sm font-bold text-white truncate">
+                    {pedido.nombre_cliente || "Sin nombre"}
+                  </p>
+                  {pedido.telefono && (
+                    <span className="text-[11px] font-mono text-slate-400">{pedido.telefono}</span>
+                  )}
                 </div>
               </div>
 
@@ -655,10 +1509,16 @@ export function ConfirmarEntregaPage() {
                   <MapPin size={16} />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Dirección de Entrega</span>
-                  <p className="text-xs text-slate-200 leading-snug">{pedido.direccion || "Sin dirección registrada"}</p>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                    Dirección de Entrega
+                  </span>
+                  <p className="text-xs text-slate-200 leading-snug">
+                    {pedido.direccion || "Sin dirección registrada"}
+                  </p>
                   {pedido.departamento && (
-                    <span className="text-[10px] text-emerald-400 font-semibold block mt-0.5">📍 {pedido.departamento}</span>
+                    <span className="text-[10px] text-emerald-400 font-semibold block mt-0.5">
+                      📍 {pedido.departamento}
+                    </span>
                   )}
                 </div>
               </div>
@@ -668,15 +1528,21 @@ export function ConfirmarEntregaPage() {
                   <Package size={16} />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Producto / SKU</span>
-                  <p className="text-xs font-mono font-bold text-white truncate">{pedido.sku || "Sin SKU"}</p>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                    Producto / SKU
+                  </span>
+                  <p className="text-xs font-mono font-bold text-white break-words">
+                    {getOrderProductLabel(pedido)}
+                  </p>
                 </div>
               </div>
 
               {pedido.notas && (
-                <div className="p-2 bg-slate-900 rounded-xl border border-slate-800 text-xs text-slate-300">
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Nota del pedido:</span>
-                  <p className="text-[11px] mt-0.5 italic">{pedido.notas}</p>
+                <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-xs text-slate-300">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">
+                    Nota del pedido:
+                  </span>
+                  <p className="text-[11px] mt-0.5 italic break-words">{pedido.notas}</p>
                 </div>
               )}
             </div>
@@ -702,40 +1568,66 @@ export function ConfirmarEntregaPage() {
               </a>
             </div>
 
-            {/* BOTONES DE COMUNICACIÓN (LLAMADA Y WHATSAPP) */}
-            <div className="grid grid-cols-2 gap-2">
-              {telefonoLimpio ? (
-                <a
-                  href={`tel:${telefonoLimpio}`}
-                  className="py-3 px-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 transition-colors"
-                >
-                  <Phone size={16} className="text-emerald-400" /> Llamar Cliente
-                </a>
-              ) : (
-                <div className="py-3 px-3 rounded-2xl bg-slate-800/50 text-slate-500 font-bold text-xs text-center border border-slate-800">
-                  Sin Teléfono
-                </div>
-              )}
+            {/* BOTONES DE COMUNICACIÓN: LLAMADA, AVISO EVOLUTION Y WA MANUAL */}
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                {telHrefPedido ? (
+                  <a
+                    href={telHrefPedido}
+                    className="py-3 px-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 transition-colors"
+                  >
+                    <Phone size={16} className="text-emerald-400" /> Llamar Cliente
+                  </a>
+                ) : (
+                  <div className="py-3 px-3 rounded-2xl bg-slate-800/50 text-slate-500 font-bold text-xs text-center border border-slate-800">
+                    Sin Teléfono
+                  </div>
+                )}
 
-              {urlWa ? (
+                {pedido.telefono ? (
+                  <button
+                    type="button"
+                    disabled={sendingWaId === pedido.id}
+                    onClick={() => handleAvisarLlegadaEvolution(pedido)}
+                    className={`py-3 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 shadow transition-colors ${
+                      yaAvisado
+                        ? "bg-emerald-600/20 border border-emerald-500/40 text-emerald-300"
+                        : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                    }`}
+                  >
+                    {sendingWaId === pedido.id ? (
+                      <Loader2 size={15} className="animate-spin" />
+                    ) : yaAvisado ? (
+                      <Check size={15} />
+                    ) : (
+                      <Send size={15} />
+                    )}
+                    {yaAvisado ? "Llegada Avisada" : "Avisar Llegada"}
+                  </button>
+                ) : (
+                  <div className="py-3 px-3 rounded-2xl bg-slate-800/50 text-slate-500 font-bold text-xs text-center border border-slate-800">
+                    Sin WhatsApp
+                  </div>
+                )}
+              </div>
+
+              {urlWa && (
                 <a
                   href={urlWa}
                   target="_blank"
                   rel="noreferrer"
-                  className="py-3 px-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow transition-colors"
+                  className="w-full py-2 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 font-semibold text-[11px] flex items-center justify-center gap-1.5 border border-slate-800 transition-colors"
                 >
-                  <MessageCircle size={16} /> WhatsApp
+                  <MessageCircle size={13} className="text-emerald-400" /> Abrir chat en app de WhatsApp (manual)
                 </a>
-              ) : (
-                <div className="py-3 px-3 rounded-2xl bg-slate-800/50 text-slate-500 font-bold text-xs text-center border border-slate-800">
-                  Sin WhatsApp
-                </div>
               )}
             </div>
 
             {/* PRUEBA DE ENTREGA: FOTO Y FIRMA */}
             <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-3">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Prueba de Entrega (Opcional):</span>
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                Prueba de Entrega (Opcional):
+              </span>
 
               <div className="flex gap-2">
                 <button
@@ -743,7 +1635,8 @@ export function ConfirmarEntregaPage() {
                   onClick={() => fileInputRef.current?.click()}
                   className="flex-1 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-xs font-bold text-slate-200 flex items-center justify-center gap-1.5"
                 >
-                  <Camera size={14} className="text-emerald-400" /> {fotoEntrega ? "Foto Tomada ✓" : "Tomar Foto"}
+                  <Camera size={14} className="text-emerald-400" />{" "}
+                  {fotoEntrega ? "Foto Tomada ✓" : "Tomar Foto"}
                 </button>
 
                 <button
@@ -751,19 +1644,38 @@ export function ConfirmarEntregaPage() {
                   onClick={() => setMostrarFirma(!mostrarFirma)}
                   className="flex-1 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-xs font-bold text-slate-200 flex items-center justify-center gap-1.5"
                 >
-                  <Edit3 size={14} className="text-indigo-400" /> {hayFirma ? "Firma Lista ✓" : "Firma en Pantalla"}
+                  <Edit3 size={14} className="text-indigo-400" />{" "}
+                  {hayFirma ? "Firma Lista ✓" : "Firma en Pantalla"}
                 </button>
               </div>
 
               {fotoEntrega && (
-                <div className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-800">
-                  <img src={fotoEntrega} alt="Preview" className="w-full h-full object-cover" />
-                  <button
-                    onClick={() => setFotoEntrega(null)}
-                    className="absolute top-1 right-1 p-1 bg-black/70 rounded-full text-white"
-                  >
-                    <X size={12} />
-                  </button>
+                <div className="flex items-center gap-3 pt-1">
+                  <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-800 shrink-0">
+                    <img src={fotoEntrega} alt="Preview" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFotoEntrega(null);
+                        setEnviarFotoCliente(false);
+                      }}
+                      className="absolute top-1 right-1 p-1 bg-black/70 rounded-full text-white"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+
+                  {pedido.telefono && (
+                    <label className="flex items-start gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={enviarFotoCliente}
+                        onChange={(e) => setEnviarFotoCliente(e.target.checked)}
+                        className="mt-0.5 accent-emerald-500 rounded cursor-pointer"
+                      />
+                      <span>Enviar esta foto como comprobante al cliente por WhatsApp</span>
+                    </label>
+                  )}
                 </div>
               )}
 
@@ -771,7 +1683,9 @@ export function ConfirmarEntregaPage() {
                 <div className="space-y-2 pt-1 border-t border-slate-800">
                   <div className="flex justify-between items-center text-[10px] text-slate-400 font-bold">
                     <span>El cliente firma aquí con el dedo:</span>
-                    <button onClick={limpiarFirma} className="text-rose-400 hover:underline">Borrar trazo</button>
+                    <button type="button" onClick={limpiarFirma} className="text-rose-400 hover:underline">
+                      Borrar trazo
+                    </button>
                   </div>
                   <canvas
                     ref={canvasRef}
@@ -784,7 +1698,7 @@ export function ConfirmarEntregaPage() {
                     onTouchStart={startDrawing}
                     onTouchMove={draw}
                     onTouchEnd={stopDrawing}
-                    className="w-full bg-white rounded-xl touch-none border border-slate-700 cursor-crosshair"
+                    className="w-full h-[130px] bg-white rounded-xl touch-none border border-slate-700 cursor-crosshair"
                   />
                 </div>
               )}
@@ -811,7 +1725,10 @@ export function ConfirmarEntregaPage() {
               {/* BOTÓN DE NOVEDAD / NO ENTREGADO */}
               <button
                 type="button"
-                onClick={() => setMostrarNovedadModal(true)}
+                onClick={() => {
+                  handleSelectTipoNovedad("Cliente no contestó llamadas/mensajes");
+                  setMostrarNovedadModal(true);
+                }}
                 className="w-full py-2.5 rounded-xl border border-rose-500/30 hover:bg-rose-500/10 text-rose-400 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
               >
                 <AlertTriangle size={14} /> Reportar Novedad / Reintento de Entrega
@@ -823,14 +1740,22 @@ export function ConfirmarEntregaPage() {
 
       {/* MODAL: REPORTAR NOVEDAD EN RUTA */}
       {mostrarNovedadModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setMostrarNovedadModal(false)}>
-          <div onClick={e => e.stopPropagation()} className="w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900 text-white shadow-2xl overflow-hidden">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => setMostrarNovedadModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900 text-white shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
+          >
             <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
               <div className="flex items-center gap-2 text-rose-400">
                 <AlertTriangle size={18} />
                 <h3 className="font-bold text-sm">Reportar Novedad en Ruta</h3>
               </div>
-              <button onClick={() => setMostrarNovedadModal(false)} className="p-1 rounded-lg"><X size={16} /></button>
+              <button type="button" onClick={() => setMostrarNovedadModal(false)} className="p-1 rounded-lg">
+                <X size={16} />
+              </button>
             </div>
 
             <div className="p-5 space-y-4">
@@ -840,16 +1765,90 @@ export function ConfirmarEntregaPage() {
                 </label>
                 <select
                   value={tipoNovedad}
-                  onChange={e => setTipoNovedad(e.target.value)}
+                  onChange={(e) => handleSelectTipoNovedad(e.target.value)}
                   className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-xs font-semibold outline-none text-white focus:border-rose-500"
                 >
-                  <option value="Cliente no contestó llamadas/mensajes">Cliente no contestó llamadas/mensajes</option>
-                  <option value="Cliente pide reprogramar entrega">Cliente pide reprogramar entrega</option>
-                  <option value="Cliente sin efectivo completo">Cliente sin efectivo completo</option>
-                  <option value="Dirección incorrecta o inaccesible">Dirección incorrecta o inaccesible</option>
-                  <option value="Cliente canceló / rechaza producto">Cliente canceló / rechaza producto</option>
+                  <option value="Cliente no contestó llamadas/mensajes">
+                    Cliente no contestó llamadas/mensajes
+                  </option>
+                  <option value="Cliente pide reprogramar entrega">
+                    Cliente pide reprogramar entrega
+                  </option>
+                  <option value="Cliente sin efectivo completo">
+                    Cliente sin efectivo completo
+                  </option>
+                  <option value="Dirección incorrecta o inaccesible">
+                    Dirección incorrecta o inaccesible
+                  </option>
+                  <option value="Cliente canceló / rechaza producto">
+                    Cliente canceló / rechaza producto
+                  </option>
                 </select>
               </div>
+
+              {/* Reprogramar fecha si el cliente lo solicitó */}
+              {tipoNovedad === "Cliente pide reprogramar entrega" && (
+                <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 space-y-2.5">
+                  <div className="flex items-center gap-1.5 text-indigo-300 text-xs font-bold">
+                    <Calendar size={14} /> Nueva fecha acordada
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setNuevaFechaReprogramar(addDaysSv(1))}
+                      className={`py-1.5 rounded-lg text-[11px] font-bold border ${
+                        nuevaFechaReprogramar === addDaysSv(1)
+                          ? "bg-indigo-600 border-indigo-500 text-white"
+                          : "bg-slate-950 border-slate-800 text-slate-300"
+                      }`}
+                    >
+                      Mañana
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNuevaFechaReprogramar(addDaysSv(2))}
+                      className={`py-1.5 rounded-lg text-[11px] font-bold border ${
+                        nuevaFechaReprogramar === addDaysSv(2)
+                          ? "bg-indigo-600 border-indigo-500 text-white"
+                          : "bg-slate-950 border-slate-800 text-slate-300"
+                      }`}
+                    >
+                      Pasado mañana
+                    </button>
+                  </div>
+                  <input
+                    type="date"
+                    value={nuevaFechaReprogramar}
+                    onChange={(e) => setNuevaFechaReprogramar(e.target.value)}
+                    className="w-full p-2 rounded-xl border border-slate-800 bg-slate-950 text-xs text-white outline-none focus:border-indigo-500"
+                  />
+                  <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={moverAProgramado}
+                      onChange={(e) => setMoverAProgramado(e.target.checked)}
+                      className="accent-indigo-500 rounded cursor-pointer"
+                    />
+                    Mover a columna "Encargos / Programados"
+                  </label>
+                </div>
+              )}
+
+              {/* Opción de cancelar en Kárdex si rechazó en la puerta */}
+              {tipoNovedad === "Cliente canceló / rechaza producto" && (
+                <label className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-2.5 text-[11px] text-rose-200 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={cancelarPorRechazo}
+                    onChange={(e) => setCancelarPorRechazo(e.target.checked)}
+                    className="mt-0.5 accent-rose-500 rounded cursor-pointer"
+                  />
+                  <span>
+                    <strong className="block text-white">Marcar pedido como Cancelado ahora</strong>
+                    Libera automáticamente las unidades reservadas de vuelta al Kárdex.
+                  </span>
+                </label>
+              )}
 
               <div>
                 <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1.5">
@@ -858,25 +1857,26 @@ export function ConfirmarEntregaPage() {
                 <textarea
                   rows={2}
                   value={notaNovedad}
-                  onChange={e => setNotaNovedad(e.target.value)}
+                  onChange={(e) => setNotaNovedad(e.target.value)}
                   placeholder="Ej. Estuve 15 minutos en el portón pero no salió nadie..."
                   className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-xs outline-none text-white focus:border-rose-500 resize-none"
                 />
               </div>
 
               {/* Checkbox para boletinar en la Lista Negra / DICOM */}
-              <div 
+              <div
                 onClick={() => setBoletinarEnListaNegra(!boletinarEnListaNegra)}
                 className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-start gap-2.5 select-none ${
-                  boletinarEnListaNegra 
-                    ? 'border-rose-500/50 bg-rose-500/10 text-rose-300' 
-                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700'
+                  boletinarEnListaNegra
+                    ? "border-rose-500/50 bg-rose-500/10 text-rose-300"
+                    : "border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700"
                 }`}
               >
                 <input
                   type="checkbox"
                   checked={boletinarEnListaNegra}
-                  onChange={e => setBoletinarEnListaNegra(e.target.checked)}
+                  onChange={(e) => setBoletinarEnListaNegra(e.target.checked)}
+                  onClick={(e) => e.stopPropagation()}
                   className="mt-0.5 rounded text-rose-600 focus:ring-0 accent-rose-600 cursor-pointer"
                 />
                 <div>

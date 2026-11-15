@@ -5,6 +5,12 @@ const VAULT_DOC_TITLE = '__SYSTEM_CONTENT_VAULT_V1__';
 const DIST_CONFIG_DOC_TITLE = '__SYSTEM_SOCIAL_DIST_CONFIG_V1__';
 const CATALOG_CFG_DOC_TITLE = '__SYSTEM_TODD_CATALOG_SETTINGS_V1__';
 const STORAGE_BUCKET = 'content-vault';
+const ALLOWED_BUCKETS = new Set(['content-vault', 'orders-evidence']);
+
+function resolveAllowedBucket(rawBucket?: unknown): string {
+  const clean = String(rawBucket || '').trim().toLowerCase();
+  return ALLOWED_BUCKETS.has(clean) ? clean : STORAGE_BUCKET;
+}
 
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -81,20 +87,24 @@ async function writeDocJson(supabase: any, titulo: string, payload: unknown, exi
   }
 }
 
-async function ensureStorageBucket(supabase: any): Promise<{ ok: boolean; error?: string }> {
+async function ensureStorageBucket(
+  supabase: any,
+  bucketName: string = STORAGE_BUCKET
+): Promise<{ ok: boolean; error?: string }> {
+  const targetBucket = resolveAllowedBucket(bucketName);
   try {
-    const { data: existing, error: getErr } = await supabase.storage.getBucket(STORAGE_BUCKET);
+    const { data: existing, error: getErr } = await supabase.storage.getBucket(targetBucket);
     if (existing && !getErr) {
       return { ok: true };
     }
 
     const { data: buckets, error: listErr } = await supabase.storage.listBuckets();
     if (!listErr && Array.isArray(buckets)) {
-      const exists = buckets.some((b: any) => b.name === STORAGE_BUCKET || b.id === STORAGE_BUCKET);
+      const exists = buckets.some((b: any) => b.name === targetBucket || b.id === targetBucket);
       if (exists) return { ok: true };
     }
 
-    const { error: createErr } = await supabase.storage.createBucket(STORAGE_BUCKET, {
+    const { error: createErr } = await supabase.storage.createBucket(targetBucket, {
       public: true,
     });
 
@@ -506,46 +516,51 @@ export default async function handler(req: any, res: any) {
 
     /* 2. ASEGURAR BUCKET DE SUPABASE STORAGE */
     if (action === 'ensure_bucket') {
-      const bucketRes = await ensureStorageBucket(supabase);
+      const targetBucket = resolveAllowedBucket(req.query?.bucket || req.body?.bucket);
+      const bucketRes = await ensureStorageBucket(supabase, targetBucket);
       if (!bucketRes.ok) {
         return res.status(400).json({
           ok: false,
-          bucket: STORAGE_BUCKET,
-          error: `No se pudo inicializar el bucket "${STORAGE_BUCKET}": ${bucketRes.error}. Verifica SUPABASE_SERVICE_ROLE_KEY en Vercel o créalo como público en Supabase → Storage.`,
+          bucket: targetBucket,
+          error: `No se pudo inicializar el bucket "${targetBucket}": ${bucketRes.error}. Verifica SUPABASE_SERVICE_ROLE_KEY en Vercel o créalo como público en Supabase → Storage.`,
         });
       }
-      return res.status(200).json({ ok: true, bucket: STORAGE_BUCKET });
+      return res.status(200).json({ ok: true, bucket: targetBucket });
     }
 
     /* 3. SUBIDA SEGURA DESDE BASE64 (< 4MB) A SUPABASE STORAGE */
     if (action === 'upload_base64') {
       if (req.method !== 'POST') return res.status(405).json({ error: 'POST required' });
-      const { fileName, mimeType, base64Data } = req.body || {};
+      const { fileName, mimeType, base64Data, bucket, folder } = req.body || {};
       if (!base64Data) {
         return res.status(400).json({ error: 'Falta base64Data' });
       }
-      const bucketCheck = await ensureStorageBucket(supabase);
+      const targetBucket = resolveAllowedBucket(bucket);
+      const bucketCheck = await ensureStorageBucket(supabase, targetBucket);
       const rawB64 = String(base64Data).includes('base64,')
         ? String(base64Data).split('base64,')[1]
         : String(base64Data);
       const buffer = Buffer.from(rawB64, 'base64');
       const safeName = String(fileName || `pieza-${Date.now()}.jpg`).replace(/[^a-zA-Z0-9._-]/g, '_');
-      const path = `uploads/${Date.now()}-${safeName}`;
+      const cleanFolder = String(folder || 'uploads')
+        .replace(/[^a-zA-Z0-9/_-]/g, '')
+        .replace(/^\/+|\/+$/g, '') || 'uploads';
+      const path = `${cleanFolder}/${Date.now()}-${safeName}`;
 
-      const { error: upErr } = await supabase.storage.from(STORAGE_BUCKET).upload(path, buffer, {
+      const { error: upErr } = await supabase.storage.from(targetBucket).upload(path, buffer, {
         contentType: mimeType || 'application/octet-stream',
         upsert: true,
       });
 
       if (upErr) {
         const extraHint = !bucketCheck.ok
-          ? ` (${bucketCheck.error}). Verifica SUPABASE_SERVICE_ROLE_KEY o crea el bucket público "${STORAGE_BUCKET}" en Supabase → Storage.`
+          ? ` (${bucketCheck.error}). Verifica SUPABASE_SERVICE_ROLE_KEY o crea el bucket público "${targetBucket}" en Supabase → Storage.`
           : '';
         return res.status(500).json({ error: `Error subiendo archivo: ${upErr.message}${extraHint}` });
       }
 
-      const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-      return res.status(200).json({ ok: true, path, publicUrl: pub.publicUrl });
+      const { data: pub } = supabase.storage.from(targetBucket).getPublicUrl(path);
+      return res.status(200).json({ ok: true, bucket: targetBucket, path, publicUrl: pub.publicUrl });
     }
 
     /* 4. GENERADOR DE COPYS OMNICANAL (CON NICHO Y TONO POR PÁGINA) */
