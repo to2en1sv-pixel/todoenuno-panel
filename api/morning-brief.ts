@@ -1093,6 +1093,23 @@ type TelegramDraft =
       stock_resultante: number;
       motivo: string;
       rawInput?: string;
+    }
+  | {
+      id: string;
+      kind: 'cambiar_estado_pedido';
+      chatId: string;
+      status: 'pending' | 'confirmed' | 'cancelled';
+      createdAt: string;
+      order_id: string;
+      pedido_codigo: string;
+      nombre_cliente: string;
+      telefono: string;
+      sku_display: string;
+      total: number;
+      estado_anterior: string;
+      estado_nuevo: 'nuevo' | 'programado' | 'por_empacar' | 'en_camino' | 'entregado' | 'cancelado';
+      motivo_cancelacion?: string;
+      rawInput?: string;
     };
 
 function getSupabaseAdmin() {
@@ -1408,6 +1425,7 @@ REGLAS ESTRICTAS:
    - "gasto_operativo": gasto del negocio que NO es compra de mercadería para reventa ni pauta ("pagué $20 de gasolina", "bolsas de empaque", "almuerzo", "flete", "internet", "sueldo").
    - "ajuste_inventario": daño, merma, pérdida, muestra regalada o corrección por conteo físico ("se dañaron 2 cascos", "merma 1 unidad", "en bodega solo quedan 8 cascos").
    - "consulta_pedido": busca un pedido por nombre de cliente, teléfono, código o estado ("¿cómo va el pedido de Tatiana?", "busca el 70231940").
+   - "cambiar_estado_pedido": el usuario ordena cambiar el estado de un pedido existente ("pasa a entregado el pedido de María", "marca en camino el 70231940", "cancela el pedido de Carlos", "pasa a por empacar el pedido #8831").
    - "consulta_pendientes": pregunta qué hay pendiente por empacar, en ruta, encargos o por liquidar.
    - "consulta_stock": pregunta cuánto stock hay de uno o más productos.
    - "consulta_brief": pide el brief / resumen de ventas del día.
@@ -1418,13 +1436,17 @@ ${params.intentHint ? `\nPISTA DE CONTEXTO: El usuario inició con el comando ${
    - Si "gasto_operativo": llena "monto" (>0), "descripcion", "account_id", y "categoria" entre: "flete_envio", "empaque_suministros", "alquiler_servicios", "nomina_sueldos", "suscripciones", "comision_pasarela", "gasto_manual", "otro_gasto".
    - Si "gasto_pauta": llena "monto" (>0), "codigo_anuncio" (en MAYÚSCULAS, ej. "PROMO1", o "GENERAL" si no menciona código), "plataforma" ("Meta"|"TikTok"|"Google"|"WhatsApp"|"Otro"), "account_id", "notas".
    - Si "ajuste_inventario": llena "adjustment_mode": "merma" (daño/pérdida/muestra), "delta_positivo" (sumar), "delta_negativo" (restar), o "conteo_exacto" (fijar stock físico total); llena "sku", "raw_name", "cantidad" (entero >= 0: si es conteo_exacto es la cantidad final observada en bodega, si es merma/delta es las unidades que salen/entran), y "motivo".
+   - Si "cambiar_estado_pedido": llena "order_query" (nombre de cliente, teléfono o código del pedido), "next_status" en UNO de: "nuevo" | "programado" | "por_empacar" | "en_camino" | "entregado" | "cancelado" ("empacar"/"empaque" -> "por_empacar", "ruta"/"motorista"/"despachado" -> "en_camino", "encargo" -> "programado"), y "cancel_reason" si es cancelación.
    - Si "consulta_pedido" o "consulta_stock": pon en "search_query" el nombre, teléfono, código o producto buscado.
    - En "account_id": elige el id exacto ("efectivo"/"caja" -> caja_chica, "banco"/"transferencia" -> banco_principal), o "${params.accounts[0]?.id || 'caja_chica'}" si no menciona.
 
 3. Devuelve EXCLUSIVAMENTE JSON válido con esta estructura:
 {
-  "intent": "compra" | "gasto_operativo" | "gasto_pauta" | "ajuste_inventario" | "consulta_pedido" | "consulta_pendientes" | "consulta_stock" | "consulta_brief" | "otro",
+  "intent": "compra" | "gasto_operativo" | "gasto_pauta" | "ajuste_inventario" | "cambiar_estado_pedido" | "consulta_pedido" | "consulta_pendientes" | "consulta_stock" | "consulta_brief" | "otro",
   "search_query": "",
+  "order_query": "",
+  "next_status": "",
+  "cancel_reason": "",
   "proveedor": "",
   "account_id": "",
   "asentar_en_finanzas": true,
@@ -1488,15 +1510,27 @@ ${params.intentHint ? `\nPISTA DE CONTEXTO: El usuario inició con el comando ${
   return JSON.parse(rawContent);
 }
 
+type ServerKardexMovementType =
+  | 'compra_entrada'
+  | 'reserva_pedido'
+  | 'liberar_reserva'
+  | 'venta_salida'
+  | 'devolucion_entrada'
+  | 'merma_dano'
+  | 'ajuste_positivo'
+  | 'ajuste_negativo';
+
 async function executeInventoryMovementServer(
   supabase: any,
   params: {
     sku: string;
-    tipo_movimiento: 'compra_entrada' | 'merma_dano' | 'ajuste_positivo' | 'ajuste_negativo';
+    tipo_movimiento: ServerKardexMovementType;
     cantidad: number;
     costo_unitario?: number;
     motivo: string;
+    source_table?: string;
     source_id: string;
+    usuario?: string;
   }
 ): Promise<{
   ok: boolean;
@@ -1507,6 +1541,8 @@ async function executeInventoryMovementServer(
   const skuClean = normalizeSku(params.sku);
   const absQty = Math.abs(Math.round(params.cantidad));
   const costo = Math.max(Number(params.costo_unitario) || 0, 0);
+  const sourceTable = params.source_table || 'telegram_bot';
+  const usuario = params.usuario || 'Telegram Bot';
 
   // 1. Intentar RPC atómico public.record_movement
   const rpcRes = await supabase.rpc('record_movement', {
@@ -1515,9 +1551,9 @@ async function executeInventoryMovementServer(
     p_cantidad: absQty,
     p_costo_unitario: costo,
     p_motivo: params.motivo,
-    p_source_table: 'telegram_bot',
+    p_source_table: sourceTable,
     p_source_id: params.source_id,
-    p_usuario: 'Telegram Bot',
+    p_usuario: usuario,
   });
 
   if (!rpcRes.error && rpcRes.data) {
@@ -1541,14 +1577,33 @@ async function executeInventoryMovementServer(
 
   const stockActual = Number(existingRow?.stock_fisico ?? 0);
   const reservadoActual = Number(existingRow?.stock_reservado ?? 0);
-  const isAdd =
-    params.tipo_movimiento === 'compra_entrada' || params.tipo_movimiento === 'ajuste_positivo';
-  const nuevoFisico = isAdd ? stockActual + absQty : Math.max(stockActual - absQty, 0);
-  const nuevoDisponible = Math.max(nuevoFisico - reservadoActual, 0);
-  const deltaKardex = isAdd ? absQty : -absQty;
+  let nuevoFisico = stockActual;
+  let nuevoReservado = reservadoActual;
+  let deltaKardex = absQty;
+
+  if (params.tipo_movimiento === 'compra_entrada' || params.tipo_movimiento === 'ajuste_positivo') {
+    nuevoFisico = stockActual + absQty;
+  } else if (params.tipo_movimiento === 'reserva_pedido') {
+    nuevoReservado = reservadoActual + absQty;
+  } else if (params.tipo_movimiento === 'liberar_reserva') {
+    nuevoReservado = Math.max(reservadoActual - absQty, 0);
+  } else if (params.tipo_movimiento === 'venta_salida') {
+    nuevoFisico = Math.max(stockActual - absQty, 0);
+    nuevoReservado = Math.max(reservadoActual - absQty, 0);
+    deltaKardex = -absQty;
+  } else if (params.tipo_movimiento === 'ajuste_negativo' || params.tipo_movimiento === 'merma_dano') {
+    nuevoFisico = Math.max(stockActual - absQty, 0);
+    deltaKardex = -absQty;
+  } else if (params.tipo_movimiento === 'devolucion_entrada') {
+    nuevoFisico = stockActual + absQty;
+    nuevoReservado = Math.max(reservadoActual - absQty, 0);
+  }
+
+  const nuevoDisponible = Math.max(nuevoFisico - nuevoReservado, 0);
 
   const updatePayload: Record<string, any> = {
     stock_fisico: nuevoFisico,
+    stock_reservado: nuevoReservado,
     updated_at: new Date().toISOString(),
   };
   if (costo > 0 && params.tipo_movimiento === 'compra_entrada') {
@@ -1566,26 +1621,301 @@ async function executeInventoryMovementServer(
       sku: skuClean,
       nombre: skuClean,
       stock_fisico: nuevoFisico,
-      stock_reservado: 0,
+      stock_reservado: nuevoReservado,
       costo_unitario: costo,
       updated_at: new Date().toISOString(),
     });
     if (insErr) return { ok: false, error: insErr.message };
   }
 
-  await supabase.from('inventory_kardex').insert({
+  const { error: kardexErr } = await supabase.from('inventory_kardex').insert({
     sku: skuClean,
     tipo_movimiento: params.tipo_movimiento,
     cantidad: deltaKardex,
     costo_unitario: costo,
     saldo_fisico: nuevoFisico,
     motivo: params.motivo,
-    source_table: 'telegram_bot',
+    source_table: sourceTable,
     source_id: params.source_id,
-    usuario: 'Telegram Bot',
+    usuario,
   });
 
+  if (kardexErr && params.tipo_movimiento === 'liberar_reserva') {
+    await supabase.from('inventory_kardex').insert({
+      sku: skuClean,
+      tipo_movimiento: 'ajuste_positivo',
+      cantidad: deltaKardex,
+      costo_unitario: costo,
+      saldo_fisico: nuevoFisico,
+      motivo: `[Liberación Reserva] ${params.motivo}`,
+      source_table: sourceTable,
+      source_id: params.source_id,
+      usuario,
+    });
+  }
+
   return { ok: true, nuevoFisico, nuevoDisponible };
+}
+
+function normalizeEstadoOrder(
+  raw?: string | null
+): 'nuevo' | 'programado' | 'por_empacar' | 'en_camino' | 'entregado' | 'cancelado' | null {
+  const s = normalizeTextKey(raw).toLowerCase();
+  if (!s) return null;
+  if (s === 'nuevo' || s === 'nueva' || s === 'pendiente') return 'nuevo';
+  if (s === 'programado' || s === 'encargo' || s === 'agendado') return 'programado';
+  if (
+    s === 'por empacar' ||
+    s === 'por_empacar' ||
+    s === 'empacar' ||
+    s === 'empaque' ||
+    s === 'empacado' ||
+    s === 'confirmado' ||
+    s === 'confirmar'
+  ) {
+    return 'por_empacar';
+  }
+  if (
+    s === 'en camino' ||
+    s === 'en_camino' ||
+    s === 'en ruta' ||
+    s === 'ruta' ||
+    s === 'despachado' ||
+    s === 'enviado' ||
+    s === 'motorista'
+  ) {
+    return 'en_camino';
+  }
+  if (s === 'entregado' || s === 'entregada' || s === 'completado' || s === 'cobrado') {
+    return 'entregado';
+  }
+  if (s === 'cancelado' || s === 'cancelada' || s === 'rechazado' || s === 'devuelto' || s === 'anulado') {
+    return 'cancelado';
+  }
+  return null;
+}
+
+function resolveOrderSkusForServer(order: any, catalog: any[]): Array<{ sku: string; cantidad: number; costo_unitario: number; stock_reservado: number }> {
+  const catalogBySku = new Map<string, any>();
+  for (const c of catalog) catalogBySku.set(normalizeSku(c.sku), c);
+
+  const aggregated = new Map<string, { sku: string; cantidad: number; costo_unitario: number; stock_reservado: number }>();
+  const addLine = (item: any, qty: number) => {
+    if (!item) return;
+    const skuClean = normalizeSku(item.sku);
+    const prev = aggregated.get(skuClean);
+    if (prev) {
+      prev.cantidad += qty;
+    } else {
+      aggregated.set(skuClean, {
+        sku: skuClean,
+        cantidad: Math.max(1, Math.round(qty)),
+        costo_unitario: Number(item.costo_unitario || 0),
+        stock_reservado: Number(item.stock_reservado || 0),
+      });
+    }
+  };
+
+  if (Array.isArray(order.items) && order.items.length > 0) {
+    for (const it of order.items) {
+      const q = Math.min(Math.max(Math.round(Number(it?.cantidad ?? it?.qty ?? 1) || 1), 1), 100);
+      const matched =
+        (it?.catalogo_sku && catalogBySku.get(normalizeSku(it.catalogo_sku))) ||
+        (it?.sku && findBestSkuMatch(String(it.sku), catalog)) ||
+        (it?.nombre && findBestSkuMatch(String(it.nombre), catalog));
+      if (matched) addLine(matched, q);
+    }
+  }
+
+  if (aggregated.size === 0) {
+    const qty =
+      order.cantidad && Number(order.cantidad) > 0
+        ? Math.min(Math.max(Math.round(Number(order.cantidad)), 1), 100)
+        : inferOrderQty(order.sku);
+    const matched =
+      (order.catalogo_sku && catalogBySku.get(normalizeSku(order.catalogo_sku))) ||
+      (order.sku && findBestSkuMatch(String(order.sku), catalog)) ||
+      (order.codigo_anuncio && findBestSkuMatch(String(order.codigo_anuncio), catalog));
+    if (matched) addLine(matched, qty);
+  }
+
+  return Array.from(aggregated.values());
+}
+
+function computeOrderLedgerServer(movements: any[], skuFilter: string) {
+  let reserved = 0;
+  let sold = 0;
+  const targetSku = normalizeSku(skuFilter);
+  const sorted = [...movements].sort((a, b) => {
+    const ta = new Date(a.created_at).getTime() || 0;
+    const tb = new Date(b.created_at).getTime() || 0;
+    return ta !== tb ? ta - tb : (Number(a.id) || 0) - (Number(b.id) || 0);
+  });
+
+  for (const m of sorted) {
+    if (normalizeSku(m.sku) !== targetSku) continue;
+    const qty = Math.abs(Number(m.cantidad) || 0);
+    if (qty === 0) continue;
+
+    if (m.tipo_movimiento === 'reserva_pedido') {
+      reserved += qty;
+    } else if (
+      m.tipo_movimiento === 'liberar_reserva' ||
+      (m.tipo_movimiento === 'ajuste_positivo' && String(m.motivo || '').startsWith('[Liberación Reserva]'))
+    ) {
+      reserved = Math.max(0, reserved - qty);
+    } else if (m.tipo_movimiento === 'venta_salida') {
+      sold += qty;
+      reserved = Math.max(0, reserved - qty);
+    } else if (m.tipo_movimiento === 'devolucion_entrada') {
+      sold = Math.max(0, sold - qty);
+      reserved = Math.max(0, reserved - qty);
+    } else if (m.tipo_movimiento === 'merma_dano') {
+      reserved = Math.max(0, reserved - qty);
+    }
+  }
+
+  return { reservedNet: reserved, soldNet: sold };
+}
+
+async function syncOrderInventoryOnStatusChangeServer(
+  supabase: any,
+  params: {
+    order: any;
+    prevEstado: string;
+    nextEstado: string;
+    reingresarStock?: boolean;
+    esMerma?: boolean;
+    motivoCancelacion?: string;
+  }
+): Promise<{ summaryText: string }> {
+  const catalog = await fetchActiveStockCatalog(supabase);
+  const lines = resolveOrderSkusForServer(params.order, catalog);
+  if (lines.length === 0) {
+    return { summaryText: 'Pedido sin SKU vinculado en bodega (solo cambió estado).' };
+  }
+
+  const prevNorm = normalizeEstadoOrder(params.prevEstado) || 'nuevo';
+  const nextNorm = normalizeEstadoOrder(params.nextEstado) || 'nuevo';
+  const shortId = String(params.order.id || '').slice(0, 8).toUpperCase();
+
+  let existingMovs: any[] = [];
+  try {
+    const { data } = await supabase
+      .from('inventory_kardex')
+      .select('*')
+      .eq('source_table', 'whatsapp_orders')
+      .eq('source_id', params.order.id)
+      .order('created_at', { ascending: true });
+    if (Array.isArray(data)) existingMovs = data;
+  } catch {}
+
+  const actions: string[] = [];
+
+  for (const line of lines) {
+    const ledger = computeOrderLedgerServer(existingMovs, line.sku);
+
+    const exec = async (
+      tipo: ServerKardexMovementType,
+      cantidad: number,
+      motivo: string,
+      costoUnitario = 0
+    ) => {
+      const r = await executeInventoryMovementServer(supabase, {
+        sku: line.sku,
+        tipo_movimiento: tipo,
+        cantidad,
+        costo_unitario: costoUnitario,
+        motivo,
+        source_table: 'whatsapp_orders',
+        source_id: params.order.id,
+        usuario: 'Telegram Bot',
+      });
+      if (r.ok) {
+        actions.push(`${line.sku}: ${tipo} (${cantidad})`);
+      }
+    };
+
+    if (nextNorm === 'nuevo' || nextNorm === 'programado') {
+      if (ledger.soldNet > 0) {
+        await exec(
+          'devolucion_entrada',
+          ledger.soldNet,
+          `Reversión de entrega pedido #${shortId} (${params.order.nombre_cliente || 'Cliente'})`,
+          line.costo_unitario
+        );
+      } else if (ledger.reservedNet > 0) {
+        await exec(
+          'liberar_reserva',
+          ledger.reservedNet,
+          `Liberación de reserva pedido #${shortId} devuelto a ${nextNorm === 'programado' ? 'Encargo' : 'Nuevo'}`
+        );
+      }
+    } else if (nextNorm === 'por_empacar' || nextNorm === 'en_camino') {
+      if (ledger.soldNet > 0) {
+        await exec(
+          'devolucion_entrada',
+          ledger.soldNet,
+          `Reingreso por retorno a ${nextNorm === 'en_camino' ? 'Ruta' : 'Empaque'} #${shortId}`,
+          line.costo_unitario
+        );
+      }
+      const neededReserve = Math.max(line.cantidad - ledger.reservedNet, 0);
+      if (neededReserve > 0) {
+        await exec(
+          'reserva_pedido',
+          neededReserve,
+          `Reserva en ${nextNorm === 'por_empacar' ? 'Empaque' : 'Ruta'} pedido #${shortId} (${params.order.nombre_cliente || 'Cliente'})`
+        );
+      }
+    } else if (nextNorm === 'entregado') {
+      const neededSell = Math.max(line.cantidad - ledger.soldNet, 0);
+      if (neededSell > 0) {
+        const missingReserve = Math.max(neededSell - ledger.reservedNet, 0);
+        if (missingReserve > 0) {
+          await exec('reserva_pedido', missingReserve, `Auto-reserva previa a entrega #${shortId}`);
+        }
+        await exec(
+          'venta_salida',
+          neededSell,
+          `Venta entregada pedido #${shortId} (${params.order.nombre_cliente || 'Cliente'})`,
+          line.costo_unitario
+        );
+      }
+    } else if (nextNorm === 'cancelado') {
+      const motivoTxt = params.motivoCancelacion || 'Cancelado desde Telegram';
+      const debeReingresar = params.reingresarStock !== false;
+      if (ledger.soldNet > 0) {
+        if (!params.esMerma && debeReingresar) {
+          await exec(
+            'devolucion_entrada',
+            ledger.soldNet,
+            `Devolución post-entrega #${shortId} (${motivoTxt})`,
+            line.costo_unitario
+          );
+        }
+      } else if (ledger.reservedNet > 0) {
+        if (params.esMerma) {
+          await exec('liberar_reserva', ledger.reservedNet, `Liberar reserva por merma #${shortId} (${motivoTxt})`);
+          await exec('merma_dano', ledger.reservedNet, `Producto dañado en devolución #${shortId} (${motivoTxt})`, line.costo_unitario);
+        } else if (debeReingresar) {
+          await exec('liberar_reserva', ledger.reservedNet, `Reserva liberada por devolución #${shortId} (${motivoTxt})`);
+        }
+      } else if ((prevNorm === 'por_empacar' || prevNorm === 'en_camino') && debeReingresar) {
+        const reservableFallback = Math.min(line.cantidad, Math.max(line.stock_reservado, 0));
+        if (reservableFallback > 0) {
+          await exec('liberar_reserva', reservableFallback, `Reserva liberada por devolución #${shortId} (${motivoTxt})`);
+        }
+        if (params.esMerma) {
+          await exec('merma_dano', line.cantidad, `Producto dañado en devolución #${shortId} (${motivoTxt})`, line.costo_unitario);
+        }
+      }
+    }
+  }
+
+  return {
+    summaryText: actions.length > 0 ? `Kárdex sincronizado: ${actions.join(', ')}` : 'Sin cambios pendientes en Kárdex.',
+  };
 }
 
 async function recordFinanceExpenseServer(
@@ -1757,6 +2087,49 @@ async function sendDraftConfirmationCard(chatId: string | number, draft: Telegra
           ],
         ],
       },
+    });
+    return;
+  }
+
+  if (kind === 'cambiar_estado_pedido' && draft.kind === 'cambiar_estado_pedido') {
+    const impactHint =
+      draft.estado_nuevo === 'por_empacar' || draft.estado_nuevo === 'en_camino'
+        ? '📦 Kárdex: reservará unidades en bodega si aún no estaban reservadas.'
+        : draft.estado_nuevo === 'entregado'
+          ? '📉 Kárdex: descontará stock físico (venta entregada).'
+          : draft.estado_nuevo === 'cancelado'
+            ? '↩️ Kárdex: liberará reserva / reingresará stock (o márcalo como merma si se dañó).'
+            : '🔓 Kárdex: liberará reserva si venía de Empaque/Ruta.';
+
+    const lines = [
+      `🔄 <b>CONFIRMAR CAMBIO DE ESTADO DE PEDIDO</b>`,
+      `🧾 Pedido: <code>${escapeHtml(draft.pedido_codigo)}</code> · <b>${fmtMoney(draft.total)}</b>`,
+      `👤 Cliente: <b>${escapeHtml(draft.nombre_cliente)}</b> (${escapeHtml(draft.telefono || 's/n')})`,
+      `📦 Producto: ${escapeHtml(draft.sku_display)}`,
+      '',
+      `${formatEstadoBadge(draft.estado_anterior)}  ➔  <b>${formatEstadoBadge(draft.estado_nuevo)}</b>`,
+      draft.motivo_cancelacion ? `📝 Motivo: <i>${escapeHtml(draft.motivo_cancelacion)}</i>` : '',
+      `<i>${impactHint}</i>`,
+    ].filter((l) => l !== '');
+
+    const buttons =
+      draft.estado_nuevo === 'cancelado'
+        ? [
+            [
+              { text: '✅ Cancelar y Reingresar Stock', callback_data: `tg_ok:${draft.id}:1` },
+              { text: '💔 Cancelar como Merma', callback_data: `tg_ok:${draft.id}:2` },
+            ],
+            [{ text: '❌ No hacer cambios', callback_data: `tg_no:${draft.id}` }],
+          ]
+        : [
+            [
+              { text: '✅ Confirmar Cambio', callback_data: `tg_ok:${draft.id}:0` },
+              { text: '❌ Cancelar', callback_data: `tg_no:${draft.id}` },
+            ],
+          ];
+
+    await sendTgMessage(chatId, lines.join('\n'), {
+      reply_markup: { inline_keyboard: buttons },
     });
     return;
   }
@@ -2082,6 +2455,7 @@ async function handleTelegramBotRequest(req: any, res: any) {
           { command: 'compra', description: 'Registrar compra: /compra SKU CANT COSTO' },
           { command: 'gasto', description: 'Registrar gasto o pauta: /gasto MONTO CONCEPTO' },
           { command: 'pedido', description: 'Buscar pedido por cliente, tel o código' },
+          { command: 'estado', description: 'Cambiar estado: /estado CLIENTE ESTADO' },
           { command: 'pendientes', description: 'Ver empaque, ruta y cobros por liquidar' },
           { command: 'merma', description: 'Registrar daño o ajuste: /merma SKU CANT' },
           { command: 'stock', description: 'Ver inventario actual: /stock [producto]' },
@@ -2320,6 +2694,92 @@ async function handleTelegramBotRequest(req: any, res: any) {
         } else {
           finalMsg = `⚠️ No se pudo registrar el ajuste en Kárdex: ${escapeHtml(movRes.error)}`;
         }
+      } else if (kind === 'cambiar_estado_pedido' && draft.kind === 'cambiar_estado_pedido') {
+        const { data: orderRow, error: fetchOrdErr } = await supabase
+          .from('whatsapp_orders')
+          .select('*')
+          .eq('id', draft.order_id)
+          .maybeSingle();
+
+        if (fetchOrdErr || !orderRow) {
+          finalMsg = `⚠️ No se encontró el pedido <code>${escapeHtml(draft.pedido_codigo)}</code> en la base de datos.`;
+        } else {
+          const prevEstadoActual = normalizeEstadoOrder(orderRow.estado) || 'nuevo';
+          const updateFields: Record<string, any> = { estado: draft.estado_nuevo };
+          if (draft.estado_nuevo === 'cancelado' && draft.motivo_cancelacion) {
+            updateFields.motivo_cancelacion = draft.motivo_cancelacion;
+          }
+
+          let updRes = await supabase
+            .from('whatsapp_orders')
+            .update(updateFields)
+            .eq('id', orderRow.id);
+
+          if (updRes.error && updateFields.motivo_cancelacion) {
+            updRes = await supabase
+              .from('whatsapp_orders')
+              .update({ estado: draft.estado_nuevo })
+              .eq('id', orderRow.id);
+          }
+
+          if (updRes.error) {
+            finalMsg = `⚠️ No se pudo actualizar el estado del pedido: ${escapeHtml(updRes.error.message)}`;
+          } else {
+            const isMerma = finFlag === '2';
+            const reingresarStock = draft.estado_nuevo === 'cancelado' ? !isMerma : true;
+            let invSummary = '';
+            try {
+              const syncRes = await syncOrderInventoryOnStatusChangeServer(supabase, {
+                order: orderRow,
+                prevEstado: prevEstadoActual,
+                nextEstado: draft.estado_nuevo,
+                reingresarStock,
+                esMerma: isMerma,
+                motivoCancelacion: draft.motivo_cancelacion,
+              });
+              invSummary = syncRes.summaryText;
+            } catch (syncErr: any) {
+              invSummary = `⚠️ Estado actualizado, pero revisa Kárdex: ${syncErr?.message || 'error'}`;
+            }
+
+            const eventMap: Record<string, string> = {
+              nuevo: 'order.created',
+              programado: 'order.scheduled',
+              por_empacar: 'order.confirmed',
+              en_camino: 'order.shipped',
+              entregado: 'order.delivered',
+              cancelado: 'order.cancelled',
+            };
+
+            await emitBestEffortOsEvent(
+              supabase,
+              eventMap[draft.estado_nuevo] || 'order.confirmed',
+              'whatsapp_orders',
+              orderRow.id,
+              {
+                order_id: orderRow.id,
+                nombre_cliente: orderRow.nombre_cliente,
+                telefono: orderRow.telefono,
+                sku: orderRow.sku,
+                catalogo_sku: orderRow.catalogo_sku,
+                total: orderRow.total,
+                estado_anterior: prevEstadoActual,
+                estado: draft.estado_nuevo,
+                es_merma: isMerma,
+                origen: 'telegram_bot',
+              }
+            );
+
+            finalMsg = [
+              `✅ <b>ESTADO DE PEDIDO ACTUALIZADO</b>`,
+              `🧾 <code>${escapeHtml(draft.pedido_codigo)}</code> · <b>${escapeHtml(draft.nombre_cliente)}</b>`,
+              `${formatEstadoBadge(prevEstadoActual)}  ➔  <b>${formatEstadoBadge(draft.estado_nuevo)}</b>`,
+              invSummary ? `📦 ${escapeHtml(invSummary)}` : '',
+            ]
+              .filter(Boolean)
+              .join('\n');
+          }
+        }
       } else {
         // Compra de mercadería
         const compra = draft as Extract<TelegramDraft, { items: DraftItem[] }>;
@@ -2501,8 +2961,9 @@ async function handleTelegramBotRequest(req: any, res: any) {
           `• <i>"Pagué $35 de pauta al anuncio PROMO1"</i>`,
           `• <code>/gasto MONTO CONCEPTO</code>`,
           '',
-          `🔎 <b>Consultas en vivo:</b>`,
+          `🔎 <b>Pedidos y Consultas en vivo:</b>`,
           `• <code>/pedido [nombre, teléfono o código]</code>`,
+          `• <code>/estado CLIENTE ESTADO</code> o <i>"Marca como entregado el pedido de María"</i>`,
           `• <code>/pendientes</code> — Cola de empaque, ruta y cobros por liquidar`,
           `• <code>/stock [producto]</code> — Disponible en bodega`,
           `• <code>/cajas</code> — Saldos de cajas y bancos`,
@@ -2670,6 +3131,8 @@ async function handleTelegramBotRequest(req: any, res: any) {
       }
     } else if (lowerText.startsWith('/gasto')) {
       intentHint = '/gasto (gasto_operativo o gasto_pauta)';
+    } else if (lowerText.startsWith('/estado')) {
+      intentHint = '/estado (cambiar_estado_pedido)';
     }
 
     // Flujo inteligente con OpenAI GPT-4o-mini (texto, voz transcrita o foto)
@@ -2680,7 +3143,7 @@ async function handleTelegramBotRequest(req: any, res: any) {
     }
 
     const cleanedPromptText = rawText
-      .replace(/^\/(compra|gasto|merma|ajuste)(@\S+)?/i, '')
+      .replace(/^\/(compra|gasto|merma|ajuste|estado)(@\S+)?/i, '')
       .trim();
 
     const parsed = await interpretWithOpenAI({
@@ -2702,6 +3165,136 @@ async function handleTelegramBotRequest(req: any, res: any) {
         chatId,
         String(parsed.search_query || cleanedPromptText || rawText)
       );
+      return res.status(200).json({ ok: true });
+    }
+
+    if (parsed.intent === 'cambiar_estado_pedido') {
+      const targetEstado = normalizeEstadoOrder(String(parsed.next_status || ''));
+      const orderQuery = String(parsed.order_query || parsed.search_query || '').trim();
+
+      if (!targetEstado || !orderQuery) {
+        await sendTgMessage(
+          chatId,
+          '⚠️ Indica el pedido (cliente, teléfono o código) y el nuevo estado.\nEjemplo: <code>/estado María entregado</code> o <i>"Pasa a ruta el pedido 70231940"</i>.'
+        );
+        return res.status(200).json({ ok: true });
+      }
+
+      const { data: recentOrders, error: ordErr } = await supabase
+        .from('whatsapp_orders')
+        .select('id,pedido_codigo,nombre_cliente,telefono,sku,catalogo_sku,total,estado,created_at')
+        .order('created_at', { ascending: false })
+        .limit(400);
+
+      if (ordErr) {
+        throw new Error(`Error buscando pedidos: ${ordErr.message}`);
+      }
+
+      const qLower = orderQuery.toLowerCase();
+      const qDigits = orderQuery.replace(/\D/g, '');
+      const allOrders = Array.isArray(recentOrders) ? recentOrders : [];
+
+      // 1. Priorizar coincidencia exacta de código, short ID o teléfono completo
+      let candidates = allOrders.filter((o: any) => {
+        const code = String(o.pedido_codigo || '').trim().toLowerCase();
+        const shortId = String(o.id || '').slice(0, 8).toLowerCase();
+        const phoneDigits = String(o.telefono || '').replace(/\D/g, '');
+        return (
+          (code && code === qLower) ||
+          (shortId && shortId === qLower.replace(/^#/, '')) ||
+          (qDigits.length >= 6 && phoneDigits === qDigits)
+        );
+      });
+
+      // 2. Si no hubo match exacto, buscar por coincidencia parcial en nombre / teléfono / código
+      if (candidates.length === 0) {
+        candidates = allOrders.filter((o: any) => {
+          const hay = [o.pedido_codigo, o.nombre_cliente, o.telefono, String(o.id || '').slice(0, 8)]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          if (hay.includes(qLower)) return true;
+          if (qDigits.length >= 4 && String(o.telefono || '').replace(/\D/g, '').includes(qDigits)) {
+            return true;
+          }
+          return false;
+        });
+      }
+
+      if (candidates.length === 0) {
+        await sendTgMessage(
+          chatId,
+          `🔍 No encontré ningún pedido reciente para <b>${escapeHtml(orderQuery)}</b>.\nUsa <code>/pedido ${escapeHtml(orderQuery)}</code> para verificar.`
+        );
+        return res.status(200).json({ ok: true });
+      }
+
+      // Si hay más de 1 coincidencia y no todas ya están resueltas, pedir desambiguación si difieren
+      const actionable = candidates.filter(
+        (o: any) => (normalizeEstadoOrder(o.estado) || 'nuevo') !== targetEstado
+      );
+      const pool = actionable.length > 0 ? actionable : candidates;
+
+      if (pool.length > 1) {
+        const listLines = pool.slice(0, 5).map((o: any) => {
+          const code = o.pedido_codigo || String(o.id || '').slice(0, 8).toUpperCase();
+          return `• <code>${escapeHtml(code)}</code> · <b>${escapeHtml(o.nombre_cliente || 'Cliente')}</b> (${escapeHtml(
+            o.telefono || 's/n'
+          )}) · ${formatEstadoBadge(o.estado)} · ${fmtMoney(o.total)}`;
+        });
+        await sendTgMessage(
+          chatId,
+          [
+            `🔎 Encontré <b>${pool.length} pedidos</b> que coinciden con "${escapeHtml(orderQuery)}":`,
+            '',
+            ...listLines,
+            '',
+            `Indícame el código o teléfono exacto, por ejemplo: <code>/estado ${escapeHtml(
+              pool[0].pedido_codigo || String(pool[0].id || '').slice(0, 8).toUpperCase()
+            )} ${targetEstado}</code>`,
+          ].join('\n')
+        );
+        return res.status(200).json({ ok: true });
+      }
+
+      const targetOrder = pool[0];
+      const currentEstado = normalizeEstadoOrder(targetOrder.estado) || 'nuevo';
+      const orderCode =
+        targetOrder.pedido_codigo || String(targetOrder.id || '').slice(0, 8).toUpperCase();
+
+      if (currentEstado === targetEstado) {
+        await sendTgMessage(
+          chatId,
+          `ℹ️ El pedido <code>${escapeHtml(orderCode)}</code> (${escapeHtml(
+            targetOrder.nombre_cliente || 'Cliente'
+          )}) ya está en estado <b>${formatEstadoBadge(currentEstado)}</b>.`
+        );
+        return res.status(200).json({ ok: true });
+      }
+
+      const draft: TelegramDraft = {
+        id: `st_${Date.now().toString(36)}`,
+        kind: 'cambiar_estado_pedido',
+        chatId,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        order_id: targetOrder.id,
+        pedido_codigo: orderCode,
+        nombre_cliente: targetOrder.nombre_cliente || 'Cliente',
+        telefono: targetOrder.telefono || '',
+        sku_display: targetOrder.sku || targetOrder.catalogo_sku || 'Producto',
+        total: Number(targetOrder.total || 0),
+        estado_anterior: currentEstado,
+        estado_nuevo: targetEstado,
+        motivo_cancelacion:
+          targetEstado === 'cancelado'
+            ? String(parsed.cancel_reason || 'Cancelado desde Telegram').trim()
+            : undefined,
+        rawInput: rawText,
+      };
+
+      await saveDraft(supabase, draft);
+      await sendDraftConfirmationCard(chatId, draft);
       return res.status(200).json({ ok: true });
     }
 

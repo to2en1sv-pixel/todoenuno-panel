@@ -462,7 +462,7 @@ export function SistemaPage() {
       } else {
         setTelegramNotice({
           type: 'ok',
-          text: `Webhook y comandos (/compra, /gasto, /pedido, /pendientes, /merma, /stock, /cajas, /brief) conectados a ${json.webhookUrl}.`,
+          text: `Webhook y comandos (/compra, /gasto, /pedido, /estado, /pendientes, /merma, /stock, /cajas, /brief) conectados a ${json.webhookUrl}.`,
         });
         await checkTelegramBot();
       }
@@ -1276,7 +1276,7 @@ export function SistemaPage() {
                     <h2 className="text-sm font-semibold">Bot Telegram Operaciones & Brief (Vercel + GPT)</h2>
                   </div>
                   <p className="text-[11px] tx-mu mt-0.5">
-                    Texto, notas de voz (Whisper) o foto de factura/recibo para registrar compras, gastos/pauta (<code className="mono">/gasto</code>), mermas/ajustes (<code className="mono">/merma</code>) y consultar <code className="mono">/pedido</code>, <code className="mono">/pendientes</code>, <code className="mono">/stock</code>, <code className="mono">/cajas</code> y <code className="mono">/brief</code>.
+                    Texto, notas de voz (Whisper) o foto de factura/recibo para registrar compras, gastos/pauta (<code className="mono">/gasto</code>), mermas/ajustes (<code className="mono">/merma</code>), cambiar estado de pedidos (<code className="mono">/estado</code>) y consultar <code className="mono">/pedido</code>, <code className="mono">/pendientes</code>, <code className="mono">/stock</code>, <code className="mono">/cajas</code> y <code className="mono">/brief</code>.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto shrink-0">
@@ -1366,7 +1366,7 @@ export function SistemaPage() {
 
               <div className="p-3 bg-sf bd rounded-xl text-[11px] tx-mu space-y-1">
                 <div>
-                  <strong className="text-[var(--tx)]">Uso en Telegram:</strong> escribe natural, envía <strong>nota de voz</strong> o foto de factura/recibo (ej. <em>"Compré 10 cascos a $12.50"</em>, <em>"Gasté $45 en Meta Ads"</em>, <em>"Se dañaron 2 cascos"</em>, <em>"¿Cómo va el pedido de María?"</em>), o usa <code className="mono">/compra</code> · <code className="mono">/gasto</code> · <code className="mono">/pedido</code> · <code className="mono">/pendientes</code> · <code className="mono">/merma</code> · <code className="mono">/ajuste</code> · <code className="mono">/stock</code> · <code className="mono">/cajas</code> · <code className="mono">/brief</code>.
+                  <strong className="text-[var(--tx)]">Uso en Telegram:</strong> escribe natural, envía <strong>nota de voz</strong> o foto de factura/recibo (ej. <em>"Compré 10 cascos a $12.50"</em>, <em>"Gasté $45 en Meta Ads"</em>, <em>"Pasa a entregado el pedido de María"</em>, <em>"Se dañaron 2 cascos"</em>), o usa <code className="mono">/compra</code> · <code className="mono">/gasto</code> · <code className="mono">/pedido</code> · <code className="mono">/estado</code> · <code className="mono">/pendientes</code> · <code className="mono">/merma</code> · <code className="mono">/ajuste</code> · <code className="mono">/stock</code> · <code className="mono">/cajas</code> · <code className="mono">/brief</code>.
                 </div>
                 {telegramStatus?.allowedChatIds?.length ? (
                   <div>
