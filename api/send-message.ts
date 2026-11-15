@@ -134,6 +134,7 @@ export default async function handler(req: any, res: any) {
     text,
     instanceId,
     contactPhone,
+    contactName,
     pauseBot = true,
     mediaUrl,
     mediaBase64,
@@ -159,8 +160,8 @@ export default async function handler(req: any, res: any) {
     );
   const hasExplicitMedia = Boolean(mediaUrl || mediaBase64);
 
-  if (!conversationId || (!messageText && !hasExplicitMedia && !productSku)) {
-    return res.status(400).json({ error: 'conversationId y text o media son obligatorios' });
+  if ((!conversationId && !contactPhone) || (!messageText && !hasExplicitMedia && !productSku)) {
+    return res.status(400).json({ error: 'conversationId o contactPhone, y text o media son obligatorios' });
   }
 
   const evolutionUrl = (process.env.EVOLUTION_API_URL || '').replace(/\/+$/, '');
@@ -188,29 +189,82 @@ export default async function handler(req: any, res: any) {
   });
 
   try {
+    let resolvedConversationId = String(conversationId || '').trim();
     let dbPhone = contactPhone;
     let dbInstance = instanceId;
-    if (!dbPhone || !dbInstance) {
-      const { data: conv } = await supabase
+    let hasExistingConv = false;
+    const legacyInstances = new Set(['builderbot-principal', 'ventas', 'builderbot']);
+
+    if (resolvedConversationId) {
+      if (!dbPhone || !dbInstance) {
+        const { data: conv } = await supabase
+          .from('bb_conversations')
+          .select('id, contact_phone, instance_id')
+          .eq('id', resolvedConversationId)
+          .maybeSingle();
+        if (conv) {
+          hasExistingConv = true;
+          dbPhone = dbPhone || conv.contact_phone;
+          dbInstance = dbInstance || conv.instance_id;
+        }
+      } else {
+        hasExistingConv = true;
+      }
+    } else if (contactPhone) {
+      const initialTarget = resolveEvolutionTarget(contactPhone, '');
+      const digits = initialTarget.cleanPhone.replace(/\D/g, '');
+      const last8 = digits.length >= 8 ? digits.slice(-8) : digits;
+      const candidates = Array.from(
+        new Set([
+          initialTarget.sendTarget,
+          `${initialTarget.sendTarget}@s.whatsapp.net`,
+          initialTarget.cleanPhone,
+        ].filter(Boolean))
+      );
+
+      const { data: byIdList } = await supabase
         .from('bb_conversations')
-        .select('contact_phone, instance_id')
-        .eq('id', conversationId)
-        .maybeSingle();
-      if (conv) {
-        dbPhone = dbPhone || conv.contact_phone;
-        dbInstance = dbInstance || conv.instance_id;
+        .select('id, contact_phone, instance_id, updated_at')
+        .in('id', candidates)
+        .order('updated_at', { ascending: false })
+        .limit(5);
+
+      let matchedConv = (byIdList || []).find(
+        (c: any) => !legacyInstances.has(String(c.instance_id || '').toLowerCase())
+      ) || byIdList?.[0];
+
+      if (!matchedConv && last8.length >= 8) {
+        const { data: byPhoneList } = await supabase
+          .from('bb_conversations')
+          .select('id, contact_phone, instance_id, updated_at')
+          .ilike('contact_phone', `%${last8}`)
+          .order('updated_at', { ascending: false })
+          .limit(5);
+
+        matchedConv = (byPhoneList || []).find(
+          (c: any) => !legacyInstances.has(String(c.instance_id || '').toLowerCase())
+        ) || byPhoneList?.[0];
+      }
+
+      if (matchedConv) {
+        resolvedConversationId = matchedConv.id;
+        hasExistingConv = true;
+        dbPhone = dbPhone || matchedConv.contact_phone;
+        dbInstance = dbInstance || matchedConv.instance_id;
       }
     }
 
-    const legacyInstances = new Set(['builderbot-principal', 'ventas', 'builderbot']);
     const targetInstance =
       dbInstance && !legacyInstances.has(String(dbInstance).toLowerCase())
         ? String(dbInstance).trim()
         : defaultInstance;
 
-    const { sendTarget, cleanPhone } = resolveEvolutionTarget(dbPhone, conversationId);
+    const { sendTarget, cleanPhone } = resolveEvolutionTarget(dbPhone, resolvedConversationId);
     if (!sendTarget) {
       return res.status(400).json({ error: 'No se encontró un número o JID de WhatsApp válido para este chat' });
+    }
+    if (!resolvedConversationId) {
+      resolvedConversationId = sendTarget.includes('@') ? sendTarget : `${sendTarget}@s.whatsapp.net`;
     }
 
     let resolvedMediaUrl = mediaUrl ? String(mediaUrl).trim() : '';
@@ -333,7 +387,7 @@ export default async function handler(req: any, res: any) {
     await supabase.from('bb_messages').upsert(
       {
         id: String(messageId),
-        conversation_id: conversationId,
+        conversation_id: resolvedConversationId,
         body: storedBody,
         from_me: true,
         created_at: nowIso,
@@ -342,14 +396,29 @@ export default async function handler(req: any, res: any) {
       { onConflict: 'id', ignoreDuplicates: true }
     );
 
-    const convUpdate: Record<string, any> = {
-      last_message: lastMessagePreview,
-      updated_at: nowIso,
-    };
-    if (pauseBot !== false) {
-      convUpdate.status = 'human';
+    if (hasExistingConv) {
+      const convUpdate: Record<string, any> = {
+        last_message: lastMessagePreview,
+        updated_at: nowIso,
+      };
+      if (pauseBot !== false) {
+        convUpdate.status = 'human';
+      }
+      await supabase.from('bb_conversations').update(convUpdate).eq('id', resolvedConversationId);
+    } else {
+      await supabase.from('bb_conversations').upsert(
+        {
+          id: resolvedConversationId,
+          contact_phone: cleanPhone,
+          contact_name: String(contactName || cleanPhone).trim(),
+          instance_id: targetInstance,
+          last_message: lastMessagePreview,
+          updated_at: nowIso,
+          status: pauseBot !== false ? 'human' : 'bot',
+        },
+        { onConflict: 'id' }
+      );
     }
-    await supabase.from('bb_conversations').update(convUpdate).eq('id', conversationId);
 
     try {
       await supabase.from('whatsapp_outbound_memory').upsert(
@@ -375,7 +444,7 @@ export default async function handler(req: any, res: any) {
         const { data: recentConvMsgs } = await supabase
           .from('bb_messages')
           .select('body')
-          .eq('conversation_id', conversationId)
+          .eq('conversation_id', resolvedConversationId)
           .order('created_at', { ascending: false })
           .limit(20);
 
@@ -418,7 +487,7 @@ export default async function handler(req: any, res: any) {
             await supabase.from('bb_messages').upsert(
               {
                 id: vidMsgId,
-                conversation_id: conversationId,
+                conversation_id: resolvedConversationId,
                 body: videoText,
                 from_me: true,
                 created_at: vidIso,
@@ -434,7 +503,7 @@ export default async function handler(req: any, res: any) {
                 updated_at: vidIso,
                 ...(pauseBot !== false ? { status: 'human' } : {}),
               })
-              .eq('id', conversationId);
+              .eq('id', resolvedConversationId);
 
             try {
               await supabase.from('whatsapp_outbound_memory').upsert(
@@ -462,6 +531,7 @@ export default async function handler(req: any, res: any) {
 
     return res.status(200).json({
       success: true,
+      conversationId: resolvedConversationId,
       messageId: String(messageId),
       storedBody,
       followUpVideoMessage,

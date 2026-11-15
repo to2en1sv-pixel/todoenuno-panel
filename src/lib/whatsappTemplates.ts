@@ -28,6 +28,7 @@ export const WA_TEMPLATE_VARIABLES: Array<{
   { key: '{departamento}', label: 'Depto.', example: 'San Miguel' },
   { key: '{courier}', label: 'Motorista / Courier', example: 'Motorista Central 1' },
   { key: '{fecha_programada}', label: 'Fecha encargo', example: '2026-11-15' },
+  { key: '{nueva_fecha}', label: 'Nueva fecha entrega', example: 'martes 17 de noviembre' },
   { key: '{metodo_pago}', label: 'Pago', example: 'Contra entrega' },
   { key: '{telefono}', label: 'Teléfono', example: '6074-4809' },
   { key: '{codigo}', label: 'Código pedido', example: 'PED-1042' },
@@ -86,6 +87,17 @@ export const DEFAULT_ORDER_WA_TEMPLATES: OrderWhatsappTemplate[] = [
     descripcion: 'Botón directo de WhatsApp usado por el motorista en /entregar y /repartidor.',
     mensaje:
       'Hola {nombre}, soy el repartidor de To2en1.app. Estoy llegando a tu dirección con tu pedido de *{producto}*. ¿Te encuentras disponible para recibir? 🛵',
+    activo: true,
+    isDefault: true,
+  },
+  {
+    id: 'retraso_reprogramacion',
+    titulo: '6. Demora Operativa y Reprogramación',
+    etiquetaBoton: 'Avisar Demora y Reprogramar',
+    categoria: 'pedidos',
+    descripcion: 'Aviso proactivo cuando un paquete excede el reloj de despacho para confirmar nueva fecha con el cliente.',
+    mensaje:
+      '¡Hola {nombre}! 👋 Te escribimos de TODOENUNO respecto a tu pedido de *{producto}* ({total}). Tuvimos una demora operativa y reprogramaremos tu entrega para el *{nueva_fecha}*. ¿Nos confirmas si podrás recibirlo ese día en 📍 {direccion}?',
     activo: true,
     isDefault: true,
   },
@@ -232,6 +244,25 @@ export async function saveOrderWhatsappTemplates(
   }
 }
 
+export function formatFriendlySpanishDate(isoOrText?: string | null): string {
+  const clean = String(isoOrText || '').trim();
+  if (!clean) return 'la nueva fecha acordada';
+  const isoMatch = clean.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (!isoMatch) return clean;
+  try {
+    const d = new Date(`${isoMatch[1]}T12:00:00Z`);
+    if (Number.isNaN(d.getTime())) return clean;
+    return new Intl.DateTimeFormat('es-SV', {
+      timeZone: 'America/El_Salvador',
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    }).format(d);
+  } catch {
+    return clean;
+  }
+}
+
 export function renderWhatsappTemplate(
   templateText: string,
   pedido?: {
@@ -247,13 +278,21 @@ export function renderWhatsappTemplate(
     fecha_programada?: string | null;
     metodo_pago?: string | null;
     telefono?: string | null;
-  } | null
+  } | null,
+  extra?: {
+    nueva_fecha?: string | null;
+  }
 ): string {
   const numTotal = Number(pedido?.total) || 0;
   const formattedTotal = `$${numTotal.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+
+  const rawNuevaFecha = extra?.nueva_fecha || pedido?.fecha_programada || '';
+  const formattedNuevaFecha = rawNuevaFecha
+    ? formatFriendlySpanishDate(rawNuevaFecha)
+    : 'la nueva fecha acordada';
 
   const replacements: Record<string, string> = {
     '{nombre}': (pedido?.nombre_cliente || '').trim(),
@@ -263,6 +302,7 @@ export function renderWhatsappTemplate(
     '{departamento}': (pedido?.departamento || 'El Salvador').trim(),
     '{courier}': (pedido?.courier || 'Motorista').trim(),
     '{fecha_programada}': (pedido?.fecha_programada || 'día acordado').trim(),
+    '{nueva_fecha}': formattedNuevaFecha,
     '{metodo_pago}': (pedido?.metodo_pago || 'Contra entrega').trim(),
     '{telefono}': (pedido?.telefono || '').trim(),
     '{codigo}': (pedido?.pedido_codigo || pedido?.id || '').trim(),

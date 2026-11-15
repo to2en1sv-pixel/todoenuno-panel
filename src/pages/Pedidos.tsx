@@ -60,6 +60,16 @@ import {
 import PedidoModal from "@/components/PedidoModal";
 import GuiaEnvio, { type GuiaPedido } from "@/components/GuiaEnvio";
 import ManifiestoDespacho from "@/components/ManifiestoDespacho";
+import {
+  DelayRescheduleModal,
+  EficienciaRetrasosView,
+} from "@/components/pedidos/EficienciaRetrasosView";
+import {
+  evaluateOrderSla,
+  fetchDispatchSlaSettings,
+  getCachedDispatchSlaSettings,
+  type DispatchSlaSettings,
+} from "@/lib/dispatchSla";
 import { addManualTransaction } from "@/lib/finance";
 import { DirectorioListaNegra } from "@/components/analitica/DirectorioListaNegra";
 import { evaluateCustomerRisk, getBlacklistEntries } from "@/lib/blacklist";
@@ -246,11 +256,22 @@ export function PedidosPage() {
   const [mostrarHistorial, setMostrarHistorial] = useState(false);
 
   // Vistas y Filtros Pro
-  const [vista, setVista] = useState<'kanban' | 'tabla' | 'lista_negra'>('kanban');
+  const [vista, setVista] = useState<'kanban' | 'tabla' | 'eficiencia' | 'lista_negra'>('kanban');
   const [pestañaEtapa, setPestañaEtapa] = useState<'todas' | Estado>('todas');
   const [filtroEncargos, setFiltroEncargos] = useState<'todos' | 'urgentes' | 'semana' | 'quincena'>('todos');
   const [filtroCourier, setFiltroCourier] = useState("Todos los Couriers");
   const [filtroDepto, setFiltroDepto] = useState("Todas las Zonas");
+
+  // Reloj de Despacho (SLA) y Eficiencia Operativa
+  const [slaSettings, setSlaSettings] = useState<DispatchSlaSettings>(() => getCachedDispatchSlaSettings());
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [pedidoDelayModal, setPedidoDelayModal] = useState<Pedido | null>(null);
+
+  useEffect(() => {
+    fetchDispatchSlaSettings().then(setSlaSettings);
+    const id = setInterval(() => setNowMs(Date.now()), 60000);
+    return () => clearInterval(id);
+  }, []);
 
   // Selección múltiple para acciones en lote
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
@@ -286,7 +307,7 @@ export function PedidosPage() {
     fetchOrderWhatsappTemplates().then(({ templates }) => {
       setWaTemplates(templates);
     });
-  }, [pedidoWhatsapp]);
+  }, [pedidoWhatsapp, pedidoDelayModal]);
 
   // Sincronización con Inventario & Kárdex
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
@@ -478,6 +499,18 @@ export function PedidosPage() {
 
     return filtrados;
   }, [pedidosFiltrados, pestañaEtapa, filtroEncargos]);
+
+  // Paquetes con reloj vencido pendientes de avisar al cliente
+  const delayedPendingCount = useMemo(() => {
+    let count = 0;
+    for (const p of pedidos) {
+      const sla = evaluateOrderSla(p, slaSettings, nowMs);
+      if (sla.severity === 'delayed' && !sla.yaNotificado) {
+        count++;
+      }
+    }
+    return count;
+  }, [pedidos, slaSettings, nowMs]);
 
   const porEstado = useMemo(() => {
     const map: Record<Estado, Pedido[]> = {
@@ -930,6 +963,31 @@ export function PedidosPage() {
               <TableIcon size={14} /> Tabla ({pedidosFiltrados.length})
             </button>
             <button
+              onClick={() => setVista('eficiencia')}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                vista === 'eficiencia'
+                  ? 'bg-amber-500 text-white font-black shadow'
+                  : delayedPendingCount > 0
+                  ? 'text-rose-600 dark:text-rose-400 hover:bg-rose-500/10'
+                  : 'tx-mu hover:text-[var(--tx)]'
+              }`}
+              title="Eficiencia Operativa, Reloj de Despacho y Avisos de Retraso por WhatsApp"
+            >
+              <Clock size={14} />
+              <span>Eficiencia &amp; Retrasos</span>
+              {delayedPendingCount > 0 && (
+                <span
+                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                    vista === 'eficiencia'
+                      ? 'bg-white/25 text-white'
+                      : 'bg-rose-600 text-white animate-pulse'
+                  }`}
+                >
+                  {delayedPendingCount}
+                </span>
+              )}
+            </button>
+            <button
               onClick={() => setVista('lista_negra')}
               className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                 vista === 'lista_negra' ? 'bg-rose-600 text-white font-black shadow' : 'text-rose-500 hover:bg-rose-500/10'
@@ -1108,6 +1166,7 @@ export function PedidosPage() {
       )}
 
       {/* Pestañas de Etapas del Flujo Operativo (Pipeline Tabs) */}
+      {(vista === 'kanban' || vista === 'tabla') && (
       <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-4 scrollbar-none">
         <button
           onClick={() => setPestañaEtapa('todas')}
@@ -1224,6 +1283,7 @@ export function PedidosPage() {
           </span>
         </button>
       </div>
+      )}
 
       {/* Banner Especial de Encargos / Pedidos Programados */}
       {pestañaEtapa === 'programado' && (
@@ -1296,6 +1356,15 @@ export function PedidosPage() {
           <Loader2 className="w-8 h-8 animate-spin mb-3" />
           <p className="text-sm">Cargando pedidos logísticos...</p>
         </div>
+      ) : vista === 'eficiencia' ? (
+        <EficienciaRetrasosView
+          pedidos={pedidosFiltrados}
+          slaSettings={slaSettings}
+          onUpdateSlaSettings={setSlaSettings}
+          onOpenDelayModal={(p) => setPedidoDelayModal(p as Pedido)}
+          onCambiarEstadoDirecto={(p, destino) => cambiarEstadoDirecto(p as Pedido, destino as Estado)}
+          nowMs={nowMs}
+        />
       ) : vista === 'lista_negra' ? (
         <DirectorioListaNegra 
           orders={pedidos} 
@@ -1331,6 +1400,8 @@ export function PedidosPage() {
                         allOrders={pedidos}
                         stockItems={stockItems}
                         kardexMovs={orderKardexMap[pedido.id] || []}
+                        slaSettings={slaSettings}
+                        nowMs={nowMs}
                         moviendo={moviendoId === pedido.id}
                         esDuplicado={telefonosDuplicados.has((pedido.telefono || '').replace(/\D/g, ''))}
                         seleccionado={seleccionados.has(pedido.id)}
@@ -1343,6 +1414,7 @@ export function PedidosPage() {
                         onBorrar={borrarPedido}
                         onLiquidar={setPedidoALiquidar}
                         onOpenWhatsapp={setPedidoWhatsapp}
+                        onOpenDelayModal={setPedidoDelayModal}
                       />
                     ))
                   )}
@@ -1388,6 +1460,8 @@ export function PedidosPage() {
                     allOrders={pedidos}
                     stockItems={stockItems}
                     kardexMovs={orderKardexMap[pedido.id] || []}
+                    slaSettings={slaSettings}
+                    nowMs={nowMs}
                     moviendo={moviendoId === pedido.id}
                     esDuplicado={telefonosDuplicados.has((pedido.telefono || '').replace(/\D/g, ''))}
                     seleccionado={seleccionados.has(pedido.id)}
@@ -1400,6 +1474,7 @@ export function PedidosPage() {
                     onBorrar={borrarPedido}
                     onLiquidar={setPedidoALiquidar}
                     onOpenWhatsapp={setPedidoWhatsapp}
+                    onOpenDelayModal={setPedidoDelayModal}
                   />
                 ))}
               </div>
@@ -1458,6 +1533,29 @@ export function PedidosPage() {
                         <td className="p-3 font-mono">
                           <span className="font-bold text-[var(--tx)]">#{p.id.slice(0, 8).toUpperCase()}</span>
                           <span className="text-[10px] tx-mu block">{fechaCorta(p.created_at)}</span>
+                          {(() => {
+                            const sla = evaluateOrderSla(p, slaSettings, nowMs);
+                            if (sla.stageGroup === 'finalizado' || sla.severity === 'scheduled_future') return null;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => setPedidoDelayModal(p)}
+                                title={`${sla.reasonLabel} · Clic para avisar demora/reprogramar`}
+                                className={`mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black border ${
+                                  sla.severity === 'delayed'
+                                    ? sla.yaNotificado
+                                      ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
+                                      : 'bg-rose-500/15 text-rose-600 border-rose-500/30'
+                                    : sla.severity === 'warning'
+                                    ? 'bg-amber-500/15 text-amber-600 border-amber-500/30'
+                                    : 'bg-sf tx-mu border-[var(--bd)]'
+                                }`}
+                              >
+                                <Clock size={9} /> {sla.durationLabel}
+                                {sla.yaNotificado ? ' · ✓ Avisado' : ''}
+                              </button>
+                            );
+                          })()}
                         </td>
                         <td className="p-3">
                           <div className="font-bold text-[var(--tx)] flex items-center gap-1.5 flex-wrap">
@@ -2030,7 +2128,8 @@ export function PedidosPage() {
                   const renderedMsg = renderWhatsappTemplate(tpl.mensaje, pedidoWhatsapp);
                   const cleanPhone = (pedidoWhatsapp.telefono || '').replace(/\D/g, '');
                   const isEncargo = tpl.id === 'encargo';
-                  const isWarn = tpl.id === 'reprogramar';
+                  const isDelay = tpl.id === 'retraso_reprogramacion';
+                  const isWarn = tpl.id === 'reprogramar' || isDelay;
 
                   return (
                     <div
@@ -2038,6 +2137,8 @@ export function PedidosPage() {
                       className={`p-3 rounded-xl border space-y-1.5 ${
                         isEncargo
                           ? 'bg-indigo-500/10 border-indigo-500/30'
+                          : isDelay
+                          ? 'bg-amber-500/10 border-amber-500/30'
                           : 'bg-sf border-[var(--bd)]'
                       }`}
                     >
@@ -2046,6 +2147,8 @@ export function PedidosPage() {
                           className={`text-xs font-bold block ${
                             isEncargo
                               ? 'text-indigo-700 dark:text-indigo-300'
+                              : isDelay
+                              ? 'text-amber-700 dark:text-amber-300'
                               : 'text-[var(--tx)]'
                           }`}
                         >
@@ -2056,33 +2159,69 @@ export function PedidosPage() {
                             Quincena / Futuro
                           </span>
                         )}
+                        {isDelay && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold shrink-0">
+                            Evolution API + Fecha
+                          </span>
+                        )}
                       </div>
 
                       <p className="text-[11px] tx-mu italic bg-cd p-2 rounded-lg border border-[var(--bd)] whitespace-pre-wrap break-words">
                         "{renderedMsg}"
                       </p>
 
-                      <a
-                        href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(renderedMsg)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={() => setPedidoWhatsapp(null)}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-white rounded-lg text-xs font-bold ${
-                          isEncargo
-                            ? 'bg-indigo-600 hover:bg-indigo-500 shadow-sm'
-                            : isWarn
-                              ? 'bg-amber-600 hover:bg-amber-500'
-                              : 'bg-emerald-600 hover:bg-emerald-500'
-                        }`}
-                      >
-                        <Send size={12} /> {tpl.etiquetaBoton || 'Enviar WhatsApp'}
-                      </a>
+                      {isDelay ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const target = pedidoWhatsapp;
+                            setPedidoWhatsapp(null);
+                            setPedidoDelayModal(target);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold shadow-sm"
+                        >
+                          <Clock size={12} /> Elegir Nueva Fecha y Enviar por Evolution →
+                        </button>
+                      ) : (
+                        <a
+                          href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(renderedMsg)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={() => setPedidoWhatsapp(null)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-white rounded-lg text-xs font-bold ${
+                            isEncargo
+                              ? 'bg-indigo-600 hover:bg-indigo-500 shadow-sm'
+                              : isWarn
+                                ? 'bg-amber-600 hover:bg-amber-500'
+                                : 'bg-emerald-600 hover:bg-emerald-500'
+                          }`}
+                        >
+                          <Send size={12} /> {tpl.etiquetaBoton || 'Enviar WhatsApp'}
+                        </a>
+                      )}
                     </div>
                   );
                 })}
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL 8: AVISAR DEMORA & REPROGRAMACIÓN DIRECTA POR EVOLUTION API */}
+      {pedidoDelayModal && (
+        <DelayRescheduleModal
+          pedido={pedidoDelayModal}
+          templates={waTemplates}
+          onClose={() => setPedidoDelayModal(null)}
+          onSentSuccess={({ id, fecha_programada, notas }) => {
+            setPedidos((prev) =>
+              prev.map((item) =>
+                item.id === id ? { ...item, fecha_programada, notas } : item
+              )
+            );
+            showInvToast('ok', `Aviso de demora enviado por WhatsApp y reprogramado para ${fecha_programada}.`);
+          }}
+        />
       )}
     </div>
   );
@@ -2229,6 +2368,8 @@ function PedidoCard({
   allOrders,
   stockItems,
   kardexMovs,
+  slaSettings,
+  nowMs,
   moviendo,
   esDuplicado,
   seleccionado,
@@ -2241,11 +2382,14 @@ function PedidoCard({
   onBorrar,
   onLiquidar,
   onOpenWhatsapp,
+  onOpenDelayModal,
 }: {
   pedido: Pedido;
   allOrders?: Pedido[];
   stockItems: StockItem[];
   kardexMovs: KardexMovement[];
+  slaSettings: DispatchSlaSettings;
+  nowMs: number;
   moviendo: boolean;
   esDuplicado: boolean;
   seleccionado: boolean;
@@ -2258,19 +2402,25 @@ function PedidoCard({
   onBorrar: (p: Pedido) => void;
   onLiquidar: (p: Pedido) => void;
   onOpenWhatsapp: (p: Pedido) => void;
+  onOpenDelayModal: (p: Pedido) => void;
 }) {
   const estado = normalizarEstado(pedido.estado);
   const idx = ESTADOS.indexOf(estado);
   const encargo = esPedidoEncargo(pedido);
   const encargoInfo = encargo ? infoEncargo(pedido) : null;
   const risk = useMemo(() => evaluateCustomerRisk(pedido.telefono, allOrders || []), [pedido.telefono, allOrders]);
+  const sla = useMemo(() => evaluateOrderSla(pedido, slaSettings, nowMs), [pedido, slaSettings, nowMs]);
 
   const btnBase =
     "flex items-center justify-center rounded-lg border border-[var(--bd)] bg-sf py-1.5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-cd";
 
   return (
-    <article className={`rounded-xl border border-[var(--bd)] bg-cd p-3 shadow-sm hover:shadow-md transition-shadow relative ${
-      seleccionado ? 'ring-2 ring-indigo-500 bg-indigo-500/5' : ''
+    <article className={`rounded-xl border bg-cd p-3 shadow-sm hover:shadow-md transition-shadow relative ${
+      seleccionado
+        ? 'ring-2 ring-indigo-500 bg-indigo-500/5 border-[var(--bd)]'
+        : sla.severity === 'delayed' && !sla.yaNotificado
+        ? 'border-rose-500/40'
+        : 'border-[var(--bd)]'
     }`}>
       {/* Cabecera de la tarjeta con Checkbox de selección */}
       <div className="flex items-start justify-between gap-2">
@@ -2291,9 +2441,31 @@ function PedidoCard({
           )}
         </div>
 
-        <span className="shrink-0 text-[10px] font-mono opacity-50">
-          {fechaCorta(pedido.created_at)}
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {sla.stageGroup !== 'finalizado' && sla.severity !== 'scheduled_future' && (
+            <button
+              type="button"
+              onClick={() => onOpenDelayModal(pedido)}
+              title={`${sla.reasonLabel} · Clic para avisar demora o reprogramar por WhatsApp`}
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-black border transition-colors ${
+                sla.severity === 'delayed'
+                  ? sla.yaNotificado
+                    ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
+                    : 'bg-rose-500/15 text-rose-600 border-rose-500/30 animate-pulse'
+                  : sla.severity === 'warning'
+                  ? 'bg-amber-500/15 text-amber-600 border-amber-500/30'
+                  : 'bg-sf tx-mu border-[var(--bd)] hover:border-[var(--tx)]'
+              }`}
+            >
+              <Clock size={9} />
+              <span>{sla.durationLabel}</span>
+              {sla.yaNotificado && <span>✓</span>}
+            </button>
+          )}
+          <span className="shrink-0 text-[10px] font-mono opacity-50">
+            {fechaCorta(pedido.created_at)}
+          </span>
+        </div>
       </div>
 
       {/* Alerta de Lista Negra / DICOM Interno o Cancelador Recurrente */}
