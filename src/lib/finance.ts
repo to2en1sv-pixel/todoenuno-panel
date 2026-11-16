@@ -13,7 +13,7 @@ const DEFAULT_ACCOUNTS: CashAccount[] = [
     id: 'caja_efectivo',
     nombre: 'Efectivo Repartidores (Contraentrega)',
     tipo: 'cash',
-    saldo_actual: 640.0,
+    saldo_actual: 0,
     moneda: 'USD',
     activo: true,
     color: '#10b981'
@@ -22,7 +22,7 @@ const DEFAULT_ACCOUNTS: CashAccount[] = [
     id: 'banco_principal',
     nombre: 'Banco Agrícola (Cuenta Principal)',
     tipo: 'bank',
-    saldo_actual: 2850.5,
+    saldo_actual: 0,
     moneda: 'USD',
     activo: true,
     color: '#3b82f6'
@@ -31,7 +31,7 @@ const DEFAULT_ACCOUNTS: CashAccount[] = [
     id: 'caja_chica',
     nombre: 'Caja Chica de Oficina',
     tipo: 'cash',
-    saldo_actual: 125.0,
+    saldo_actual: 0,
     moneda: 'USD',
     activo: true,
     color: '#f59e0b'
@@ -40,7 +40,7 @@ const DEFAULT_ACCOUNTS: CashAccount[] = [
     id: 'tarjeta_pauta',
     nombre: 'Tarjeta Débito Meta Ads',
     tipo: 'credit_card',
-    saldo_actual: 450.0,
+    saldo_actual: 0,
     moneda: 'USD',
     activo: true,
     color: '#8b5cf6'
@@ -58,7 +58,7 @@ const DEFAULT_BUDGETS: Budget[] = [
     periodo: currentMonth(),
     categoria: 'Marketing & Pauta Meta',
     monto_presupuestado: 1200.0,
-    monto_gastado: 450.0,
+    monto_gastado: 0,
     notas: 'Presupuesto mensual para campañas de conversión en Meta y TikTok'
   },
   {
@@ -66,7 +66,7 @@ const DEFAULT_BUDGETS: Budget[] = [
     periodo: currentMonth(),
     categoria: 'Envíos y Logística',
     monto_presupuestado: 500.0,
-    monto_gastado: 195.0,
+    monto_gastado: 0,
     notas: 'Fletes y pagos a mensajeros por entrega de paquetes'
   },
   {
@@ -74,7 +74,7 @@ const DEFAULT_BUDGETS: Budget[] = [
     periodo: currentMonth(),
     categoria: 'Suministros y Empaque',
     monto_presupuestado: 250.0,
-    monto_gastado: 95.0,
+    monto_gastado: 0,
     notas: 'Bolsas Kraft, cinta adhesiva y etiquetas térmicas'
   },
   {
@@ -82,76 +82,16 @@ const DEFAULT_BUDGETS: Budget[] = [
     periodo: currentMonth(),
     categoria: 'Nómina y Operaciones',
     monto_presupuestado: 800.0,
-    monto_gastado: 400.0,
+    monto_gastado: 0,
     notas: 'Ayudante de empaque y servicios básicos'
   }
 ];
 
-const DEFAULT_TRANSACTIONS: MoneyTransaction[] = [
-  {
-    id: 1001,
-    account_id: 'caja_efectivo',
-    account_nombre: 'Efectivo Repartidores (Contraentrega)',
-    tipo: 'income',
-    categoria: 'venta_pedido',
-    monto: 35.0,
-    descripcion: 'Cobro liquidado pedido PED-8831 (Carlos Méndez)',
-    fecha: new Date().toISOString().slice(0, 10),
-    source_table: 'whatsapp_orders',
-    source_id: 'ord-8831',
-    es_manual: false
-  },
-  {
-    id: 1002,
-    account_id: 'tarjeta_pauta',
-    account_nombre: 'Tarjeta Débito Meta Ads',
-    tipo: 'expense',
-    categoria: 'pauta_publicidad',
-    monto: 45.0,
-    descripcion: 'Pauta publicitaria diaria Meta Ads (CAMP-EMS-PROMO)',
-    fecha: new Date().toISOString().slice(0, 10),
-    source_table: 'gastos_publicidad',
-    source_id: 'adexp-20261107',
-    es_manual: false
-  },
-  {
-    id: 1003,
-    account_id: 'caja_chica',
-    account_nombre: 'Caja Chica de Oficina',
-    tipo: 'expense',
-    categoria: 'empaque_suministros',
-    monto: 45.0,
-    descripcion: 'Compra 500 bolsas Kraft y rollo de cinta de seguridad',
-    fecha: new Date().toISOString().slice(0, 10),
-    es_manual: true
-  },
-  {
-    id: 1004,
-    account_id: 'banco_principal',
-    account_nombre: 'Banco Agrícola (Cuenta Principal)',
-    tipo: 'income',
-    categoria: 'abono_manual',
-    monto: 250.0,
-    descripcion: 'Abono cliente mayorista tienda San Salvador',
-    fecha: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
-    es_manual: true
-  },
-  {
-    id: 1005,
-    account_id: 'caja_efectivo',
-    account_nombre: 'Efectivo Repartidores (Contraentrega)',
-    tipo: 'expense',
-    categoria: 'flete_envio',
-    monto: 25.0,
-    descripcion: 'Combustible y viático mensajero ruta occidente',
-    fecha: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
-    es_manual: true
-  }
-];
+const DEFAULT_TRANSACTIONS: MoneyTransaction[] = [];
 
 let localAccounts = [...DEFAULT_ACCOUNTS];
 let localBudgets = [...DEFAULT_BUDGETS];
-let localTransactions = [...DEFAULT_TRANSACTIONS];
+let localTransactions: MoneyTransaction[] = [...DEFAULT_TRANSACTIONS];
 
 /**
  * Obtener Cuentas de Dinero
@@ -599,3 +539,230 @@ export async function deleteMoneyTransaction(id: number | string): Promise<{ suc
     return { success: false, error: err?.message || 'Error al eliminar transacción' };
   }
 }
+
+/* ========================================================================== */
+/* CORTE LIMPIO DESDE AHORA (BORRADO DE LEGACY FINANCIERO)                    */
+/* ========================================================================== */
+
+const FINANCE_CUTOFF_KEY = 'todoenuno_finance_cutoff_v1';
+
+export function getFinanceCutoffDate(): string | null {
+  try {
+    return localStorage.getItem(FINANCE_CUTOFF_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setFinanceCutoffDate(iso: string | null): void {
+  try {
+    if (iso) localStorage.setItem(FINANCE_CUTOFF_KEY, iso);
+    else localStorage.removeItem(FINANCE_CUTOFF_KEY);
+  } catch {
+    // ignorar
+  }
+}
+
+export async function hydrateFinanceCutoffFromOsEvents(supabaseClient: any = supabase): Promise<string | null> {
+  const local = getFinanceCutoffDate();
+  if (local) return local;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('os_events')
+      .select('type,payload,occurred_at')
+      .in('type', ['system.finance_reset', 'system.finance_cutoff_cleared'])
+      .order('occurred_at', { ascending: false })
+      .limit(1);
+
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const latest = data[0];
+      if (latest.type === 'system.finance_reset') {
+        const cutoff = latest.payload?.finance_cutoff || latest.occurred_at || null;
+        if (cutoff) setFinanceCutoffDate(cutoff);
+        return cutoff;
+      }
+    }
+  } catch {
+    // os_events opcional
+  }
+  return local;
+}
+
+export function isRecordBeforeFinanceCutoff(
+  createdAt: string | null | undefined,
+  fallbackDate?: string | null | undefined,
+  cutoffIso?: string | null
+): boolean {
+  const cutoff = cutoffIso !== undefined ? cutoffIso : getFinanceCutoffDate();
+  if (!cutoff) return false;
+  const cutoffMs = new Date(cutoff).getTime();
+  if (!Number.isFinite(cutoffMs)) return false;
+
+  if (createdAt) {
+    const createdMs = new Date(createdAt).getTime();
+    if (Number.isFinite(createdMs)) return createdMs <= cutoffMs;
+  }
+
+  if (fallbackDate) {
+    const cutoffDay = cutoff.slice(0, 10);
+    return fallbackDate.slice(0, 10) < cutoffDay;
+  }
+
+  return false;
+}
+
+export async function resetFinancesFromNow(options: {
+  wipeTransactions?: boolean;
+  resetBalancesToZero?: boolean;
+  setOrdersCutoff?: boolean;
+} = {}): Promise<{ success: boolean; cutoffIso: string; warning?: string }> {
+  const {
+    wipeTransactions = true,
+    resetBalancesToZero = true,
+    setOrdersCutoff = true
+  } = options;
+
+  const nowIso = new Date().toISOString();
+  const warnings: string[] = [];
+
+  if (wipeTransactions) {
+    localTransactions = [];
+    try {
+      const res1 = await supabase.from('finance_money_transactions').delete().gte('id', 0);
+      if (res1.error) {
+        const res2 = await (supabase as any).schema('finance').from('money_transactions').delete().gte('id', 0);
+        if (res2.error) warnings.push(res2.error.message);
+      }
+    } catch (err: any) {
+      warnings.push(err?.message || 'No se pudieron borrar movimientos en DB');
+    }
+  }
+
+  if (resetBalancesToZero) {
+    localAccounts = localAccounts.map(acc => ({ ...acc, saldo_actual: 0 }));
+    localBudgets = localBudgets.map(b => ({ ...b, monto_gastado: 0 }));
+    try {
+      const res1 = await supabase.from('finance_cash_accounts').update({ saldo_actual: 0 }).neq('id', '');
+      if (res1.error) {
+        const res2 = await (supabase as any).schema('finance').from('cash_accounts').update({ saldo_actual: 0 }).neq('id', '');
+        if (res2.error) warnings.push(res2.error.message);
+      }
+    } catch (err: any) {
+      warnings.push(err?.message || 'No se pudieron poner las cuentas en $0.00 en DB');
+    }
+  }
+
+  if (setOrdersCutoff) {
+    setFinanceCutoffDate(nowIso);
+  }
+
+  try {
+    await emitOsEvent({
+      type: 'system.finance_reset',
+      source_table: 'finance_money_transactions',
+      source_id: nowIso,
+      payload: {
+        finance_cutoff: setOrdersCutoff ? nowIso : null,
+        wiped_transactions: wipeTransactions,
+        reset_balances: resetBalancesToZero
+      }
+    });
+  } catch {
+    // os_events opcional
+  }
+
+  return {
+    success: true,
+    cutoffIso: nowIso,
+    warning: warnings.length > 0 ? warnings.join(' · ') : undefined
+  };
+}
+
+export async function clearFinanceCutoff(): Promise<void> {
+  setFinanceCutoffDate(null);
+  try {
+    await emitOsEvent({
+      type: 'system.finance_cutoff_cleared',
+      source_table: 'finance_money_transactions',
+      source_id: new Date().toISOString(),
+      payload: {}
+    });
+  } catch {
+    // os_events opcional
+  }
+}
+
+/**
+ * Cierra únicamente los pedidos ya marcados como `entregado` que quedaron
+ * sin liquidar (legacy) para que no aparezcan como "por liquidar",
+ * SIN modificar saldos de cuentas ni borrar movimientos financieros.
+ */
+export async function clearLegacyDeliveredPending(): Promise<{
+  success: boolean;
+  clearedCount: number;
+  clearedTotal: number;
+  error?: string;
+}> {
+  const nowIso = new Date().toISOString();
+  try {
+    const { data: legacyRows, error: fetchErr } = await supabase
+      .from('whatsapp_orders')
+      .select('id, total, liquidado')
+      .eq('estado', 'entregado')
+      .or('liquidado.is.null,liquidado.eq.false');
+
+    if (fetchErr) {
+      return { success: false, clearedCount: 0, clearedTotal: 0, error: fetchErr.message };
+    }
+
+    const rows = legacyRows || [];
+    if (rows.length === 0) {
+      return { success: true, clearedCount: 0, clearedTotal: 0 };
+    }
+
+    const ids = rows.map((r: any) => r.id);
+    const clearedTotal = rows.reduce((sum: number, r: any) => sum + (Number(r.total) || 0), 0);
+
+    // Actualizar en lotes de 80 para evitar límites de longitud en PostgREST
+    for (let i = 0; i < ids.length; i += 80) {
+      const chunk = ids.slice(i, i + 80);
+      const { error: updErr } = await supabase
+        .from('whatsapp_orders')
+        .update({
+          liquidado: true,
+          liquidado_at: nowIso,
+          cuenta_liquidacion: 'corte_legacy'
+        })
+        .in('id', chunk);
+
+      if (updErr) {
+        return { success: false, clearedCount: 0, clearedTotal: 0, error: updErr.message };
+      }
+    }
+
+    try {
+      await emitOsEvent({
+        type: 'system.finance_delivered_legacy_cleared',
+        source_table: 'whatsapp_orders',
+        source_id: nowIso,
+        payload: {
+          cleared_count: rows.length,
+          cleared_total: clearedTotal
+        }
+      });
+    } catch {
+      // os_events opcional
+    }
+
+    return { success: true, clearedCount: rows.length, clearedTotal };
+  } catch (err: any) {
+    return {
+      success: false,
+      clearedCount: 0,
+      clearedTotal: 0,
+      error: err?.message || 'Error limpiando pedidos entregados legacy'
+    };
+  }
+}
+

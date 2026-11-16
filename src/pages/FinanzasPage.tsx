@@ -1,56 +1,46 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Wallet, 
-  TrendingUp, 
-  TrendingDown, 
-  DollarSign, 
-  Plus, 
-  Receipt, 
-  PieChart, 
-  ArrowUpRight, 
-  ArrowDownRight, 
-  Calendar, 
-  AlertCircle, 
-  CheckCircle2, 
-  Pencil, 
-  Trash2, 
-  Filter, 
-  Search, 
-  Code, 
-  Copy, 
-  Check, 
-  X, 
-  Layers, 
-  Sparkles,
-  CreditCard,
-  Building,
-  Coins,
-  RefreshCw,
-  Megaphone,
-  ExternalLink,
+import { Link } from 'react-router-dom';
+import {
+  Plus,
+  ArrowUpRight,
+  ArrowDownRight,
+  Search,
+  Code,
+  Copy,
+  Check,
+  X,
   ArrowRightLeft,
-  Truck,
-  Clock
+  Pencil,
+  Trash2,
+  RotateCcw,
+  AlertCircle,
+  ExternalLink,
+  Calendar,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { 
-  fetchCashAccounts, 
-  fetchBudgets, 
-  fetchMoneyTransactions, 
-  addManualTransaction, 
+import {
+  fetchCashAccounts,
+  fetchBudgets,
+  fetchMoneyTransactions,
+  addManualTransaction,
   addAccountTransfer,
   saveBudget,
   updateCashAccountBalance,
-  deleteMoneyTransaction
+  deleteMoneyTransaction,
+  getFinanceCutoffDate,
+  hydrateFinanceCutoffFromOsEvents,
+  isRecordBeforeFinanceCutoff,
+  resetFinancesFromNow,
+  clearFinanceCutoff,
+  clearLegacyDeliveredPending,
 } from '@/lib/finance';
-import type { 
-  CashAccount, 
-  MoneyTransaction, 
-  Budget, 
-  TransactionType 
+import type {
+  CashAccount,
+  MoneyTransaction,
+  Budget,
+  TransactionType,
 } from '@/types/finance';
 
-// Tipo de pagos fijos de la versión previa
 type PagoFijo = {
   id: string;
   nombre: string;
@@ -73,18 +63,28 @@ type PendingSettlementOrder = {
   created_at?: string | null;
 };
 
-const FINANCE_TRIGGER_PATCH_SQL = `-- ============================================================================
--- PATCH: Solo sumar a Finanzas al pulsar "Liquidar Pedido" (NO al pasar a Entregado)
--- Ejecutar en: Supabase SQL Editor
+const FINANCE_RESET_AND_PATCH_SQL = `-- ============================================================================
+-- CERRAR LEGACY DE ENTREGADOS + TRIGGER SIN AUTO-COBRO AL ENTREGAR
+-- No toca saldos de cuentas ni movimientos ya asentados.
+-- Ejecutar una sola vez en Supabase -> SQL Editor
 -- ============================================================================
+
+-- 1. Archivar pedidos ya entregados antiguos para que no sumen "por liquidar"
+update public.whatsapp_orders
+   set liquidado = true,
+       liquidado_at = now(),
+       cuenta_liquidacion = 'corte_legacy'
+ where estado = 'entregado'
+   and coalesce(liquidado, false) = false;
+
+-- 2. Actualizar trigger: order.delivered NO suma dinero a Finanzas.
+--    Los cobros entran únicamente al pulsar "Liquidar Pedido".
 create or replace function finance.project_os_event() returns trigger
 language plpgsql security definer as $$
 declare
   v_amount numeric;
   v_campaign text;
 begin
-  -- NOTA: order.delivered ya NO inserta cobros ni suma dinero automáticamente a Finanzas.
-  -- El dinero entra a cuentas únicamente cuando se ejecuta "Liquidar Pedido" en Pedidos OS.
   if NEW.type = 'marketing.ad.expense' then
     v_amount   := coalesce((NEW.payload->>'amount')::numeric, 0);
     v_campaign := coalesce(NEW.payload->>'campaign_id', 'Campaña');
@@ -113,7 +113,7 @@ end;
 $$;`;
 
 const SPRINT2_SQL_CODE = `-- ============================================================================
--- TODOENUNO OS — SPRINT 2: MONEY ENGINE & CONTROL DE PRESUPUESTOS (BUDGETS)
+-- TODOENUNO OS — MONEY ENGINE & PRESUPUESTOS (BASE LIMPIA EN $0.00)
 -- Ejecutar en: Supabase SQL Editor
 -- ============================================================================
 
@@ -131,10 +131,10 @@ create table if not exists finance.cash_accounts (
 );
 
 insert into finance.cash_accounts (id, nombre, tipo, saldo_actual, moneda, color) values
-  ('caja_efectivo',   'Efectivo Repartidores (Contraentrega)', 'cash',        640.00,  'USD', '#10b981'),
-  ('banco_principal', 'Banco Agrícola (Cuenta Principal)',    'bank',        2850.50, 'USD', '#3b82f6'),
-  ('caja_chica',      'Caja Chica de Oficina',                'cash',        125.00,  'USD', '#f59e0b'),
-  ('tarjeta_pauta',   'Tarjeta Débito Meta Ads',              'credit_card', 450.00,  'USD', '#8b5cf6')
+  ('caja_efectivo',   'Efectivo Repartidores (Contraentrega)', 'cash',        0.00, 'USD', '#10b981'),
+  ('banco_principal', 'Banco Agrícola (Cuenta Principal)',    'bank',        0.00, 'USD', '#3b82f6'),
+  ('caja_chica',      'Caja Chica de Oficina',                'cash',        0.00, 'USD', '#f59e0b'),
+  ('tarjeta_pauta',   'Tarjeta Débito Meta Ads',              'credit_card', 0.00, 'USD', '#8b5cf6')
 on conflict (id) do nothing;
 
 create table if not exists finance.money_transactions (
@@ -165,13 +165,6 @@ create table if not exists finance.budgets (
   notas               text,
   created_at          timestamptz not null default now()
 );
-
-insert into finance.budgets (id, periodo, categoria, monto_presupuestado, notas) values
-  ('2026-11-marketing', '2026-11', 'Marketing & Pauta Meta', 1200.00, 'Presupuesto mensual Meta y TikTok'),
-  ('2026-11-envios',    '2026-11', 'Envíos y Logística',      500.00, 'Fletes y pagos a mensajeros'),
-  ('2026-11-empaque',   '2026-11', 'Suministros y Empaque',   250.00, 'Bolsas Kraft y cinta'),
-  ('2026-11-operativo', '2026-11', 'Nómina y Operaciones',    800.00, 'Operador de empaque y servicios')
-on conflict (id) do nothing;
 
 create table if not exists finance.daily_metrics (
   fecha                    date primary key,
@@ -205,8 +198,6 @@ declare
   v_amount numeric;
   v_campaign text;
 begin
-  -- NOTA: order.delivered ya NO inserta cobros ni suma dinero automáticamente a Finanzas.
-  -- El dinero entra a cuentas únicamente cuando se ejecuta "Liquidar Pedido".
   if NEW.type = 'marketing.ad.expense' then
     v_amount   := coalesce((NEW.payload->>'amount')::numeric, 0);
     v_campaign := coalesce(NEW.payload->>'campaign_id', 'Campaña');
@@ -239,36 +230,6 @@ create trigger trg_finance_projector
   after insert on os.events
   for each row execute function finance.project_os_event();
 
--- Trigger sobre gastos_publicidad (Marketing Event Producer)
-create or replace function os.gastos_publicidad_events() returns trigger
-language plpgsql security definer set search_path = os, public as $$
-begin
-  if TG_OP = 'INSERT' then
-    perform os.emit_event(
-      'marketing.ad.expense',
-      'gastos_publicidad',
-      NEW.id::text,
-      'gastos_publicidad:' || NEW.id || ':' || coalesce(NEW.fecha::text, current_date::text),
-      jsonb_build_object(
-        'gasto_id', NEW.id,
-        'campaign_id', coalesce(NEW.codigo_anuncio, 'META_AD'),
-        'codigo_anuncio', NEW.codigo_anuncio,
-        'platform', coalesce(NEW.plataforma, 'meta'),
-        'amount', NEW.monto,
-        'date', NEW.fecha,
-        'notas', NEW.notas
-      )
-    );
-  end if;
-  return NEW;
-end;
-$$;
-
-drop trigger if exists trg_gastos_publicidad_events on public.gastos_publicidad;
-create trigger trg_gastos_publicidad_events
-  after insert on public.gastos_publicidad
-  for each row execute function os.gastos_publicidad_events();
-
 create or replace view public.finance_cash_accounts as select * from finance.cash_accounts;
 create or replace view public.finance_money_transactions as select * from finance.money_transactions;
 create or replace view public.finance_budgets as select * from finance.budgets;
@@ -300,22 +261,101 @@ create policy "finance_money_transactions_all" on finance.money_transactions for
 create policy "finance_budgets_all"            on finance.budgets            for all using (true) with check (true);
 create policy "finance_daily_metrics_all"      on finance.daily_metrics      for all using (true) with check (true);`;
 
-export function FinanzasPage() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'budgets' | 'transactions' | 'fixed_payments'>('dashboard');
+const fmtMoney = (n: number) =>
+  `$${Number(n || 0).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
-  // Datos financieros
+const fmtCutoffLabel = (iso: string | null) => {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleString('es-SV', {
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso.slice(0, 16);
+  }
+};
+
+const accountTypeLabel = (tipo: string) => {
+  switch (tipo) {
+    case 'bank':
+      return 'Banco';
+    case 'credit_card':
+      return 'Tarjeta';
+    default:
+      return 'Efectivo';
+  }
+};
+
+export function FinanzasPage() {
+  const [activeTab, setActiveTab] = useState<'resumen' | 'movimientos' | 'planificacion'>('resumen');
+
+  // Estado financiero
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [transactions, setTransactions] = useState<MoneyTransaction[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingSettlementOrder[]>([]);
-  const [isRealDb, setIsRealDb] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [copiedPatchSql, setCopiedPatchSql] = useState(false);
-  const [cleaningPremature, setCleaningPremature] = useState(false);
-  const [confirmCleanPremature, setConfirmCleanPremature] = useState(false);
-
-  // Pagos Fijos (Suscripciones previas)
   const [pagosFijos, setPagosFijos] = useState<PagoFijo[]>([]);
+  const [financeCutoff, setFinanceCutoff] = useState<string | null>(() => getFinanceCutoffDate());
+  const [loading, setLoading] = useState(true);
+  const [statusNotice, setStatusNotice] = useState<{ tipo: 'ok' | 'warn'; msg: string } | null>(null);
+
+  // Confirmación inline de borrado de movimientos
+  const [confirmDeleteTxId, setConfirmDeleteTxId] = useState<number | string | null>(null);
+  const [deletingTxId, setDeletingTxId] = useState<number | string | null>(null);
+  const [confirmCleanPremature, setConfirmCleanPremature] = useState(false);
+  const [cleaningPremature, setCleaningPremature] = useState(false);
+  const [confirmClearLegacy, setConfirmClearLegacy] = useState(false);
+  const [clearingLegacy, setClearingLegacy] = useState(false);
+
+  // Modal: Corte legacy / Reinicio
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [optLegacyDelivered, setOptLegacyDelivered] = useState(true);
+  const [optWipeTx, setOptWipeTx] = useState(false);
+  const [optZeroAccounts, setOptZeroAccounts] = useState(false);
+  const [optSetCutoff, setOptSetCutoff] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  // Modal: Registro Manual
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [manualTipo, setManualTipo] = useState<TransactionType>('expense');
+  const [manualMonto, setManualMonto] = useState('');
+  const [manualDescripcion, setManualDescripcion] = useState('');
+  const [manualCategoria, setManualCategoria] = useState('gasto_manual');
+  const [manualAccountId, setManualAccountId] = useState('caja_chica');
+  const [manualFecha, setManualFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [manualCodigoAnuncio, setManualCodigoAnuncio] = useState('');
+  const [isSavingManual, setIsSavingManual] = useState(false);
+
+  // Modal: Transferencia entre cuentas
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferOrigenId, setTransferOrigenId] = useState('banco_principal');
+  const [transferDestinoId, setTransferDestinoId] = useState('tarjeta_pauta');
+  const [transferMonto, setTransferMonto] = useState('');
+  const [transferDescripcion, setTransferDescripcion] = useState('');
+  const [transferFecha, setTransferFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [isSavingTransfer, setIsSavingTransfer] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+
+  // Modal: Ajustar saldo
+  const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const [adjustAccount, setAdjustAccount] = useState<CashAccount | null>(null);
+  const [adjustSaldo, setAdjustSaldo] = useState('');
+  const [isSavingAdjust, setIsSavingAdjust] = useState(false);
+
+  // Modal: Presupuesto
+  const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [budgetCategoria, setBudgetCategoria] = useState('');
+  const [budgetMonto, setBudgetMonto] = useState('');
+  const [budgetNotas, setBudgetNotas] = useState('');
+  const [isSavingBudget, setIsSavingBudget] = useState(false);
+
+  // Form: Pagos Recurrentes
   const [showPagoFijoForm, setShowPagoFijoForm] = useState(false);
   const [editingPagoFijoId, setEditingPagoFijoId] = useState<string | null>(null);
   const [pagoFijoNombre, setPagoFijoNombre] = useState('');
@@ -323,180 +363,94 @@ export function FinanzasPage() {
   const [pagoFijoFecha, setPagoFijoFecha] = useState('');
   const [pagoFijoCategoria, setPagoFijoCategoria] = useState('software');
   const [pagoFijoFrecuencia, setPagoFijoFrecuencia] = useState('mensual');
+  const [confirmDeletePagoId, setConfirmDeletePagoId] = useState<string | null>(null);
 
-  // Modal de Transacción Manual (Gastos / Pagos)
-  const [showManualModal, setShowManualModal] = useState(false);
-  const [manualTipo, setManualTipo] = useState<TransactionType>('expense');
-  const [manualMonto, setManualMonto] = useState('');
-  const [manualDescripcion, setManualDescripcion] = useState('');
-  const [manualCategoria, setManualCategoria] = useState('gasto_manual');
-  const [manualAccountId, setManualAccountId] = useState('caja_chica');
-  const [manualFecha, setManualFecha] = useState(new Date().toISOString().slice(0, 10));
-  const [manualCodigoAnuncio, setManualCodigoAnuncio] = useState('');
-  const [isSavingManual, setIsSavingManual] = useState(false);
-
-  // Modal de Presupuesto
-  const [showBudgetModal, setShowBudgetModal] = useState(false);
-  const [budgetCategoria, setBudgetCategoria] = useState('');
-  const [budgetMonto, setBudgetMonto] = useState('');
-  const [budgetNotas, setBudgetNotas] = useState('');
-  const [isSavingBudget, setIsSavingBudget] = useState(false);
-
-  // Modal SQL Sprint 2
+  // Modal: SQL
   const [showSqlModal, setShowSqlModal] = useState(false);
+  const [sqlTab, setSqlTab] = useState<'reset' | 'schema'>('reset');
   const [copiedSql, setCopiedSql] = useState(false);
 
-  // Modal de Transferencia entre Cuentas / Billeteras
-  const [showTransferModal, setShowTransferModal] = useState(false);
-  const [transferOrigenId, setTransferOrigenId] = useState('banco_principal');
-  const [transferDestinoId, setTransferDestinoId] = useState('tarjeta_pauta');
-  const [transferMonto, setTransferMonto] = useState('');
-  const [transferDescripcion, setTransferDescripcion] = useState('');
-  const [transferFecha, setTransferFecha] = useState(new Date().toISOString().slice(0, 10));
-  const [isSavingTransfer, setIsSavingTransfer] = useState(false);
-  const [transferError, setTransferError] = useState<string | null>(null);
-
-  const handleTransferSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setTransferError(null);
-    const monto = parseFloat(transferMonto);
-    if (!monto || monto <= 0) {
-      setTransferError('Ingresa un monto válido mayor a 0');
-      return;
-    }
-    if (transferOrigenId === transferDestinoId) {
-      setTransferError('La cuenta de origen y destino no pueden ser la misma');
-      return;
-    }
-
-    setIsSavingTransfer(true);
-    try {
-      const res = await addAccountTransfer({
-        origen_id: transferOrigenId,
-        destino_id: transferDestinoId,
-        monto,
-        fecha: transferFecha,
-        descripcion: transferDescripcion
-      });
-
-      if (!res.success) {
-        setTransferError(res.error || 'No se pudo completar la transferencia');
-        setIsSavingTransfer(false);
-        return;
-      }
-
-      setTransferMonto('');
-      setTransferDescripcion('');
-      setShowTransferModal(false);
-      await loadFinanceData(true);
-    } catch (err: any) {
-      setTransferError(err?.message || 'Error al procesar la transferencia');
-    } finally {
-      setIsSavingTransfer(false);
-    }
-  };
-
-  // Filtros de transacciones
+  // Filtros de libro diario
   const [filterTipo, setFilterTipo] = useState<'all' | 'income' | 'expense' | 'transfer' | 'manual'>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Modal de Ajuste de Saldo de Cuenta
-  const [showAdjustModal, setShowAdjustModal] = useState(false);
-  const [adjustAccount, setAdjustAccount] = useState<CashAccount | null>(null);
-  const [adjustSaldo, setAdjustSaldo] = useState('');
-  const [isSavingAdjust, setIsSavingAdjust] = useState(false);
-
-  const handleSaveAdjust = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!adjustAccount || !adjustSaldo) return;
-    setIsSavingAdjust(true);
-    await updateCashAccountBalance(adjustAccount.id, parseFloat(adjustSaldo));
-    setIsSavingAdjust(false);
-    setShowAdjustModal(false);
-    await loadFinanceData(true);
+  const showNotice = (tipo: 'ok' | 'warn', msg: string) => {
+    setStatusNotice({ tipo, msg });
+    setTimeout(() => {
+      setStatusNotice(prev => (prev?.msg === msg ? null : prev));
+    }, 5500);
   };
 
-  // Manejo de eliminación de transacciones
-  const [deletingTxId, setDeletingTxId] = useState<number | string | null>(null);
-
-  const handleDeleteTransaction = async (tx: MoneyTransaction) => {
-    const desc = tx.descripcion || 'esta transacción';
-    const monto = Number(tx.monto).toFixed(2);
-    const signo = tx.tipo === 'income' ? '+' : '-';
-    const revertirTexto = tx.tipo === 'expense' 
-      ? `Se devolverán $${monto} al saldo de la cuenta.` 
-      : `Se restarán $${monto} del saldo de la cuenta.`;
-
-    const confirmado = window.confirm(
-      `¿Deseas eliminar la transacción "${desc}" (${signo}$${monto})?\n\n${revertirTexto}`
-    );
-    if (!confirmado) return;
-
-    setDeletingTxId(tx.id);
-    await deleteMoneyTransaction(tx.id);
-    await loadFinanceData(true);
-    setDeletingTxId(null);
-  };
-
-  // Carga de datos
   const loadFinanceData = async (silent = false) => {
     if (!silent) setLoading(true);
-    const [accData, budData, txData, ordersRes] = await Promise.all([
-      fetchCashAccounts(),
-      fetchBudgets(),
-      fetchMoneyTransactions(),
-      supabase
-        .from('whatsapp_orders')
-        .select('id, pedido_codigo, nombre_cliente, total, estado, liquidado, courier, metodo_pago, created_at')
-        .in('estado', ['en_camino', 'entregado'])
-        .order('created_at', { ascending: false })
-        .limit(500)
-    ]);
-
-    setAccounts(accData.accounts);
-    setBudgets(budData.budgets);
-    setTransactions(txData.transactions);
-    setIsRealDb(accData.isRealDb || txData.isRealDb);
-    if (!ordersRes.error && ordersRes.data) {
-      setPendingOrders(ordersRes.data as PendingSettlementOrder[]);
-    }
-
-    // Cargar suscripciones fijas desde panel_pagos
     try {
-      const { data } = await supabase.from('panel_pagos').select('*').order('fecha_vencimiento', { ascending: true });
-      if (data) setPagosFijos(data);
-    } catch {
-      // fallback
-    }
+      const [cutoff, accData, budData, txData, ordersRes, pagosRes] = await Promise.all([
+        hydrateFinanceCutoffFromOsEvents(supabase),
+        fetchCashAccounts(),
+        fetchBudgets(),
+        fetchMoneyTransactions(250),
+        supabase
+          .from('whatsapp_orders')
+          .select('id, pedido_codigo, nombre_cliente, total, estado, liquidado, courier, metodo_pago, created_at')
+          .in('estado', ['en_camino', 'entregado'])
+          .order('created_at', { ascending: false })
+          .limit(500),
+        supabase.from('panel_pagos').select('*').order('fecha_vencimiento', { ascending: true }),
+      ]);
 
-    if (!silent) setLoading(false);
+      setFinanceCutoff(cutoff);
+      setAccounts(accData.accounts);
+      setBudgets(budData.budgets);
+      setTransactions(txData.transactions);
+      if (!ordersRes.error && ordersRes.data) {
+        setPendingOrders(ordersRes.data as PendingSettlementOrder[]);
+      }
+      if (!pagosRes.error && pagosRes.data) {
+        setPagosFijos(pagosRes.data);
+      }
+    } finally {
+      if (!silent) setLoading(false);
+    }
   };
 
   useEffect(() => {
     loadFinanceData();
   }, []);
 
-  // Cálculos consolidados
-  const saldoTotalCuentas = useMemo(() => {
-    return accounts.reduce((sum, a) => sum + (a.saldo_actual || 0), 0);
-  }, [accounts]);
+  // Transacciones visibles respetando el corte desde ahora si existe
+  const activeTransactions = useMemo(() => {
+    if (!financeCutoff) return transactions;
+    return transactions.filter(
+      tx => !isRecordBeforeFinanceCutoff(tx.created_at, tx.fecha, financeCutoff)
+    );
+  }, [transactions, financeCutoff]);
 
-  const metricasMes = useMemo(() => {
+  // Pedidos activos respetando el corte desde ahora
+  const activePendingOrders = useMemo(() => {
+    if (!financeCutoff) return pendingOrders;
+    return pendingOrders.filter(
+      o => !isRecordBeforeFinanceCutoff(o.created_at, undefined, financeCutoff)
+    );
+  }, [pendingOrders, financeCutoff]);
+
+  const saldoTotalCuentas = useMemo(
+    () => accounts.reduce((sum, a) => sum + (Number(a.saldo_actual) || 0), 0),
+    [accounts]
+  );
+
+  const metricasPeriodo = useMemo(() => {
     let ingresos = 0;
     let egresos = 0;
-
-    transactions.forEach(tx => {
+    activeTransactions.forEach(tx => {
       if (tx.tipo === 'income') ingresos += Number(tx.monto) || 0;
       if (tx.tipo === 'expense') egresos += Number(tx.monto) || 0;
     });
-
     const utilidadNeta = ingresos - egresos;
     const margen = ingresos > 0 ? (utilidadNeta / ingresos) * 100 : 0;
-
     return { ingresos, egresos, utilidadNeta, margen };
-  }, [transactions]);
+  }, [activeTransactions]);
 
-  // Estimado en calle / pendiente de liquidar (no sumado aún a cuentas hasta pulsar Liquidar Pedido)
+  // Estimado en calle / pendiente de liquidar
   const estimadoPorEntrar = useMemo(() => {
     let entregadosTotal = 0;
     let entregadosCount = 0;
@@ -504,7 +458,7 @@ export function FinanzasPage() {
     let enCaminoCount = 0;
     const byCourierMap = new Map<string, { courier: string; total: number; count: number }>();
 
-    pendingOrders.forEach(o => {
+    activePendingOrders.forEach(o => {
       if (o.liquidado) return;
       const monto = Number(o.total || 0);
       if (o.estado === 'entregado') {
@@ -531,12 +485,12 @@ export function FinanzasPage() {
       totalCount: entregadosCount + enCaminoCount,
       courierBreakdown,
     };
-  }, [pendingOrders]);
+  }, [activePendingOrders]);
 
-  // Detectar cobros automáticos antiguos (venta_pedido) de pedidos que aún NO han sido liquidados
+  // Cobros automáticos viejos (venta_pedido) para pedidos todavía sin liquidar
   const prematureAutoTxs = useMemo(() => {
-    const orderById = new Map(pendingOrders.map(o => [String(o.id), o]));
-    return transactions.filter(t => {
+    const orderById = new Map(activePendingOrders.map(o => [String(o.id), o]));
+    return activeTransactions.filter(t => {
       if (t.categoria !== 'venta_pedido' || t.es_manual || t.source_table !== 'whatsapp_orders') {
         return false;
       }
@@ -544,12 +498,138 @@ export function FinanzasPage() {
       const ord = orderById.get(String(t.source_id));
       return ord ? !ord.liquidado : false;
     });
-  }, [transactions, pendingOrders]);
+  }, [activeTransactions, activePendingOrders]);
 
   const prematureTotal = useMemo(
     () => prematureAutoTxs.reduce((sum, tx) => sum + (Number(tx.monto) || 0), 0),
     [prematureAutoTxs]
   );
+
+  // Presupuestos con gasto real calculado desde activeTransactions
+  const budgetsWithRealSpent = useMemo(() => {
+    return budgets.map(b => {
+      const catLower = b.categoria.toLowerCase();
+      const isMarketing = catLower.includes('marketing') || catLower.includes('pauta');
+      const isEnvios = catLower.includes('envio') || catLower.includes('logist');
+      const isEmpaque = catLower.includes('empaque') || catLower.includes('suministro');
+      const isOperativo = catLower.includes('operat') || catLower.includes('nomina');
+
+      let gastoReal = 0;
+      activeTransactions.forEach(t => {
+        if (t.tipo !== 'expense') return;
+        const tCat = (t.categoria || '').toLowerCase();
+        if (isMarketing && (tCat.includes('pauta') || tCat.includes('marketing') || t.account_id === 'tarjeta_pauta')) {
+          gastoReal += Number(t.monto) || 0;
+        } else if (isEnvios && (tCat.includes('flete') || tCat.includes('envio'))) {
+          gastoReal += Number(t.monto) || 0;
+        } else if (isEmpaque && (tCat.includes('empaque') || tCat.includes('bolsa') || tCat.includes('suministro'))) {
+          gastoReal += Number(t.monto) || 0;
+        } else if (isOperativo && (tCat.includes('nomina') || tCat.includes('sueldo') || tCat.includes('operat'))) {
+          gastoReal += Number(t.monto) || 0;
+        } else if (!isMarketing && !isEnvios && !isEmpaque && !isOperativo && tCat.includes(catLower)) {
+          gastoReal += Number(t.monto) || 0;
+        }
+      });
+
+      return { ...b, monto_gastado: gastoReal };
+    });
+  }, [budgets, activeTransactions]);
+
+  const presupuestoTotal = useMemo(() => {
+    const totalPresupuestado = budgetsWithRealSpent.reduce((sum, b) => sum + (b.monto_presupuestado || 0), 0);
+    const totalGastado = budgetsWithRealSpent.reduce((sum, b) => sum + (b.monto_gastado || 0), 0);
+    const pct = totalPresupuestado > 0 ? (totalGastado / totalPresupuestado) * 100 : 0;
+    return { totalPresupuestado, totalGastado, pct };
+  }, [budgetsWithRealSpent]);
+
+  const filteredTransactions = useMemo(() => {
+    return activeTransactions.filter(t => {
+      if (filterTipo === 'income' && t.tipo !== 'income') return false;
+      if (filterTipo === 'expense' && t.tipo !== 'expense') return false;
+      if (filterTipo === 'transfer' && t.tipo !== 'transfer') return false;
+      if (filterTipo === 'manual' && !t.es_manual) return false;
+
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        const descMatch = (t.descripcion || '').toLowerCase().includes(term);
+        const catMatch = (t.categoria || '').toLowerCase().includes(term);
+        const accMatch = (t.account_nombre || t.account_id || '').toLowerCase().includes(term);
+        if (!descMatch && !catMatch && !accMatch) return false;
+      }
+      return true;
+    });
+  }, [activeTransactions, filterTipo, searchTerm]);
+
+  /* ------------------------------ Acciones ------------------------------ */
+  const handleQuickClearLegacyDelivered = async () => {
+    if (clearingLegacy) return;
+    setClearingLegacy(true);
+    try {
+      const res = await clearLegacyDeliveredPending();
+      setConfirmClearLegacy(false);
+      await loadFinanceData(true);
+      if (!res.success) {
+        showNotice('warn', res.error || 'No se pudo archivar el legacy de entregados.');
+      } else {
+        showNotice(
+          'ok',
+          `Se archivaron ${res.clearedCount} pedidos entregados legacy (${fmtMoney(res.clearedTotal)}). Tus cuentas no fueron modificadas.`
+        );
+      }
+    } finally {
+      setClearingLegacy(false);
+    }
+  };
+
+  const handleResetFromNow = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetting(true);
+    try {
+      const msgs: string[] = [];
+      let hasWarn = false;
+
+      if (optLegacyDelivered) {
+        const legRes = await clearLegacyDeliveredPending();
+        if (!legRes.success) {
+          hasWarn = true;
+          msgs.push(legRes.error || 'Error archivando pedidos entregados');
+        } else {
+          msgs.push(`${legRes.clearedCount} entregados legacy cerrados (${fmtMoney(legRes.clearedTotal)})`);
+        }
+      }
+
+      if (optWipeTx || optZeroAccounts || optSetCutoff) {
+        const res = await resetFinancesFromNow({
+          wipeTransactions: optWipeTx,
+          resetBalancesToZero: optZeroAccounts,
+          setOrdersCutoff: optSetCutoff,
+        });
+        if (optSetCutoff) setFinanceCutoff(res.cutoffIso);
+        if (res.warning) {
+          hasWarn = true;
+          msgs.push(res.warning);
+        } else {
+          msgs.push('corte financiero aplicado');
+        }
+      }
+
+      setShowResetModal(false);
+      await loadFinanceData(true);
+      showNotice(
+        hasWarn ? 'warn' : 'ok',
+        msgs.length > 0 ? msgs.join(' · ') : 'Listo.'
+      );
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const handleClearCutoff = async () => {
+    await clearFinanceCutoff();
+    setFinanceCutoff(null);
+    await loadFinanceData(true);
+    showNotice('ok', 'Corte temporal removido: mostrando historial completo disponible.');
+  };
 
   const handleCleanPrematureSales = async () => {
     if (prematureAutoTxs.length === 0 || cleaningPremature) return;
@@ -560,60 +640,24 @@ export function FinanzasPage() {
       }
       setConfirmCleanPremature(false);
       await loadFinanceData(true);
+      showNotice('ok', 'Se revirtieron los cobros automáticos sin liquidar.');
     } finally {
       setCleaningPremature(false);
     }
   };
 
-  const copyPatchSql = () => {
-    navigator.clipboard.writeText(FINANCE_TRIGGER_PATCH_SQL);
-    setCopiedPatchSql(true);
-    setTimeout(() => setCopiedPatchSql(false), 2200);
+  const handleDeleteTransaction = async (txId: number | string) => {
+    setDeletingTxId(txId);
+    await deleteMoneyTransaction(txId);
+    setConfirmDeleteTxId(null);
+    await loadFinanceData(true);
+    setDeletingTxId(null);
   };
 
-  // Presupuestos con cálculo reactivo del gasto real del mes
-  const budgetsWithRealSpent = useMemo(() => {
-    return budgets.map(b => {
-      const isMarketing = b.categoria.toLowerCase().includes('marketing') || b.categoria.toLowerCase().includes('pauta');
-      const isEnvios = b.categoria.toLowerCase().includes('envio') || b.categoria.toLowerCase().includes('logist');
-      const isEmpaque = b.categoria.toLowerCase().includes('empaque') || b.categoria.toLowerCase().includes('suministro');
-      const isOperativo = b.categoria.toLowerCase().includes('operat') || b.categoria.toLowerCase().includes('nomina');
-
-      let gastoReal = 0;
-      transactions.forEach(t => {
-        if (t.tipo !== 'expense') return;
-        const cat = (t.categoria || '').toLowerCase();
-        if (isMarketing && (cat.includes('pauta') || cat.includes('marketing') || t.account_id === 'tarjeta_pauta')) {
-          gastoReal += Number(t.monto) || 0;
-        } else if (isEnvios && (cat.includes('flete') || cat.includes('envio'))) {
-          gastoReal += Number(t.monto) || 0;
-        } else if (isEmpaque && (cat.includes('empaque') || cat.includes('bolsa') || cat.includes('suministro'))) {
-          gastoReal += Number(t.monto) || 0;
-        } else if (isOperativo && (cat.includes('nomina') || cat.includes('sueldo') || cat.includes('operat'))) {
-          gastoReal += Number(t.monto) || 0;
-        }
-      });
-
-      return {
-        ...b,
-        monto_gastado: gastoReal > 0 ? gastoReal : (b.monto_gastado || 0)
-      };
-    });
-  }, [budgets, transactions]);
-
-  const presupuestoTotal = useMemo(() => {
-    const totalPresupuestado = budgetsWithRealSpent.reduce((sum, b) => sum + (b.monto_presupuestado || 0), 0);
-    const totalGastado = budgetsWithRealSpent.reduce((sum, b) => sum + (b.monto_gastado || 0), 0);
-    const pct = totalPresupuestado > 0 ? (totalGastado / totalPresupuestado) * 100 : 0;
-    return { totalPresupuestado, totalGastado, pct };
-  }, [budgetsWithRealSpent]);
-
-  // Manejo de Registro Manual
   const handleSaveManualTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualMonto || !manualDescripcion) return;
     setIsSavingManual(true);
-
     await addManualTransaction({
       account_id: manualAccountId,
       tipo: manualTipo,
@@ -621,33 +665,77 @@ export function FinanzasPage() {
       monto: parseFloat(manualMonto),
       descripcion: manualDescripcion,
       fecha: manualFecha,
-      codigo_anuncio: manualCategoria === 'pauta_publicidad' ? manualCodigoAnuncio : undefined
+      codigo_anuncio: manualCategoria === 'pauta_publicidad' ? manualCodigoAnuncio : undefined,
     });
-
     setIsSavingManual(false);
     setShowManualModal(false);
     setManualMonto('');
     setManualDescripcion('');
     setManualCodigoAnuncio('');
     await loadFinanceData(true);
+    showNotice('ok', 'Movimiento asentado.');
   };
 
-  // Manejo de Presupuesto
+  const handleTransferSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTransferError(null);
+    const monto = parseFloat(transferMonto);
+    if (!monto || monto <= 0) {
+      setTransferError('Ingresa un monto mayor a 0.');
+      return;
+    }
+    if (transferOrigenId === transferDestinoId) {
+      setTransferError('La cuenta de origen y destino deben ser distintas.');
+      return;
+    }
+    setIsSavingTransfer(true);
+    try {
+      const res = await addAccountTransfer({
+        origen_id: transferOrigenId,
+        destino_id: transferDestinoId,
+        monto,
+        fecha: transferFecha,
+        descripcion: transferDescripcion,
+      });
+      if (!res.success) {
+        setTransferError(res.error || 'No se pudo completar la transferencia.');
+        return;
+      }
+      setTransferMonto('');
+      setTransferDescripcion('');
+      setShowTransferModal(false);
+      await loadFinanceData(true);
+      showNotice('ok', 'Transferencia registrada.');
+    } catch (err: any) {
+      setTransferError(err?.message || 'Error al transferir.');
+    } finally {
+      setIsSavingTransfer(false);
+    }
+  };
+
+  const handleSaveAdjust = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adjustAccount || adjustSaldo === '') return;
+    setIsSavingAdjust(true);
+    await updateCashAccountBalance(adjustAccount.id, parseFloat(adjustSaldo));
+    setIsSavingAdjust(false);
+    setShowAdjustModal(false);
+    await loadFinanceData(true);
+    showNotice('ok', `Saldo de ${adjustAccount.nombre} actualizado.`);
+  };
+
   const handleSaveBudget = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!budgetCategoria || !budgetMonto) return;
     setIsSavingBudget(true);
-
     const d = new Date();
     const periodo = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-
     await saveBudget({
       periodo,
       categoria: budgetCategoria,
       monto_presupuestado: parseFloat(budgetMonto),
-      notas: budgetNotas
+      notas: budgetNotas,
     });
-
     setIsSavingBudget(false);
     setShowBudgetModal(false);
     setBudgetCategoria('');
@@ -656,629 +744,552 @@ export function FinanzasPage() {
     await loadFinanceData(true);
   };
 
-  // Manejo de Pagos Fijos (Suscripciones)
   const handleSavePagoFijo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pagoFijoNombre || !pagoFijoMonto || !pagoFijoFecha) return;
-
     const dataToSave = {
       nombre: pagoFijoNombre,
       monto: parseFloat(pagoFijoMonto),
       fecha_vencimiento: pagoFijoFecha,
       categoria: pagoFijoCategoria,
-      frecuencia: pagoFijoFrecuencia
+      frecuencia: pagoFijoFrecuencia,
     };
-
     if (editingPagoFijoId) {
       await supabase.from('panel_pagos').update(dataToSave).eq('id', editingPagoFijoId);
     } else {
       await supabase.from('panel_pagos').insert(dataToSave);
     }
-
     setShowPagoFijoForm(false);
     setEditingPagoFijoId(null);
     setPagoFijoNombre('');
     setPagoFijoMonto('');
     setPagoFijoFecha('');
-    loadFinanceData(true);
+    await loadFinanceData(true);
   };
 
   const handlePagarSuscripcion = async (pago: PagoFijo) => {
-    let nuevaFecha = new Date(pago.fecha_vencimiento + 'T12:00:00');
+    const nuevaFecha = new Date(pago.fecha_vencimiento + 'T12:00:00');
     if (pago.frecuencia === 'mensual') nuevaFecha.setMonth(nuevaFecha.getMonth() + 1);
     else if (pago.frecuencia === 'anual') nuevaFecha.setFullYear(nuevaFecha.getFullYear() + 1);
 
-    const nuevaFechaStr = nuevaFecha.toISOString().split('T')[0];
-    await supabase.from('panel_pagos').update({ fecha_vencimiento: nuevaFechaStr }).eq('id', pago.id);
+    await supabase
+      .from('panel_pagos')
+      .update({ fecha_vencimiento: nuevaFecha.toISOString().split('T')[0] })
+      .eq('id', pago.id);
 
-    // Asentar automáticamente como gasto manual en el libro diario
     await addManualTransaction({
       account_id: 'banco_principal',
       tipo: 'expense',
       categoria: 'suscripciones',
       monto: pago.monto,
-      descripcion: `Pago recurrente suscripción ${pago.nombre}`,
-      fecha: new Date().toISOString().slice(0, 10)
+      descripcion: `Pago recurrente ${pago.nombre}`,
+      fecha: new Date().toISOString().slice(0, 10),
     });
 
-    loadFinanceData(true);
+    await loadFinanceData(true);
+    showNotice('ok', `Pago de ${pago.nombre} asentado.`);
   };
 
   const handleDeletePagoFijo = async (id: string) => {
-    if (!confirm('¿Eliminar esta suscripción de la lista?')) return;
     await supabase.from('panel_pagos').delete().eq('id', id);
-    loadFinanceData(true);
+    setConfirmDeletePagoId(null);
+    await loadFinanceData(true);
   };
 
-  // Filtrado de transacciones
-  const filteredTransactions = useMemo(() => {
-    return transactions.filter(t => {
-      if (filterTipo === 'income' && t.tipo !== 'income') return false;
-      if (filterTipo === 'expense' && t.tipo !== 'expense') return false;
-      if (filterTipo === 'transfer' && t.tipo !== 'transfer') return false;
-      if (filterTipo === 'manual' && !t.es_manual) return false;
-
-      if (searchTerm.trim()) {
-        const term = searchTerm.toLowerCase();
-        const descMatch = t.descripcion.toLowerCase().includes(term);
-        const catMatch = t.categoria.toLowerCase().includes(term);
-        const accMatch = (t.account_nombre || t.account_id).toLowerCase().includes(term);
-        if (!descMatch && !catMatch && !accMatch) return false;
-      }
-      return true;
-    });
-  }, [transactions, filterTipo, searchTerm]);
-
-  const copySql = () => {
-    navigator.clipboard.writeText(SPRINT2_SQL_CODE);
+  const copyActiveSql = () => {
+    navigator.clipboard.writeText(
+      sqlTab === 'reset' ? FINANCE_RESET_AND_PATCH_SQL : SPRINT2_SQL_CODE
+    );
     setCopiedSql(true);
     setTimeout(() => setCopiedSql(false), 2000);
   };
 
-  const getAccountIcon = (tipo: string) => {
-    switch (tipo) {
-      case 'bank': return <Building size={18} className="text-blue-500" />;
-      case 'credit_card': return <CreditCard size={18} className="text-purple-500" />;
-      default: return <Coins size={18} className="text-emerald-500" />;
-    }
-  };
+  const cutoffLabel = fmtCutoffLabel(financeCutoff);
 
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-14">
-      {/* Encabezado General */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
-        <div className="min-w-0 shrink-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <Wallet className="text-[var(--ac)] shrink-0" size={24} />
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight whitespace-normal sm:whitespace-nowrap">
-              Finanzas & Money Engine
-            </h1>
-            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
-              Sprint 2
-            </span>
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-16">
+      {/* Encabezado limpio y de una sola fila en escritorio */}
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--tx)]">
+            Finanzas
+          </h1>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--mu)] mt-1">
+            <span>{accounts.length} cuentas activas</span>
+            <span aria-hidden="true">·</span>
+            {cutoffLabel ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span>Conteo desde {cutoffLabel}</span>
+                <button
+                  type="button"
+                  onClick={handleClearCutoff}
+                  className="underline hover:text-[var(--tx)] transition-colors"
+                >
+                  Ver todo
+                </button>
+              </span>
+            ) : (
+              <span>Cobros ingresan únicamente al liquidar pedido</span>
+            )}
           </div>
-          <p className="text-xs text-[var(--mu)] mt-1 max-w-xl">
-            Gestión de liquidez, cuentas de dinero, control de presupuestos y registro de gastos/pagos manuales.
-          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
+            type="button"
+            onClick={() => setShowResetModal(true)}
+            className="px-3 py-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
+          >
+            <RotateCcw size={13} /> Limpiar legacy
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowSqlModal(true)}
+            className="px-3 py-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
+          >
+            <Code size={13} /> SQL
+          </button>
+
+          <button
+            type="button"
             onClick={() => {
               setTransferError(null);
               setShowTransferModal(true);
             }}
-            className="flex-1 sm:flex-none px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-colors"
-            title="Mover dinero entre cuentas (ej. Banco a Tarjeta de Ads o Efectivo a Banco)"
+            className="px-3.5 py-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-xs font-semibold text-[var(--tx)] flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
           >
-            <ArrowRightLeft size={15} /> ⇄ Transferir entre Billeteras
+            <ArrowRightLeft size={13} /> Transferir
           </button>
 
           <button
+            type="button"
             onClick={() => {
               setManualTipo('expense');
               setShowManualModal(true);
             }}
-            className="flex-1 sm:flex-none px-4 py-2 bg-[var(--tx)] text-[var(--cd)] rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:opacity-90 shadow-sm"
+            className="px-4 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-opacity"
           >
-            <Plus size={15} /> Registrar Gasto / Pago Manual
-          </button>
-
-          <button
-            onClick={() => setShowSqlModal(true)}
-            className="px-3 py-2 border border-[var(--bd)] rounded-xl text-xs font-bold flex items-center gap-1.5 hover:bg-sf transition-colors"
-          >
-            <Code size={14} /> SQL Sprint 2
+            <Plus size={14} /> Nuevo movimiento
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Selector de Pestañas */}
-      <div className="flex items-center p-1 bg-sf rounded-xl border border-[var(--bd)] overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('dashboard')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap flex items-center gap-2 transition-colors ${
-            activeTab === 'dashboard' ? 'bg-cd text-[var(--tx)] shadow-sm' : 'text-[var(--mu)] hover:text-[var(--tx)]'
+      {/* Aviso discreto de estado */}
+      {statusNotice && (
+        <div
+          className={`px-4 py-2.5 rounded-lg border text-xs flex items-center justify-between gap-3 ${
+            statusNotice.tipo === 'ok'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+              : 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
           }`}
         >
-          <DollarSign size={14} /> Cuentas & Liquidez
-        </button>
-        <button
-          onClick={() => setActiveTab('budgets')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap flex items-center gap-2 transition-colors ${
-            activeTab === 'budgets' ? 'bg-cd text-[var(--tx)] shadow-sm' : 'text-[var(--mu)] hover:text-[var(--tx)]'
-          }`}
-        >
-          <PieChart size={14} /> Presupuestos (Budgets)
-        </button>
-        <button
-          onClick={() => setActiveTab('transactions')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap flex items-center gap-2 transition-colors ${
-            activeTab === 'transactions' ? 'bg-cd text-[var(--tx)] shadow-sm' : 'text-[var(--mu)] hover:text-[var(--tx)]'
-          }`}
-        >
-          <Receipt size={14} /> Libro de Movimientos ({transactions.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('fixed_payments')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap flex items-center gap-2 transition-colors ${
-            activeTab === 'fixed_payments' ? 'bg-cd text-[var(--tx)] shadow-sm' : 'text-[var(--mu)] hover:text-[var(--tx)]'
-          }`}
-        >
-          <Calendar size={14} /> Suscripciones Fijas ({pagosFijos.length})
-        </button>
-      </div>
+          <span>{statusNotice.msg}</span>
+          <button
+            type="button"
+            onClick={() => setStatusNotice(null)}
+            className="opacity-70 hover:opacity-100"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
-      {/* PESTAÑA 1: CUENTAS & LIQUIDEZ */}
-      {activeTab === 'dashboard' && (
+      {/* Navegación por pestañas con línea inferior limpia */}
+      <nav className="flex items-center gap-6 border-b border-[var(--bd)] overflow-x-auto">
+        {[
+          { id: 'resumen', label: 'Resumen' },
+          { id: 'movimientos', label: `Libro diario (${activeTransactions.length})` },
+          { id: 'planificacion', label: 'Presupuestos y fijos' },
+        ].map(tab => {
+          const active = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`pb-3 text-xs font-semibold whitespace-nowrap shrink-0 border-b-2 transition-colors ${
+                active
+                  ? 'border-[var(--tx)] text-[var(--tx)]'
+                  : 'border-transparent text-[var(--mu)] hover:text-[var(--tx)]'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* PESTAÑA 1: RESUMEN */}
+      {activeTab === 'resumen' && (
         <div className="flex flex-col gap-6">
-          {/* Tarjetas KPI Superiores */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-              <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Saldo Total Disponible</span>
-              <div className="text-2xl font-black mt-1 text-emerald-600 dark:text-emerald-400">
-                ${saldoTotalCuentas.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          {/* Franja de 4 métricas unificada por divisores sutiles */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
+            <div className="p-5">
+              <div className="text-xs font-medium text-[var(--mu)]">Liquidez disponible</div>
+              <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
+                {loading ? '—' : fmtMoney(saldoTotalCuentas)}
               </div>
-              <span className="text-[10px] tx-mu mt-1 block">En {accounts.length} cuentas activas</span>
+              <div className="text-xs text-[var(--mu)] mt-1">
+                Suma en {accounts.length} cuentas
+              </div>
             </div>
 
-            <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-              <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Ingresos del Mes</span>
-              <div className="text-2xl font-black mt-1 flex items-center gap-1 text-emerald-500">
-                <ArrowUpRight size={20} />
-                ${metricasMes.ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            <div className="p-5">
+              <div className="text-xs font-medium text-[var(--mu)]">Por liquidar en calle</div>
+              <div className="text-2xl font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400 mt-1.5">
+                {loading ? '—' : fmtMoney(estimadoPorEntrar.totalAfuera)}
               </div>
-              <span className="text-[10px] tx-mu mt-1 block">Cobros y abonos</span>
+              <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
+                {estimadoPorEntrar.entregadosCount} entregados · {estimadoPorEntrar.enCaminoCount} en ruta
+              </div>
             </div>
 
-            <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-              <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Egresos del Mes</span>
-              <div className="text-2xl font-black mt-1 flex items-center gap-1 text-rose-500">
-                <ArrowDownRight size={20} />
-                ${metricasMes.egresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            <div className="p-5">
+              <div className="text-xs font-medium text-[var(--mu)]">Ingresos liquidados</div>
+              <div className="text-2xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1.5">
+                {loading ? '—' : fmtMoney(metricasPeriodo.ingresos)}
               </div>
-              <span className="text-[10px] tx-mu mt-1 block">Pauta + envíos + compras</span>
+              <div className="text-xs text-[var(--mu)] mt-1">
+                Cobros confirmados en caja
+              </div>
             </div>
 
-            <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-              <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Utilidad Neta Libre</span>
-              <div className="text-2xl font-black mt-1 text-[var(--ac)]">
-                ${metricasMes.utilidadNeta.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            <div className="p-5">
+              <div className="text-xs font-medium text-[var(--mu)]">Egresos del período</div>
+              <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
+                {loading ? '—' : fmtMoney(metricasPeriodo.egresos)}
               </div>
-              <span className="text-[10px] tx-mu mt-1 block">Margen: {metricasMes.margen.toFixed(1)}%</span>
+              <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
+                Neto {fmtMoney(metricasPeriodo.utilidadNeta)} · {metricasPeriodo.margen.toFixed(1)}% margen
+              </div>
             </div>
-          </div>
+          </section>
 
-          {/* Estimado en Calle / Por Entrar (Entregados sin liquidar + En Camino) */}
-          <div className="p-5 rounded-2xl bg-cd border border-amber-500/30 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Clock size={16} className="text-amber-500 shrink-0" />
-                  <h2 className="text-sm font-bold text-[var(--tx)]">
-                    Estimado en Calle / Por Entrar (Sin Liquidar)
-                  </h2>
+          {/* Grid principal: Cuentas (izq) + Pendiente por liquidar (der) */}
+          <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+            {/* Cuentas de dinero */}
+            <div className="lg:col-span-7 bg-cd border border-[var(--bd)] rounded-xl flex flex-col">
+              <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-[var(--tx)]">Cuentas de dinero</h2>
+                <span className="text-xs text-[var(--mu)]">Saldos reales</span>
+              </div>
+
+              {loading ? (
+                <div className="p-5 space-y-3">
+                  {[1, 2, 3, 4].map(i => (
+                    <div key={i} className="h-10 rounded-lg bg-sf animate-pulse" />
+                  ))}
                 </div>
-                <p className="text-[11px] tx-mu mt-0.5">
-                  Los pedidos pasan a <strong>Entregado</strong> sin sumarse a tus cuentas; solo ingresan a Finanzas al pulsar <strong>Liquidar Pedido</strong>.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={copyPatchSql}
-                  className="px-3 py-1.5 rounded-xl border border-[var(--bd)] bg-sf hover:bg-cd text-[11px] font-bold flex items-center gap-1.5 transition-colors"
-                  title="Copia el SQL para desactivar el auto-cobro al pasar a Entregado en Supabase"
-                >
-                  {copiedPatchSql ? <Check size={13} className="text-emerald-500" /> : <Code size={13} />}
-                  {copiedPatchSql ? '¡Patch SQL Copiado!' : 'Copiar Patch SQL Trigger'}
-                </button>
-                <a
-                  href="/pedidos"
-                  className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-600 dark:text-amber-300 text-[11px] font-bold flex items-center gap-1.5 transition-colors"
-                >
-                  Ir a Liquidar Pedidos <ExternalLink size={12} />
-                </a>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25">
-                <span className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-300 block">
-                  Entregados Pendientes de Depósito
-                </span>
-                <div className="text-xl font-black font-mono text-amber-600 dark:text-amber-300 mt-1">
-                  ${estimadoPorEntrar.entregadosTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <span className="text-[10px] tx-mu mt-0.5 block">
-                  {estimadoPorEntrar.entregadosCount} {estimadoPorEntrar.entregadosCount === 1 ? 'pedido entregado' : 'pedidos entregados'} sin liquidar
-                </span>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-sky-500/10 border border-sky-500/25">
-                <span className="text-[10px] uppercase font-bold text-sky-600 dark:text-sky-300 block">
-                  En Ruta por Cobrar
-                </span>
-                <div className="text-xl font-black font-mono text-sky-600 dark:text-sky-300 mt-1">
-                  ${estimadoPorEntrar.enCaminoTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <span className="text-[10px] tx-mu mt-0.5 block">
-                  {estimadoPorEntrar.enCaminoCount} {estimadoPorEntrar.enCaminoCount === 1 ? 'paquete en camino' : 'paquetes en camino'}
-                </span>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-sf border border-[var(--bd)]">
-                <span className="text-[10px] uppercase font-bold tx-mu block">
-                  Total Estimado por Entrar
-                </span>
-                <div className="text-xl font-black font-mono text-[var(--tx)] mt-1">
-                  ${estimadoPorEntrar.totalAfuera.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <span className="text-[10px] tx-mu mt-0.5 block">
-                  {estimadoPorEntrar.totalCount} {estimadoPorEntrar.totalCount === 1 ? 'pedido activo' : 'pedidos activos'} fuera de caja
-                </span>
-              </div>
-            </div>
-
-            {estimadoPorEntrar.courierBreakdown.length > 0 && (
-              <div className="pt-2 border-t border-[var(--bd)] flex flex-wrap items-center gap-2">
-                <span className="text-[10px] uppercase font-bold tx-mu flex items-center gap-1 mr-1">
-                  <Truck size={12} /> Por motorista:
-                </span>
-                {estimadoPorEntrar.courierBreakdown.map(item => (
-                  <span
-                    key={item.courier}
-                    className="px-2.5 py-1 rounded-lg bg-sf border border-[var(--bd)] text-[11px] font-semibold flex items-center gap-1.5"
-                  >
-                    <span>{item.courier}:</span>
-                    <span className="font-mono font-bold text-amber-600 dark:text-amber-300">
-                      ${item.total.toFixed(2)}
-                    </span>
-                    <span className="text-[10px] tx-mu">({item.count})</span>
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {prematureAutoTxs.length > 0 && (
-              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
-                <div className="flex items-start gap-2 text-rose-700 dark:text-rose-200">
-                  <AlertCircle size={16} className="shrink-0 mt-0.5 text-rose-500" />
-                  <div>
-                    <p className="font-bold">
-                      Hay {prematureAutoTxs.length} cobro(s) automáticos de pedidos que aún no has liquidado (${prematureTotal.toFixed(2)}).
-                    </p>
-                    <p className="text-[11px] opacity-85 mt-0.5">
-                      Ejecuta el <strong>Patch SQL Trigger</strong> en Supabase para que no vuelvan a sumarse solos al entregar, y revierte estos cobros prematuros para cuadrar tu caja.
-                    </p>
-                  </div>
-                </div>
-
-                {confirmCleanPremature ? (
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      disabled={cleaningPremature}
-                      onClick={handleCleanPrematureSales}
-                      className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] disabled:opacity-50"
+              ) : (
+                <div className="divide-y divide-[var(--bd)] flex-1">
+                  {accounts.map(acc => (
+                    <div
+                      key={acc.id}
+                      className="px-5 py-3.5 flex items-center justify-between gap-4 hover:bg-sf/50 transition-colors"
                     >
-                      {cleaningPremature ? 'Revirtiendo...' : 'Confirmar Reversión'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmCleanPremature(false)}
-                      className="px-2.5 py-1.5 rounded-lg border border-[var(--bd)] bg-cd text-[11px] font-semibold"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmCleanPremature(true)}
-                    className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] shrink-0"
-                  >
-                    Revertir {prematureAutoTxs.length} cobro(s) sin liquidar
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-[var(--tx)] truncate">
+                          {acc.nombre}
+                        </div>
+                        <div className="text-xs text-[var(--mu)] mt-0.5">
+                          {accountTypeLabel(acc.tipo)} · {acc.moneda}
+                        </div>
+                      </div>
 
-          {/* Cuentas de Dinero (Billeteras) */}
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold uppercase tracking-wider tx-mu flex items-center gap-2">
-                <Coins size={16} /> Cuentas de Dinero y Billeteras
-              </h2>
-              <span className="text-xs text-[var(--mu)]">Actualizadas por eventos en tiempo real</span>
-            </div>
+                      <div className="flex items-center gap-4 shrink-0">
+                        <div className="text-base font-bold font-mono tabular-nums text-[var(--tx)]">
+                          {fmtMoney(acc.saldo_actual)}
+                        </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {accounts.map(acc => (
-                <div key={acc.id} className="p-5 bg-cd border border-[var(--bd)] rounded-2xl flex flex-col justify-between shadow-sm relative overflow-hidden group">
-                  <div className="flex items-start justify-between">
-                    <div className="p-2.5 bg-sf rounded-xl border border-[var(--bd)]">
-                      {getAccountIcon(acc.tipo)}
-                    </div>
-                    <span className="text-[10px] font-mono uppercase bg-sf px-2 py-0.5 rounded-full border border-[var(--bd)] tx-mu">
-                      {acc.tipo}
-                    </span>
-                  </div>
-
-                  <div className="mt-4">
-                    <h3 className="font-bold text-sm text-[var(--tx)] truncate">{acc.nombre}</h3>
-                    <div className="text-xl font-black mt-1" style={{ color: acc.color || 'var(--tx)' }}>
-                      ${acc.saldo_actual.toLocaleString('en-US', { minimumFractionDigits: 2 })} {acc.moneda}
-                    </div>
-                  </div>
-
-                  <div className="mt-3 pt-3 border-t border-[var(--bd)] flex items-center justify-between text-[11px] tx-mu">
-                    <button
-                      onClick={() => {
-                        setAdjustAccount(acc);
-                        setAdjustSaldo(String(acc.saldo_actual));
-                        setShowAdjustModal(true);
-                      }}
-                      className="hover:text-[var(--tx)] hover:underline flex items-center gap-1 font-medium transition-colors"
-                      title="Definir saldo actual"
-                    >
-                      <Pencil size={11} /> Ajustar
-                    </button>
-                    <button
-                      onClick={() => {
-                        setTransferOrigenId(acc.id);
-                        const otra = accounts.find(a => a.id !== acc.id);
-                        if (otra) setTransferDestinoId(otra.id);
-                        setTransferError(null);
-                        setShowTransferModal(true);
-                      }}
-                      className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-bold transition-colors"
-                      title="Mover dinero desde esta cuenta a otra"
-                    >
-                      <ArrowRightLeft size={11} /> Transferir
-                    </button>
-                    <button
-                      onClick={() => {
-                        setManualAccountId(acc.id);
-                        setShowManualModal(true);
-                      }}
-                      className="text-[var(--ac)] hover:underline font-bold"
-                    >
-                      + Movimiento
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Card de Conexión de Pauta Publicitaria Meta Ads */}
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-500/10 via-purple-500/5 to-transparent border border-purple-500/20 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-purple-500/20 text-purple-600 dark:text-purple-400">
-                <Megaphone size={20} />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-sm text-[var(--tx)]">Conexión Pauta Publicitaria (Meta Ads / TikTok)</h3>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-600 dark:text-purple-300">
-                    Fase 4 Activa
-                  </span>
-                </div>
-                <p className="text-xs tx-mu mt-0.5">
-                  Los gastos en publicidad descuentan de la <strong>Tarjeta Débito Meta Ads</strong>, alimentan el <strong>Event Stream</strong> y calculan el ROAS por anuncio.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <button
-                onClick={() => {
-                  setManualTipo('expense');
-                  setManualCategoria('pauta_publicidad');
-                  setManualAccountId('tarjeta_pauta');
-                  setShowManualModal(true);
-                }}
-                className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
-              >
-                <Plus size={14} /> Registrar Pauta
-              </button>
-              <a
-                href="/rentabilidad"
-                className="px-3.5 py-1.5 rounded-xl border border-[var(--bd)] bg-sf hover:bg-cd text-xs font-bold flex items-center gap-1.5 transition-colors"
-              >
-                Ver ROAS & Anuncios <ExternalLink size={12} />
-              </a>
-            </div>
-          </div>
-
-          {/* Resumen rápido de últimos movimientos */}
-          <div className="bg-cd border border-[var(--bd)] rounded-2xl p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold flex items-center gap-2">
-                <Receipt size={16} className="text-[var(--ac)]" /> Últimos Movimientos Asentados
-              </h3>
-              <button onClick={() => setActiveTab('transactions')} className="text-xs text-[var(--ac)] hover:underline font-bold">
-                Ver todos los movimientos →
-              </button>
-            </div>
-
-            <div className="divide-y divide-[var(--bd)]">
-              {transactions.slice(0, 5).map(tx => (
-                <div key={tx.id} className="py-3 flex items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className={`p-2 rounded-xl shrink-0 ${tx.tipo === 'income' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
-                      {tx.tipo === 'income' ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="font-bold truncate text-[var(--tx)]">{tx.descripcion}</div>
-                      <div className="text-[10px] tx-mu mt-0.5 flex items-center gap-2">
-                        <span>{tx.fecha}</span>
-                        <span>•</span>
-                        <span className="capitalize">{tx.account_nombre || tx.account_id}</span>
-                        <span>•</span>
-                        <span className="font-mono">{tx.es_manual ? '✍️ Manual' : '🤖 Automático'}</span>
+                        <div className="flex items-center gap-2 text-xs text-[var(--mu)]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAdjustAccount(acc);
+                              setAdjustSaldo(String(acc.saldo_actual));
+                              setShowAdjustModal(true);
+                            }}
+                            className="hover:text-[var(--tx)] transition-colors"
+                            title="Ajustar saldo"
+                          >
+                            Ajustar
+                          </button>
+                          <span aria-hidden="true">·</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManualAccountId(acc.id);
+                              setShowManualModal(true);
+                            }}
+                            className="hover:text-[var(--tx)] transition-colors"
+                            title="Registrar movimiento en esta cuenta"
+                          >
+                            + Mov
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className={`font-mono font-bold text-sm ${tx.tipo === 'income' ? 'text-emerald-500' : 'text-rose-500'}`}>
-                      {tx.tipo === 'income' ? '+' : '-'}${Number(tx.monto).toFixed(2)}
-                    </div>
-                    <button
-                      onClick={() => handleDeleteTransaction(tx)}
-                      disabled={deletingTxId === tx.id}
-                      title="Eliminar movimiento y revertir saldo"
-                      className="p-1.5 text-[var(--mu)] hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* PESTAÑA 2: CONTROL DE PRESUPUESTOS (BUDGETS) */}
-      {activeTab === 'budgets' && (
-        <div className="flex flex-col gap-6">
-          {/* Header de Presupuestos */}
-          <div className="bg-cd border border-[var(--bd)] rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <h2 className="text-base font-bold flex items-center gap-2">
-                <PieChart size={18} className="text-[var(--ac)]" /> Control Mensual de Presupuesto
-              </h2>
-              <p className="text-xs tx-mu mt-0.5">
-                Define límites de gasto por categoría para evitar sobrecostos en pauta, empaque y mensajería.
-              </p>
+              )}
             </div>
 
-            <button
-              onClick={() => setShowBudgetModal(true)}
-              className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] rounded-xl text-xs font-bold flex items-center gap-2 hover:opacity-90"
-            >
-              <Plus size={15} /> Nuevo Presupuesto
-            </button>
-          </div>
-
-          {/* Barra Global de Presupuesto Consumido */}
-          <div className="p-5 bg-cd border border-[var(--bd)] rounded-2xl">
-            <div className="flex justify-between items-end mb-2">
+            {/* Pendiente por liquidar */}
+            <div className="lg:col-span-5 bg-cd border border-[var(--bd)] rounded-xl flex flex-col justify-between">
               <div>
-                <span className="text-[11px] tx-mu font-bold uppercase">Ejecución Global del Presupuesto</span>
-                <div className="text-2xl font-black mt-0.5">
-                  ${presupuestoTotal.totalGastado.toFixed(2)} <span className="text-sm font-normal tx-mu">de ${presupuestoTotal.totalPresupuestado.toFixed(2)}</span>
+                <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-[var(--tx)]">Por liquidar en caja</h2>
+                  <Link
+                    to="/pedidos"
+                    className="text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] flex items-center gap-1 transition-colors"
+                  >
+                    Ir a Pedidos <ExternalLink size={12} />
+                  </Link>
+                </div>
+
+                <div className="divide-y divide-[var(--bd)]">
+                  <div className="px-5 py-3.5 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium text-[var(--tx)]">
+                        Entregados sin depositar
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--mu)] tabular-nums mt-0.5">
+                        <span>
+                          {estimadoPorEntrar.entregadosCount}{' '}
+                          {estimadoPorEntrar.entregadosCount === 1 ? 'pedido' : 'pedidos'}
+                        </span>
+                        {estimadoPorEntrar.entregadosCount > 0 && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            {confirmClearLegacy ? (
+                              <span className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={clearingLegacy}
+                                  onClick={handleQuickClearLegacyDelivered}
+                                  className="px-2 py-0.5 rounded bg-[var(--tx)] text-[var(--cd)] font-semibold text-[11px]"
+                                >
+                                  {clearingLegacy ? 'Cerrando...' : 'Confirmar archivo'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmClearLegacy(false)}
+                                  className="px-1.5 py-0.5 rounded border border-[var(--bd)] text-[11px]"
+                                >
+                                  No
+                                </button>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmClearLegacy(true)}
+                                className="underline hover:text-[var(--tx)] transition-colors"
+                              >
+                                Archivar entregados legacy
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-base font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400">
+                      {fmtMoney(estimadoPorEntrar.entregadosTotal)}
+                    </div>
+                  </div>
+
+                  <div className="px-5 py-3.5 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium text-[var(--tx)]">
+                        En ruta por cobrar
+                      </div>
+                      <div className="text-xs text-[var(--mu)] tabular-nums">
+                        {estimadoPorEntrar.enCaminoCount}{' '}
+                        {estimadoPorEntrar.enCaminoCount === 1 ? 'paquete' : 'paquetes'}
+                      </div>
+                    </div>
+                    <div className="text-base font-bold font-mono tabular-nums text-[var(--tx)]">
+                      {fmtMoney(estimadoPorEntrar.enCaminoTotal)}
+                    </div>
+                  </div>
+
+                  {estimadoPorEntrar.courierBreakdown.length > 0 ? (
+                    <div className="px-5 py-3.5 space-y-2">
+                      <div className="text-xs font-medium text-[var(--mu)]">
+                        Efectivo pendiente por repartidor
+                      </div>
+                      <div className="space-y-1.5">
+                        {estimadoPorEntrar.courierBreakdown.map(item => (
+                          <div
+                            key={item.courier}
+                            className="flex items-center justify-between text-xs"
+                          >
+                            <span className="text-[var(--tx)] truncate pr-2">
+                              {item.courier}{' '}
+                              <span className="text-[var(--mu)] tabular-nums">({item.count})</span>
+                            </span>
+                            <span className="font-mono tabular-nums font-semibold text-[var(--tx)]">
+                              {fmtMoney(item.total)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="px-5 py-5 text-xs text-[var(--mu)]">
+                      No hay cobros pendientes por liquidar en este período.
+                    </div>
+                  )}
                 </div>
               </div>
-              <span className={`text-sm font-black ${presupuestoTotal.pct > 90 ? 'text-rose-500' : presupuestoTotal.pct > 75 ? 'text-amber-500' : 'text-emerald-500'}`}>
-                {presupuestoTotal.pct.toFixed(1)}% Usado
-              </span>
-            </div>
 
-            <div className="w-full bg-sf rounded-full h-3 overflow-hidden border border-[var(--bd)]">
-              <div 
-                className={`h-full transition-all duration-500 ${
-                  presupuestoTotal.pct > 90 ? 'bg-rose-500' : presupuestoTotal.pct > 75 ? 'bg-amber-500' : 'bg-emerald-500'
-                }`}
-                style={{ width: `${Math.min(presupuestoTotal.pct, 100)}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Lista de Presupuestos por Categoría */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {budgetsWithRealSpent.map(b => {
-              const gastado = b.monto_gastado || 0;
-              const pct = b.monto_presupuestado > 0 ? (gastado / b.monto_presupuestado) * 100 : 0;
-              const saldoRestante = b.monto_presupuestado - gastado;
-
-              return (
-                <div key={b.id} className="p-5 bg-cd border border-[var(--bd)] rounded-2xl flex flex-col justify-between shadow-sm">
-                  <div>
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="font-bold text-sm text-[var(--tx)]">{b.categoria}</h3>
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
-                        pct > 90 ? 'bg-rose-500/10 text-rose-600 border-rose-500/30' :
-                        pct > 75 ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' :
-                        'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
-                      }`}>
-                        {pct.toFixed(0)}%
-                      </span>
-                    </div>
-
-                    <div className="flex items-baseline justify-between mt-3 text-xs">
-                      <span className="font-mono text-base font-black text-[var(--tx)]">
-                        ${gastado.toFixed(2)}
-                      </span>
-                      <span className="tx-mu">
-                        Límite: ${b.monto_presupuestado.toFixed(2)}
-                      </span>
-                    </div>
-
-                    <div className="w-full bg-sf rounded-full h-2 mt-2 overflow-hidden border border-[var(--bd)]">
-                      <div 
-                        className={`h-full transition-all ${
-                          pct > 90 ? 'bg-rose-500' : pct > 75 ? 'bg-amber-500' : 'bg-emerald-500'
-                        }`}
-                        style={{ width: `${Math.min(pct, 100)}%` }}
-                      />
-                    </div>
-
-                    <div className="mt-3 flex justify-between items-center text-[11px] tx-mu">
-                      <span>Restante: ${Math.max(saldoRestante, 0).toFixed(2)}</span>
-                      {b.notas && <span className="italic truncate max-w-[200px]">"{b.notas}"</span>}
-                    </div>
+              {prematureAutoTxs.length > 0 && (
+                <div className="px-5 py-3 border-t border-[var(--bd)] bg-rose-500/5 flex items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300 min-w-0">
+                    <AlertCircle size={14} className="shrink-0" />
+                    <span className="truncate">
+                      {prematureAutoTxs.length} cobro(s) auto sin liquidar ({fmtMoney(prematureTotal)})
+                    </span>
                   </div>
+
+                  {confirmCleanPremature ? (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        disabled={cleaningPremature}
+                        onClick={handleCleanPrematureSales}
+                        className="px-2.5 py-1 rounded-md bg-rose-600 text-white font-semibold text-xs"
+                      >
+                        {cleaningPremature ? 'Revirtiendo...' : 'Confirmar'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmCleanPremature(false)}
+                        className="px-2 py-1 rounded-md border border-[var(--bd)] text-xs"
+                      >
+                        No
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmCleanPremature(true)}
+                      className="text-xs font-semibold text-rose-600 dark:text-rose-400 hover:underline shrink-0"
+                    >
+                      Revertir
+                    </button>
+                  )}
                 </div>
-              );
-            })}
-          </div>
+              )}
+            </div>
+          </section>
+
+          {/* Últimos movimientos */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-[var(--tx)]">Últimos movimientos</h2>
+              {activeTransactions.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('movimientos')}
+                  className="text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] transition-colors"
+                >
+                  Ver libro completo →
+                </button>
+              )}
+            </div>
+
+            {loading ? (
+              <div className="p-5 space-y-2.5">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="h-9 rounded-lg bg-sf animate-pulse" />
+                ))}
+              </div>
+            ) : activeTransactions.length === 0 ? (
+              <div className="px-5 py-10 text-center space-y-3">
+                <p className="text-sm text-[var(--mu)]">
+                  Aún no hay movimientos registrados en este período.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setManualTipo('expense');
+                    setShowManualModal(true);
+                  }}
+                  className="px-4 py-2 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd text-xs font-semibold text-[var(--tx)] inline-flex items-center gap-1.5 transition-colors"
+                >
+                  <Plus size={14} /> Registrar primer movimiento
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-sf/60 border-b border-[var(--bd)] text-[var(--mu)] font-medium">
+                    <tr>
+                      <th className="py-2.5 px-5">Fecha</th>
+                      <th className="py-2.5 px-4">Concepto</th>
+                      <th className="py-2.5 px-4">Cuenta</th>
+                      <th className="py-2.5 px-4">Categoría</th>
+                      <th className="py-2.5 px-5 text-right">Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--bd)]">
+                    {activeTransactions.slice(0, 6).map(tx => (
+                      <tr key={tx.id} className="hover:bg-sf/40 transition-colors">
+                        <td className="py-3 px-5 font-mono tabular-nums text-[var(--mu)] whitespace-nowrap">
+                          {tx.fecha}
+                        </td>
+                        <td className="py-3 px-4 font-medium text-[var(--tx)] max-w-sm truncate">
+                          {tx.descripcion}
+                        </td>
+                        <td className="py-3 px-4 text-[var(--mu)] whitespace-nowrap">
+                          {tx.account_nombre || tx.account_id}
+                        </td>
+                        <td className="py-3 px-4 text-[var(--mu)] whitespace-nowrap">
+                          {tx.categoria}
+                        </td>
+                        <td
+                          className={`py-3 px-5 font-mono tabular-nums font-semibold text-right whitespace-nowrap ${
+                            tx.tipo === 'income' || tx.categoria === 'transferencia_entrada'
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : tx.tipo === 'transfer'
+                              ? 'text-[var(--mu)]'
+                              : 'text-rose-600 dark:text-rose-400'
+                          }`}
+                        >
+                          {tx.tipo === 'income' || tx.categoria === 'transferencia_entrada' ? '+' : '-'}
+                          {fmtMoney(tx.monto)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         </div>
       )}
 
-      {/* PESTAÑA 3: LIBRO DIARIO DE MOVIMIENTOS */}
-      {activeTab === 'transactions' && (
+      {/* PESTAÑA 2: LIBRO DIARIO */}
+      {activeTab === 'movimientos' && (
         <div className="flex flex-col gap-4">
-          <div className="bg-cd border border-[var(--bd)] rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-            {/* Filtros */}
-            <div className="flex items-center gap-1 overflow-x-auto w-full sm:w-auto">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-1 p-1 bg-sf border border-[var(--bd)] rounded-lg overflow-x-auto">
               {[
                 { id: 'all', label: 'Todos' },
-                { id: 'income', label: '🟢 Ingresos' },
-                { id: 'expense', label: '🔴 Egresos' },
-                { id: 'transfer', label: '⇄ Transferencias' },
-                { id: 'manual', label: '✍️ Solo Manuales' },
+                { id: 'income', label: 'Ingresos' },
+                { id: 'expense', label: 'Egresos' },
+                { id: 'transfer', label: 'Transferencias' },
+                { id: 'manual', label: 'Manuales' },
               ].map(f => (
                 <button
                   key={f.id}
+                  type="button"
                   onClick={() => setFilterTipo(f.id as any)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                    filterTipo === f.id ? 'bg-[var(--tx)] text-[var(--cd)] shadow-sm' : 'text-[var(--mu)] hover:bg-sf'
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
+                    filterTipo === f.id
+                      ? 'bg-cd text-[var(--tx)] shadow-sm'
+                      : 'text-[var(--mu)] hover:text-[var(--tx)]'
                   }`}
                 >
                   {f.label}
@@ -1286,176 +1297,497 @@ export function FinanzasPage() {
               ))}
             </div>
 
-            {/* Buscador */}
             <div className="relative w-full sm:w-64">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 tx-mu" />
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mu)]" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                placeholder="Buscar por concepto o cuenta..."
-                className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-sf border border-[var(--bd)] text-xs outline-none"
+                placeholder="Buscar concepto, cuenta o categoría..."
+                className="w-full pl-9 pr-3 py-2 rounded-lg bg-cd border border-[var(--bd)] text-xs outline-none focus:border-[var(--tx)]"
               />
             </div>
           </div>
 
-          {/* Tabla de Movimientos */}
-          <div className="bg-cd border border-[var(--bd)] rounded-2xl overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-sf border-b border-[var(--bd)] text-[10px] tx-mu uppercase font-bold">
-                  <tr>
-                    <th className="py-3 px-4">Fecha</th>
-                    <th className="py-3 px-4">Concepto / Descripción</th>
-                    <th className="py-3 px-4">Cuenta</th>
-                    <th className="py-3 px-4">Categoría</th>
-                    <th className="py-3 px-4">Origen</th>
-                    <th className="py-3 px-4 text-right">Monto</th>
-                    <th className="py-3 px-4 text-center">Acción</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--bd)]">
-                  {filteredTransactions.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="py-8 text-center tx-mu">
-                        No se encontraron transacciones con los filtros seleccionados.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredTransactions.map(tx => (
-                      <tr key={tx.id} className="hover:bg-sf/50 transition-colors">
-                        <td className="py-3 px-4 font-mono whitespace-nowrap">{tx.fecha}</td>
-                        <td className="py-3 px-4 font-medium text-[var(--tx)] max-w-xs truncate">
-                          {tx.descripcion}
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap capitalize">
-                          {tx.account_nombre || tx.account_id}
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap">
-                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono border ${
-                            tx.tipo === 'transfer'
-                              ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30 font-bold'
-                              : 'bg-sf border-[var(--bd)]'
-                          }`}>
-                            {tx.tipo === 'transfer' ? (tx.categoria === 'transferencia_salida' ? '⇄ Salida' : '⇄ Entrada') : tx.categoria}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            tx.tipo === 'transfer'
-                              ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
-                              : tx.es_manual
-                              ? 'bg-amber-500/10 text-amber-600'
-                              : 'bg-blue-500/10 text-blue-600'
-                          }`}>
-                            {tx.tipo === 'transfer' ? '⇄ Billeteras' : tx.es_manual ? '✍️ Manual' : '🤖 OS Event'}
-                          </span>
-                        </td>
-                        <td className={`py-3 px-4 font-mono font-bold text-right whitespace-nowrap ${
-                          tx.tipo === 'income'
-                            ? 'text-emerald-500'
-                            : tx.tipo === 'transfer'
-                            ? (tx.categoria === 'transferencia_salida' ? 'text-indigo-600 dark:text-indigo-400' : 'text-emerald-500')
-                            : 'text-rose-500'
-                        }`}>
-                          {tx.tipo === 'income' ? '+' : tx.tipo === 'transfer' ? (tx.categoria === 'transferencia_salida' ? '-' : '+') : '-'}${Number(tx.monto).toFixed(2)}
-                        </td>
-                        <td className="py-3 px-4 text-center whitespace-nowrap">
-                          <button
-                            onClick={() => handleDeleteTransaction(tx)}
-                            disabled={deletingTxId === tx.id}
-                            title="Eliminar transacción y revertir saldo"
-                            className="p-1.5 text-[var(--mu)] hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* PESTAÑA 4: SUSCRIPCIONES Y PAGOS FIJOS (Preservada y Mejorada) */}
-      {activeTab === 'fixed_payments' && (
-        <div className="flex flex-col gap-4">
-          <div className="flex justify-between items-center bg-cd p-4 rounded-2xl border border-[var(--bd)]">
-            <div>
-              <h3 className="font-bold text-sm">Calendario de Pagos Recurrentes</h3>
-              <p className="text-xs tx-mu mt-0.5">Software, hosting y suscripciones mensuales con recordatorios.</p>
-            </div>
-            <button
-              onClick={() => setShowPagoFijoForm(true)}
-              className="px-3 py-1.5 bg-[var(--tx)] text-[var(--cd)] rounded-xl text-xs font-bold flex items-center gap-1.5"
-            >
-              <Plus size={14} /> Nueva Suscripción
-            </button>
-          </div>
-
-          {showPagoFijoForm && (
-            <form onSubmit={handleSavePagoFijo} className="bg-cd border border-[var(--bd)] rounded-2xl p-5 shadow-sm space-y-3">
-              <h4 className="font-bold text-xs uppercase tx-mu">{editingPagoFijoId ? 'Editar Suscripción' : 'Nueva Suscripción'}</h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <input placeholder="Nombre (Ej. DigitalOcean)" value={pagoFijoNombre} onChange={e=>setPagoFijoNombre(e.target.value)} className="bg-sf border border-[var(--bd)] rounded-xl px-3 py-2 text-xs outline-none" required />
-                <input placeholder="Monto ($)" type="number" step="0.01" value={pagoFijoMonto} onChange={e=>setPagoFijoMonto(e.target.value)} className="bg-sf border border-[var(--bd)] rounded-xl px-3 py-2 text-xs outline-none" required />
-                <input type="date" value={pagoFijoFecha} onChange={e=>setPagoFijoFecha(e.target.value)} className="bg-sf border border-[var(--bd)] rounded-xl px-3 py-2 text-xs outline-none" required />
-                <select value={pagoFijoFrecuencia} onChange={e=>setPagoFijoFrecuencia(e.target.value)} className="bg-sf border border-[var(--bd)] rounded-xl px-3 py-2 text-xs outline-none">
-                  <option value="mensual">Mensual</option>
-                  <option value="anual">Anual</option>
-                  <option value="unico">Pago Único</option>
-                </select>
+          <div className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
+            {filteredTransactions.length === 0 ? (
+              <div className="py-12 px-5 text-center space-y-3">
+                <p className="text-sm text-[var(--mu)]">
+                  {activeTransactions.length === 0
+                    ? 'No hay movimientos registrados todavía.'
+                    : 'Ningún movimiento coincide con los filtros.'}
+                </p>
+                {activeTransactions.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowManualModal(true)}
+                    className="px-4 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] text-xs font-semibold inline-flex items-center gap-1.5"
+                  >
+                    <Plus size={14} /> Registrar movimiento
+                  </button>
+                )}
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowPagoFijoForm(false)} className="px-3 py-1.5 border border-[var(--bd)] rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" className="px-4 py-1.5 bg-[var(--ac)] text-white rounded-xl text-xs font-bold">Guardar</button>
-              </div>
-            </form>
-          )}
-
-          <div className="bg-cd border border-[var(--bd)] rounded-2xl divide-y divide-[var(--bd)] overflow-hidden shadow-sm">
-            {pagosFijos.length === 0 ? (
-              <div className="p-8 text-center text-xs tx-mu">No hay suscripciones registradas.</div>
             ) : (
-              pagosFijos.map(pago => (
-                <div key={pago.id} className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-500/10 text-blue-500 rounded-xl">
-                      <Calendar size={18} />
-                    </div>
-                    <div>
-                      <div className="font-bold text-sm text-[var(--tx)]">{pago.nombre}</div>
-                      <div className="text-[10px] tx-mu flex items-center gap-2 mt-0.5">
-                        <span className="capitalize">{pago.frecuencia}</span>
-                        <span>•</span>
-                        <span>Vencimiento: {pago.fecha_vencimiento}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 self-end sm:self-center">
-                    <div className="font-bold font-mono text-sm">${pago.monto.toFixed(2)}</div>
-                    <button
-                      onClick={() => handlePagarSuscripcion(pago)}
-                      className="px-3 py-1 bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-emerald-500/20 transition-colors"
-                    >
-                      <CheckCircle2 size={12} /> Pagar & Asentar
-                    </button>
-                    <button onClick={() => handleDeletePagoFijo(pago.id)} className="p-1.5 text-rose-400 hover:text-rose-600 rounded-lg">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-sf/60 border-b border-[var(--bd)] text-[var(--mu)] font-medium">
+                    <tr>
+                      <th className="py-3 px-4">Fecha</th>
+                      <th className="py-3 px-4">Concepto</th>
+                      <th className="py-3 px-4">Cuenta</th>
+                      <th className="py-3 px-4">Categoría</th>
+                      <th className="py-3 px-4">Origen</th>
+                      <th className="py-3 px-4 text-right">Monto</th>
+                      <th className="py-3 px-4 text-right">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--bd)]">
+                    {filteredTransactions.map(tx => {
+                      const isPositive =
+                        tx.tipo === 'income' || tx.categoria === 'transferencia_entrada';
+                      return (
+                        <tr key={tx.id} className="hover:bg-sf/40 transition-colors">
+                          <td className="py-3 px-4 font-mono tabular-nums text-[var(--mu)] whitespace-nowrap">
+                            {tx.fecha}
+                          </td>
+                          <td className="py-3 px-4 font-medium text-[var(--tx)] max-w-xs truncate">
+                            {tx.descripcion}
+                          </td>
+                          <td className="py-3 px-4 text-[var(--mu)] whitespace-nowrap">
+                            {tx.account_nombre || tx.account_id}
+                          </td>
+                          <td className="py-3 px-4 text-[var(--mu)] whitespace-nowrap">
+                            {tx.tipo === 'transfer'
+                              ? tx.categoria === 'transferencia_salida'
+                                ? 'Salida entre cuentas'
+                                : 'Entrada entre cuentas'
+                              : tx.categoria}
+                          </td>
+                          <td className="py-3 px-4 text-[var(--mu)] whitespace-nowrap">
+                            {tx.tipo === 'transfer'
+                              ? 'Transferencia'
+                              : tx.es_manual
+                              ? 'Manual'
+                              : 'Automático'}
+                          </td>
+                          <td
+                            className={`py-3 px-4 font-mono tabular-nums font-semibold text-right whitespace-nowrap ${
+                              isPositive
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : tx.tipo === 'transfer'
+                                ? 'text-[var(--mu)]'
+                                : 'text-rose-600 dark:text-rose-400'
+                            }`}
+                          >
+                            {isPositive ? '+' : '-'}
+                            {fmtMoney(tx.monto)}
+                          </td>
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
+                            {confirmDeleteTxId === tx.id ? (
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={deletingTxId === tx.id}
+                                  onClick={() => handleDeleteTransaction(tx.id)}
+                                  className="px-2 py-1 rounded bg-rose-600 text-white font-semibold text-[11px]"
+                                >
+                                  {deletingTxId === tx.id ? '...' : 'Revertir'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteTxId(null)}
+                                  className="px-2 py-1 rounded border border-[var(--bd)] text-[11px]"
+                                >
+                                  No
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteTxId(tx.id)}
+                                title="Eliminar movimiento y revertir saldo"
+                                className="p-1.5 text-[var(--mu)] hover:text-rose-500 rounded-md transition-colors"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </div>
       )}
 
-      {/* MODAL: REGISTRAR GASTO O PAGO MANUAL (Requerimiento Clave) */}
+      {/* PESTAÑA 3: PRESUPUESTOS Y PAGOS FIJOS */}
+      {activeTab === 'planificacion' && (
+        <div className="flex flex-col gap-8">
+          {/* Bloque A: Presupuestos */}
+          <section className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-[var(--tx)]">Presupuestos del mes</h2>
+                <p className="text-xs text-[var(--mu)] mt-0.5 tabular-nums">
+                  Ejecutado {fmtMoney(presupuestoTotal.totalGastado)} de{' '}
+                  {fmtMoney(presupuestoTotal.totalPresupuestado)} ({presupuestoTotal.pct.toFixed(1)}%)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBudgetModal(true)}
+                className="px-3.5 py-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-xs font-semibold flex items-center gap-1.5 self-start sm:self-auto whitespace-nowrap"
+              >
+                <Plus size={14} /> Nuevo límite
+              </button>
+            </div>
+
+            <div className="w-full bg-sf rounded-full h-1.5 overflow-hidden border border-[var(--bd)]">
+              <div
+                className={`h-full transition-all ${
+                  presupuestoTotal.pct > 90
+                    ? 'bg-rose-500'
+                    : presupuestoTotal.pct > 75
+                    ? 'bg-amber-500'
+                    : 'bg-emerald-500'
+                }`}
+                style={{ width: `${Math.min(presupuestoTotal.pct, 100)}%` }}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {budgetsWithRealSpent.map(b => {
+                const gastado = b.monto_gastado || 0;
+                const pct = b.monto_presupuestado > 0 ? (gastado / b.monto_presupuestado) * 100 : 0;
+                const restante = b.monto_presupuestado - gastado;
+                return (
+                  <div
+                    key={b.id}
+                    className="p-4 bg-cd border border-[var(--bd)] rounded-xl space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-[var(--tx)]">{b.categoria}</span>
+                      <span
+                        className={`text-xs font-mono tabular-nums font-semibold ${
+                          pct > 90
+                            ? 'text-rose-600 dark:text-rose-400'
+                            : pct > 75
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-[var(--mu)]'
+                        }`}
+                      >
+                        {pct.toFixed(0)}%
+                      </span>
+                    </div>
+
+                    <div className="flex items-baseline justify-between text-xs font-mono tabular-nums">
+                      <span className="text-base font-bold text-[var(--tx)]">
+                        {fmtMoney(gastado)}
+                      </span>
+                      <span className="text-[var(--mu)]">Límite {fmtMoney(b.monto_presupuestado)}</span>
+                    </div>
+
+                    <div className="w-full bg-sf rounded-full h-1.5 overflow-hidden border border-[var(--bd)]">
+                      <div
+                        className={`h-full transition-all ${
+                          pct > 90 ? 'bg-rose-500' : pct > 75 ? 'bg-amber-500' : 'bg-emerald-500'
+                        }`}
+                        style={{ width: `${Math.min(pct, 100)}%` }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs text-[var(--mu)]">
+                      <span className="tabular-nums">
+                        Restante {fmtMoney(Math.max(restante, 0))}
+                      </span>
+                      {b.notas && <span className="truncate max-w-[200px]">{b.notas}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Bloque B: Suscripciones y Pagos Recurrentes */}
+          <section className="space-y-4 pt-6 border-t border-[var(--bd)]">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-[var(--tx)]">
+                  Suscripciones y pagos fijos
+                </h2>
+                <p className="text-xs text-[var(--mu)] mt-0.5">
+                  Software, hosting y gastos recurrentes.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingPagoFijoId(null);
+                  setShowPagoFijoForm(v => !v);
+                }}
+                className="px-3.5 py-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-xs font-semibold flex items-center gap-1.5 self-start sm:self-auto whitespace-nowrap"
+              >
+                <Plus size={14} /> Nueva suscripción
+              </button>
+            </div>
+
+            {showPagoFijoForm && (
+              <form
+                onSubmit={handleSavePagoFijo}
+                className="bg-cd border border-[var(--bd)] rounded-xl p-4 space-y-3"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <input
+                    placeholder="Nombre (ej. DigitalOcean)"
+                    value={pagoFijoNombre}
+                    onChange={e => setPagoFijoNombre(e.target.value)}
+                    className="bg-sf border border-[var(--bd)] rounded-lg px-3 py-2 text-xs outline-none"
+                    required
+                  />
+                  <input
+                    placeholder="Monto ($)"
+                    type="number"
+                    step="0.01"
+                    value={pagoFijoMonto}
+                    onChange={e => setPagoFijoMonto(e.target.value)}
+                    className="bg-sf border border-[var(--bd)] rounded-lg px-3 py-2 text-xs font-mono outline-none"
+                    required
+                  />
+                  <input
+                    type="date"
+                    value={pagoFijoFecha}
+                    onChange={e => setPagoFijoFecha(e.target.value)}
+                    className="bg-sf border border-[var(--bd)] rounded-lg px-3 py-2 text-xs font-mono outline-none"
+                    required
+                  />
+                  <select
+                    value={pagoFijoFrecuencia}
+                    onChange={e => setPagoFijoFrecuencia(e.target.value)}
+                    className="bg-sf border border-[var(--bd)] rounded-lg px-3 py-2 text-xs outline-none"
+                  >
+                    <option value="mensual">Mensual</option>
+                    <option value="anual">Anual</option>
+                    <option value="unico">Pago único</option>
+                  </select>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowPagoFijoForm(false)}
+                    className="px-3 py-1.5 border border-[var(--bd)] rounded-lg text-xs font-medium"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 bg-[var(--tx)] text-[var(--cd)] rounded-lg text-xs font-semibold"
+                  >
+                    Guardar
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div className="bg-cd border border-[var(--bd)] rounded-xl divide-y divide-[var(--bd)] overflow-hidden">
+              {pagosFijos.length === 0 ? (
+                <div className="p-8 text-center text-xs text-[var(--mu)]">
+                  No hay suscripciones registradas.
+                </div>
+              ) : (
+                pagosFijos.map(pago => (
+                  <div
+                    key={pago.id}
+                    className="px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Calendar size={15} className="text-[var(--mu)] shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-[var(--tx)] truncate">
+                          {pago.nombre}
+                        </div>
+                        <div className="text-xs text-[var(--mu)] capitalize tabular-nums">
+                          {pago.frecuencia} · Vence {pago.fecha_vencimiento}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+                      <span className="font-mono tabular-nums font-bold text-sm text-[var(--tx)]">
+                        {fmtMoney(pago.monto)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handlePagarSuscripcion(pago)}
+                        className="px-3 py-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd text-xs font-semibold text-[var(--tx)] transition-colors"
+                      >
+                        Pagar y asentar
+                      </button>
+                      {confirmDeletePagoId === pago.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePagoFijo(pago.id)}
+                            className="px-2 py-1 rounded bg-rose-600 text-white text-xs font-semibold"
+                          >
+                            Sí
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeletePagoId(null)}
+                            className="px-2 py-1 rounded border border-[var(--bd)] text-xs"
+                          >
+                            No
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeletePagoId(pago.id)}
+                          className="p-1.5 text-[var(--mu)] hover:text-rose-500 rounded-md"
+                          title="Eliminar suscripción"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* MODAL: LIMPIAR LEGACY / CORTE DESDE AHORA */}
+      {showResetModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setShowResetModal(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-md rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+          >
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+              <div className="flex items-center gap-2">
+                <RotateCcw size={16} />
+                <h3 className="font-semibold text-sm">Limpiar legacy por liquidar</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                className="p-1 rounded-md text-[var(--mu)] hover:text-[var(--tx)]"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleResetFromNow} className="p-5 space-y-4">
+              <p className="text-xs text-[var(--mu)] leading-relaxed">
+                Cierra los pedidos entregados antiguos para que el conteo de{' '}
+                <strong className="text-[var(--tx)]">Por liquidar</strong> empiece limpio desde ahora.
+                Tus cuentas bancarias y movimientos actuales no se modifican salvo que marques las
+                opciones avanzadas abajo.
+              </p>
+
+              <div className="space-y-2.5 text-xs">
+                <label className="flex items-start gap-2.5 p-3 rounded-lg border border-[var(--bd)] bg-sf/50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={optLegacyDelivered}
+                    onChange={e => setOptLegacyDelivered(e.target.checked)}
+                    className="mt-0.5 accent-emerald-600"
+                  />
+                  <span>
+                    <strong className="block text-[var(--tx)]">
+                      Archivar pedidos ya entregados sin liquidar ({fmtMoney(estimadoPorEntrar.entregadosTotal)})
+                    </strong>
+                    <span className="text-[var(--mu)]">
+                      Quita el saldo legacy de Finanzas, Hoy y Pedidos sin sumar dinero a cuentas.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-3 rounded-lg border border-[var(--bd)] bg-sf/50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={optSetCutoff}
+                    onChange={e => setOptSetCutoff(e.target.checked)}
+                    className="mt-0.5 accent-emerald-600"
+                  />
+                  <span>
+                    <strong className="block text-[var(--tx)]">
+                      Aplicar fecha de corte desde este instante (opcional)
+                    </strong>
+                    <span className="text-[var(--mu)]">
+                      Oculta en la vista cualquier movimiento o pedido previo a esta hora.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-3 rounded-lg border border-[var(--bd)] bg-sf/50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={optWipeTx}
+                    onChange={e => setOptWipeTx(e.target.checked)}
+                    className="mt-0.5 accent-rose-600"
+                  />
+                  <span>
+                    <strong className="block text-[var(--tx)]">
+                      Vaciar libro diario de movimientos (avanzado)
+                    </strong>
+                    <span className="text-[var(--mu)]">
+                      Borra los movimientos registrados en la tabla de finanzas.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-3 rounded-lg border border-[var(--bd)] bg-sf/50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={optZeroAccounts}
+                    onChange={e => setOptZeroAccounts(e.target.checked)}
+                    className="mt-0.5 accent-rose-600"
+                  />
+                  <span>
+                    <strong className="block text-[var(--tx)]">
+                      Poner saldos de cuentas en $0.00 (avanzado)
+                    </strong>
+                    <span className="text-[var(--mu)]">
+                      Reinicia Efectivo, Banco, Caja Chica y Tarjeta Ads a cero.
+                    </span>
+                  </span>
+                </label>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowResetModal(false)}
+                  className="px-4 py-2 rounded-lg border border-[var(--bd)] text-xs font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    resetting ||
+                    (!optLegacyDelivered && !optWipeTx && !optZeroAccounts && !optSetCutoff)
+                  }
+                  className="px-4 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] text-xs font-semibold disabled:opacity-50"
+                >
+                  {resetting ? 'Aplicando...' : 'Aplicar limpieza'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: NUEVO MOVIMIENTO MANUAL */}
       {showManualModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
@@ -1463,43 +1795,43 @@ export function FinanzasPage() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-lg rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+            className="w-full max-w-lg rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
           >
-            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
-              <div className="flex items-center gap-2">
-                <Receipt size={18} className="text-[var(--ac)]" />
-                <h3 className="font-bold text-sm">Registrar Movimiento Manual</h3>
-              </div>
-              <button onClick={() => setShowManualModal(false)} className="p-1 rounded-lg hover:bg-black/10">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+              <h3 className="font-semibold text-sm">Registrar movimiento manual</h3>
+              <button
+                type="button"
+                onClick={() => setShowManualModal(false)}
+                className="p-1 rounded-md text-[var(--mu)] hover:text-[var(--tx)]"
+              >
                 <X size={16} />
               </button>
             </div>
 
             <form onSubmit={handleSaveManualTransaction} className="p-5 space-y-4">
-              {/* Selector Tipo: Gasto vs Ingreso */}
-              <div className="grid grid-cols-2 gap-2 p-1 bg-sf rounded-xl border border-[var(--bd)]">
+              <div className="grid grid-cols-2 gap-2 p-1 bg-sf rounded-lg border border-[var(--bd)]">
                 <button
                   type="button"
                   onClick={() => setManualTipo('expense')}
-                  className={`py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
-                    manualTipo === 'expense' ? 'bg-rose-500 text-white shadow-sm' : 'tx-mu'
+                  className={`py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+                    manualTipo === 'expense' ? 'bg-rose-600 text-white' : 'text-[var(--mu)]'
                   }`}
                 >
-                  <ArrowDownRight size={14} /> Gasto / Egreso Manual
+                  <ArrowDownRight size={14} /> Gasto / Egreso
                 </button>
                 <button
                   type="button"
                   onClick={() => setManualTipo('income')}
-                  className={`py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
-                    manualTipo === 'income' ? 'bg-emerald-500 text-white shadow-sm' : 'tx-mu'
+                  className={`py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+                    manualTipo === 'income' ? 'bg-emerald-600 text-white' : 'text-[var(--mu)]'
                   }`}
                 >
-                  <ArrowUpRight size={14} /> Pago / Ingreso Manual
+                  <ArrowUpRight size={14} /> Pago / Ingreso
                 </button>
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Monto ($) *</label>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">Monto ($) *</label>
                 <input
                   type="number"
                   step="0.01"
@@ -1507,42 +1839,44 @@ export function FinanzasPage() {
                   value={manualMonto}
                   onChange={e => setManualMonto(e.target.value)}
                   placeholder="0.00"
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-base font-bold outline-none"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-base font-mono tabular-nums font-bold outline-none"
                   required
                   autoFocus
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Concepto / Descripción *</label>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">
+                  Concepto / Descripción *
+                </label>
                 <input
                   type="text"
                   value={manualDescripcion}
                   onChange={e => setManualDescripcion(e.target.value)}
-                  placeholder="Ej. Gasolina repartidor, 500 bolsas empaque, abono cliente..."
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                  placeholder="Ej. Gasolina repartidor, 500 bolsas, abono cliente..."
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
                   required
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Cuenta Afectada *</label>
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1">Cuenta *</label>
                   <select
                     value={manualAccountId}
                     onChange={e => setManualAccountId(e.target.value)}
-                    className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
                   >
                     {accounts.map(acc => (
                       <option key={acc.id} value={acc.id}>
-                        {acc.nombre} (${acc.saldo_actual.toFixed(2)})
+                        {acc.nombre} ({fmtMoney(acc.saldo_actual)})
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Categoría</label>
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1">Categoría</label>
                   <select
                     value={manualCategoria}
                     onChange={e => {
@@ -1552,23 +1886,23 @@ export function FinanzasPage() {
                         setManualAccountId('tarjeta_pauta');
                       }
                     }}
-                    className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
                   >
                     {manualTipo === 'expense' ? (
                       <>
-                        <option value="gasto_manual">Gasto General</option>
-                        <option value="pauta_publicidad">📢 Pauta Publicitaria (Meta Ads / TikTok)</option>
+                        <option value="gasto_manual">Gasto general</option>
+                        <option value="pauta_publicidad">Pauta publicitaria (Meta / TikTok)</option>
                         <option value="flete_envio">Flete / Transporte</option>
                         <option value="empaque_suministros">Empaque / Bolsas</option>
                         <option value="nomina_sueldos">Nómina / Ayudante</option>
-                        <option value="pago_proveedor">Pago Proveedor</option>
+                        <option value="pago_proveedor">Pago proveedor</option>
                         <option value="alquiler_servicios">Servicios / Alquiler</option>
                       </>
                     ) : (
                       <>
-                        <option value="abono_manual">Abono de Cliente</option>
-                        <option value="devolucion_proveedor">Devolución Proveedor</option>
-                        <option value="otro_ingreso">Otro Ingreso</option>
+                        <option value="abono_manual">Abono de cliente</option>
+                        <option value="devolucion_proveedor">Devolución proveedor</option>
+                        <option value="otro_ingreso">Otro ingreso</option>
                       </>
                     )}
                   </select>
@@ -1576,30 +1910,27 @@ export function FinanzasPage() {
               </div>
 
               {manualCategoria === 'pauta_publicidad' && (
-                <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] space-y-1">
-                  <label className="block text-[10px] uppercase font-bold text-purple-600 dark:text-purple-400">
-                    Código de Anuncio / Campaña
+                <div className="p-3 bg-sf rounded-lg border border-[var(--bd)] space-y-1">
+                  <label className="block text-xs font-medium text-[var(--mu)]">
+                    Código de anuncio / campaña
                   </label>
                   <input
                     type="text"
                     value={manualCodigoAnuncio}
                     onChange={e => setManualCodigoAnuncio(e.target.value.toUpperCase())}
                     placeholder="Ej. PROMO1, CAMP-EMS-01..."
-                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs uppercase outline-none font-mono font-bold"
+                    className="w-full p-2 rounded-md border border-[var(--bd)] bg-cd text-xs uppercase outline-none font-mono font-bold"
                   />
-                  <span className="text-[10px] tx-mu block">
-                    ✨ Se sincronizará automáticamente con el módulo de Rentabilidad & ROAS y afectará la Tarjeta Débito Meta Ads.
-                  </span>
                 </div>
               )}
 
               <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Fecha</label>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">Fecha</label>
                 <input
                   type="date"
                   value={manualFecha}
                   onChange={e => setManualFecha(e.target.value)}
-                  className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                  className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono outline-none"
                 />
               </div>
 
@@ -1607,16 +1938,208 @@ export function FinanzasPage() {
                 <button
                   type="button"
                   onClick={() => setShowManualModal(false)}
-                  className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold"
+                  className="px-4 py-2 border border-[var(--bd)] rounded-lg text-xs font-medium"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingManual}
-                  className="px-5 py-2 bg-[var(--ac)] text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                  className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] font-semibold rounded-lg text-xs disabled:opacity-50"
                 >
-                  <Plus size={14} /> {isSavingManual ? 'Guardando...' : 'Asentar Movimiento'}
+                  {isSavingManual ? 'Guardando...' : 'Asentar movimiento'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: TRANSFERIR ENTRE CUENTAS */}
+      {showTransferModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setShowTransferModal(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-lg rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+          >
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+              <h3 className="font-semibold text-sm">Transferir entre cuentas</h3>
+              <button
+                type="button"
+                onClick={() => setShowTransferModal(false)}
+                className="p-1 rounded-md text-[var(--mu)] hover:text-[var(--tx)]"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleTransferSubmit} className="p-5 space-y-4">
+              {transferError && (
+                <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-300 text-xs">
+                  {transferError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1">
+                    Cuenta origen (sale) *
+                  </label>
+                  <select
+                    value={transferOrigenId}
+                    onChange={e => setTransferOrigenId(e.target.value)}
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                  >
+                    {accounts.map(acc => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.nombre} ({fmtMoney(acc.saldo_actual)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1">
+                    Cuenta destino (entra) *
+                  </label>
+                  <select
+                    value={transferDestinoId}
+                    onChange={e => setTransferDestinoId(e.target.value)}
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                  >
+                    {accounts.map(acc => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.nombre} ({fmtMoney(acc.saldo_actual)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1">Monto ($) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={transferMonto}
+                    onChange={e => setTransferMonto(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-base font-mono tabular-nums font-bold outline-none"
+                    required
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1">Fecha</label>
+                  <input
+                    type="date"
+                    value={transferFecha}
+                    onChange={e => setTransferFecha(e.target.value)}
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">
+                  Concepto (opcional)
+                </label>
+                <input
+                  type="text"
+                  value={transferDescripcion}
+                  onChange={e => setTransferDescripcion(e.target.value)}
+                  placeholder="Ej. Depósito de efectivo a banco, recarga tarjeta Meta..."
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTransferModal(false)}
+                  className="px-4 py-2 border border-[var(--bd)] rounded-lg text-xs font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingTransfer}
+                  className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] font-semibold rounded-lg text-xs disabled:opacity-50"
+                >
+                  {isSavingTransfer ? 'Transfiriendo...' : 'Transferir'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: AJUSTAR SALDO */}
+      {showAdjustModal && adjustAccount && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setShowAdjustModal(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-sm rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+          >
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+              <div className="flex items-center gap-2">
+                <Pencil size={15} />
+                <h3 className="font-semibold text-sm">Ajustar saldo</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAdjustModal(false)}
+                className="p-1 rounded-md text-[var(--mu)] hover:text-[var(--tx)]"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAdjust} className="p-5 space-y-4">
+              <div>
+                <div className="text-xs text-[var(--mu)]">Cuenta</div>
+                <div className="text-sm font-semibold text-[var(--tx)] mt-0.5">
+                  {adjustAccount.nombre}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">
+                  Nuevo saldo real ($)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={adjustSaldo}
+                  onChange={e => setAdjustSaldo(e.target.value)}
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-lg font-mono tabular-nums font-bold outline-none"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowAdjustModal(false)}
+                  className="px-4 py-2 border border-[var(--bd)] rounded-lg text-xs font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingAdjust}
+                  className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] font-semibold rounded-lg text-xs disabled:opacity-50"
+                >
+                  {isSavingAdjust ? 'Guardando...' : 'Guardar'}
                 </button>
               </div>
             </form>
@@ -1632,49 +2155,55 @@ export function FinanzasPage() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-md rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+            className="w-full max-w-md rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
           >
-            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
-              <h3 className="font-bold text-sm">Nuevo Límite de Presupuesto</h3>
-              <button onClick={() => setShowBudgetModal(false)} className="p-1 rounded-lg">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+              <h3 className="font-semibold text-sm">Nuevo límite de presupuesto</h3>
+              <button
+                type="button"
+                onClick={() => setShowBudgetModal(false)}
+                className="p-1 rounded-md text-[var(--mu)] hover:text-[var(--tx)]"
+              >
                 <X size={16} />
               </button>
             </div>
 
             <form onSubmit={handleSaveBudget} className="p-5 space-y-4">
               <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Categoría *</label>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">Categoría *</label>
                 <input
                   type="text"
                   value={budgetCategoria}
                   onChange={e => setBudgetCategoria(e.target.value)}
                   placeholder="Ej. Marketing Meta, Envíos, Empaque..."
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Monto Límite Mensual ($) *</label>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">
+                  Límite mensual ($) *
+                </label>
                 <input
                   type="number"
                   step="0.01"
                   value={budgetMonto}
                   onChange={e => setBudgetMonto(e.target.value)}
-                  placeholder="Ej. 1000.00"
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-base font-bold outline-none"
+                  placeholder="1000.00"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-base font-mono tabular-nums font-bold outline-none"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Notas / Propósito</label>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">Notas</label>
                 <textarea
                   rows={2}
                   value={budgetNotas}
                   onChange={e => setBudgetNotas(e.target.value)}
-                  placeholder="Detalles del objetivo..."
-                  className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none resize-none"
+                  placeholder="Detalles del límite..."
+                  className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none resize-none"
                 />
               </div>
 
@@ -1682,16 +2211,16 @@ export function FinanzasPage() {
                 <button
                   type="button"
                   onClick={() => setShowBudgetModal(false)}
-                  className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold"
+                  className="px-4 py-2 border border-[var(--bd)] rounded-lg text-xs font-medium"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingBudget}
-                  className="px-5 py-2 bg-[var(--ac)] text-white font-bold rounded-xl text-xs flex items-center gap-1.5"
+                  className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] font-semibold rounded-lg text-xs disabled:opacity-50"
                 >
-                  Guardar Presupuesto
+                  Guardar
                 </button>
               </div>
             </form>
@@ -1699,7 +2228,7 @@ export function FinanzasPage() {
         </div>
       )}
 
-      {/* MODAL SQL SPRINT 2 */}
+      {/* MODAL: SQL (REINICIO LIMPIO + SCHEMA SPRINT 2) */}
       {showSqlModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
@@ -1707,269 +2236,69 @@ export function FinanzasPage() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl flex flex-col"
+            className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl flex flex-col"
           >
-            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
               <div className="flex items-center gap-2">
-                <Code size={18} className="text-emerald-500" />
-                <h3 className="font-bold text-sm">Script SQL Sprint 2 — Money Engine & Budgets</h3>
+                <Code size={16} />
+                <h3 className="font-semibold text-sm">SQL Finanzas — Supabase</h3>
               </div>
-              <button onClick={() => setShowSqlModal(false)} className="p-1 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setShowSqlModal(false)}
+                className="p-1 rounded-md text-[var(--mu)] hover:text-[var(--tx)]"
+              >
                 <X size={16} />
               </button>
             </div>
 
             <div className="p-5 overflow-y-auto space-y-4">
-              <div className="p-4 bg-sf rounded-xl border border-[var(--bd)] text-xs tx-mu space-y-1">
-                <p className="font-semibold text-[var(--tx)]">Instrucciones para Supabase:</p>
-                <p>1. Copia el script abajo.</p>
-                <p>2. Pégalo en tu SQL Editor de Supabase y presiona <strong>Run</strong>.</p>
-                <p>3. Creará el schema <code className="font-mono bg-cd px-1 rounded">finance</code>, las cuentas de dinero, el libro de movimientos y el trigger de gastos de pauta (los cobros de pedidos ingresan únicamente al pulsar <strong>Liquidar Pedido</strong>).</p>
-              </div>
-
-              <div className="relative">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs font-mono tx-mu">docs/20261107_sprint2_money_engine.sql</span>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-1 p-1 bg-sf border border-[var(--bd)] rounded-lg">
                   <button
-                    onClick={copySql}
-                    className="px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shadow-sm"
+                    type="button"
+                    onClick={() => setSqlTab('reset')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium ${
+                      sqlTab === 'reset'
+                        ? 'bg-cd text-[var(--tx)] shadow-sm'
+                        : 'text-[var(--mu)] hover:text-[var(--tx)]'
+                    }`}
                   >
-                    {copiedSql ? <Check size={14} /> : <Copy size={14} />}
-                    {copiedSql ? '¡Copiado!' : 'Copiar SQL Sprint 2'}
+                    Archivar Legacy + Trigger Patch
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSqlTab('schema')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium ${
+                      sqlTab === 'schema'
+                        ? 'bg-cd text-[var(--tx)] shadow-sm'
+                        : 'text-[var(--mu)] hover:text-[var(--tx)]'
+                    }`}
+                  >
+                    Instalación Completa
                   </button>
                 </div>
-                <pre className="p-4 rounded-xl bg-zinc-950 text-zinc-200 font-mono text-xs overflow-x-auto max-h-96 border border-zinc-800 leading-relaxed">
-                  {SPRINT2_SQL_CODE}
-                </pre>
-              </div>
-            </div>
 
-            <div className="p-4 border-t border-[var(--bd)] bg-sf flex justify-end">
-              <button onClick={() => setShowSqlModal(false)} className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] rounded-xl text-xs font-bold">
-                Cerrar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: AJUSTAR SALDO DE CUENTA */}
-      {showAdjustModal && adjustAccount && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-          onClick={() => setShowAdjustModal(false)}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            className="w-full max-w-sm rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
-          >
-            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
-              <h3 className="font-bold text-sm">Ajustar Saldo de Cuenta</h3>
-              <button onClick={() => setShowAdjustModal(false)} className="p-1 rounded-lg">
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveAdjust} className="p-5 space-y-4">
-              <div>
-                <span className="text-xs font-bold text-[var(--tx)] block">{adjustAccount.nombre}</span>
-                <span className="text-[10px] tx-mu">Define el saldo real actual en tu caja o banco.</span>
-              </div>
-
-              <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Nuevo Saldo ($) *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={adjustSaldo}
-                  onChange={e => setAdjustSaldo(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-lg font-bold outline-none"
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowAdjustModal(false)}
-                  className="px-3 py-1.5 border border-[var(--bd)] rounded-xl text-xs font-semibold"
+                  onClick={copyActiveSql}
+                  className="px-3.5 py-2 text-xs font-semibold rounded-lg bg-[var(--tx)] text-[var(--cd)] flex items-center gap-1.5"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingAdjust}
-                  className="px-4 py-1.5 bg-[var(--ac)] text-white font-bold rounded-xl text-xs flex items-center gap-1.5"
-                >
-                  {isSavingAdjust ? 'Guardando...' : 'Actualizar Saldo'}
+                  {copiedSql ? <Check size={14} /> : <Copy size={14} />}
+                  {copiedSql ? 'Copiado' : 'Copiar SQL'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
 
-      {/* MODAL: TRANSFERENCIA ENTRE BILLETERAS / CUENTAS */}
-      {showTransferModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
-          onClick={() => setShowTransferModal(false)}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            className="w-full max-w-md rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
-          >
-            {/* Cabecera */}
-            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
-              <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
-                <ArrowRightLeft size={18} />
-                <h3 className="font-bold text-sm">Transferencia entre Billeteras</h3>
-              </div>
-              <button onClick={() => setShowTransferModal(false)} className="p-1 rounded-lg hover:bg-black/10">
-                <X size={16} />
-              </button>
+              <p className="text-xs text-[var(--mu)]">
+                {sqlTab === 'reset'
+                  ? 'Cierra los pedidos entregados antiguos sin tocar saldos de cuentas y desactiva el auto-cobro al pasar a Entregado.'
+                  : 'Crea el esquema completo finance desde cero.'}
+              </p>
+
+              <pre className="p-4 rounded-lg bg-zinc-950 text-zinc-200 font-mono text-xs overflow-x-auto max-h-96 border border-zinc-800 leading-relaxed">
+                {sqlTab === 'reset' ? FINANCE_RESET_AND_PATCH_SQL : SPRINT2_SQL_CODE}
+              </pre>
             </div>
-
-            <form onSubmit={handleTransferSubmit} className="p-5 space-y-4">
-              {transferError && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-600 rounded-xl text-xs flex items-center gap-2">
-                  <AlertCircle size={15} className="shrink-0" />
-                  <span>{transferError}</span>
-                </div>
-              )}
-
-              {/* Selector de Cuentas: Origen -> Destino */}
-              <div className="bg-sf p-3.5 rounded-xl border border-[var(--bd)] space-y-3">
-                {/* Cuenta Origen */}
-                <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
-                    Cuenta Origen (Sale el dinero)
-                  </label>
-                  <select
-                    value={transferOrigenId}
-                    onChange={e => setTransferOrigenId(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-cd text-xs font-bold outline-none"
-                  >
-                    {accounts.map(acc => (
-                      <option key={acc.id} value={acc.id}>
-                        {acc.nombre} (Disp: ${acc.saldo_actual.toFixed(2)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Flecha visual indicadora */}
-                <div className="flex items-center justify-center py-0.5 text-indigo-500">
-                  <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 rounded-full border border-indigo-500/20 text-[10px] font-bold">
-                    <span>Transfiere a</span>
-                    <ArrowDownRight size={13} />
-                  </div>
-                </div>
-
-                {/* Cuenta Destino */}
-                <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
-                    Cuenta Destino (Ingresa el dinero)
-                  </label>
-                  <select
-                    value={transferDestinoId}
-                    onChange={e => setTransferDestinoId(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-cd text-xs font-bold outline-none"
-                  >
-                    {accounts.map(acc => (
-                      <option key={acc.id} value={acc.id} disabled={acc.id === transferOrigenId}>
-                        {acc.nombre} (Actual: ${acc.saldo_actual.toFixed(2)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Monto */}
-              <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
-                  Monto a Transferir ($ USD) *
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-sm opacity-50">$</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    value={transferMonto}
-                    onChange={e => setTransferMonto(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full pl-8 pr-3 py-2.5 rounded-xl border border-[var(--bd)] bg-sf text-base font-black outline-none focus:border-indigo-500"
-                    required
-                    autoFocus
-                  />
-                </div>
-                {/* Botones de atajo de monto */}
-                <div className="flex items-center gap-1.5 mt-2">
-                  <span className="text-[10px] tx-mu">Atajos:</span>
-                  {[25, 50, 100, 200, 500].map(val => (
-                    <button
-                      key={val}
-                      type="button"
-                      onClick={() => setTransferMonto(String(val))}
-                      className="px-2 py-0.5 rounded-md bg-sf border border-[var(--bd)] text-[10px] font-bold hover:bg-cd"
-                    >
-                      ${val}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Concepto / Descripción */}
-              <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
-                  Concepto / Detalle (Opcional)
-                </label>
-                <input
-                  type="text"
-                  value={transferDescripcion}
-                  onChange={e => setTransferDescripcion(e.target.value)}
-                  placeholder="Ej: Recarga para Meta Ads, Depósito de cobros contra entrega..."
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              {/* Fecha */}
-              <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Fecha</label>
-                <input
-                  type="date"
-                  value={transferFecha}
-                  onChange={e => setTransferFecha(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs font-semibold outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[10px] text-amber-700 dark:text-amber-300">
-                💡 <b>Nota Contable:</b> Esta transferencia mueve fondos internamente entre cuentas. <u>No cuenta como un gasto ni como un ingreso</u>, por lo que el P&L (ganancia neta) de tu negocio se mantiene exacto.
-              </div>
-
-              {/* Botones de acción */}
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowTransferModal(false)}
-                  className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold hover:bg-sf"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingTransfer}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md"
-                >
-                  {isSavingTransfer ? <RefreshCw size={14} className="animate-spin" /> : <ArrowRightLeft size={14} />}
-                  {isSavingTransfer ? 'Transfiriendo...' : 'Confirmar Transferencia'}
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

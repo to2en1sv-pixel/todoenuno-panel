@@ -4,7 +4,12 @@ import { supabase } from '@/lib/supabase';
 import { usePostQueue } from '@/hooks/usePostQueue';
 import { useProductos, useVariantes } from '@/hooks/useCatalog';
 import { fetchStockItems } from '@/lib/inventory';
-import { fetchCashAccounts } from '@/lib/finance';
+import {
+  fetchCashAccounts,
+  getFinanceCutoffDate,
+  hydrateFinanceCutoffFromOsEvents,
+  isRecordBeforeFinanceCutoff,
+} from '@/lib/finance';
 import PedidoModal from '@/components/PedidoModal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { fmtAgo } from '@/lib/format';
@@ -157,6 +162,7 @@ export function HoyPage() {
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [adSpendToday, setAdSpendToday] = useState(0);
   const [pagosProximos, setPagosProximos] = useState<PagoRow[]>([]);
+  const [financeCutoff, setFinanceCutoff] = useState<string | null>(() => getFinanceCutoffDate());
 
   const [notas, setNotas] = useState<NotaRow[]>([]);
   const [nuevaNota, setNuevaNota] = useState('');
@@ -214,6 +220,9 @@ export function HoyPage() {
         supabase.from('panel_pagos').select('id,nombre,monto,fecha_vencimiento,categoria'),
         supabase.from('panel_notas').select('*').order('created_at', { ascending: false }),
       ]);
+
+      const cutoff = await hydrateFinanceCutoffFromOsEvents(supabase);
+      setFinanceCutoff(cutoff);
 
       if (!ordersRes.error && Array.isArray(ordersRes.data)) {
         setOrders(ordersRes.data as OrderRow[]);
@@ -355,7 +364,11 @@ export function HoyPage() {
         enRuta.push(o);
       }
 
-      if ((o.estado === 'en_camino' || o.estado === 'entregado') && !o.liquidado) {
+      if (
+        (o.estado === 'en_camino' || o.estado === 'entregado') &&
+        !o.liquidado &&
+        !isRecordBeforeFinanceCutoff(o.created_at, undefined, financeCutoff)
+      ) {
         cobrosEnCalle += total;
       }
 
@@ -383,7 +396,7 @@ export function HoyPage() {
       enRuta,
       recientesHoy,
     };
-  }, [orders, todayISO]);
+  }, [orders, todayISO, financeCutoff]);
 
   const chatMetrics = useMemo(() => {
     const active = conversations.filter((c) => !isLegacyConversation(c));

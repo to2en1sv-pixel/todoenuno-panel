@@ -116,6 +116,7 @@ export interface Pedido {
   departamento?: string | null;
   motivo_cancelacion?: string | null;
   liquidado?: boolean | null;
+  cuenta_liquidacion?: string | null;
   origen?: string | null;
   fecha_programada?: string | null;
   es_encargo?: boolean | null;
@@ -1772,9 +1773,15 @@ export function PedidosPage() {
                         </td>
                         <td className="p-3 text-center">
                           {p.liquidado ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                              ✓ En Caja
-                            </span>
+                            p.cuenta_liquidacion === 'corte_legacy' ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-sf text-[var(--mu)] border border-[var(--bd)]">
+                                Archivado
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                                ✓ En Caja
+                              </span>
+                            )
                           ) : (
                             <button
                               onClick={() => setPedidoALiquidar(p)}
@@ -2640,9 +2647,15 @@ function PedidoCard({
         </span>
 
         {pedido.liquidado && (
-          <span className="inline-flex items-center gap-0.5 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-600">
-            ✓ Liquidado
-          </span>
+          pedido.cuenta_liquidacion === 'corte_legacy' ? (
+            <span className="inline-flex items-center gap-0.5 rounded-md border border-[var(--bd)] bg-sf px-1.5 py-0.5 text-[9px] font-medium tx-mu">
+              Archivado
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-0.5 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-600">
+              ✓ Liquidado
+            </span>
+          )
         )}
       </div>
 
