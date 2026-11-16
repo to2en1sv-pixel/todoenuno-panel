@@ -34,6 +34,8 @@ import {
   Eye,
   EyeOff,
   Clock,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { compressImageFile, syncOrderInventoryOnStatusChange } from "@/lib/inventory";
 import { hydrateCutoffsFromOsEvents } from "@/lib/catalogAliases";
@@ -166,6 +168,25 @@ export function ConfirmarEntregaPage() {
   const { couriers, activeNames: courierOptions } = useCouriers();
 
   const todaySv = useMemo(() => getElSalvadorDateKey(), []);
+
+  // Tema visual sincronizado (Claro / Oscuro) para visibilidad en calle o noche
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    try {
+      const saved = localStorage.getItem("theme");
+      return saved === "dark" ? "dark" : "light";
+    } catch {
+      return "light";
+    }
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      localStorage.setItem("theme", theme);
+    } catch {}
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((prev) => (prev === "light" ? "dark" : "light"));
 
   // Seguridad PIN del Portal Repartidor
   const [driverAccess, setDriverAccess] = useState<DriverAccessConfig>(() =>
@@ -1079,9 +1100,9 @@ export function ConfirmarEntregaPage() {
 
   if (cargando) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white">
-        <Loader2 className="w-10 h-10 animate-spin mb-4 text-emerald-500" />
-        <p className="font-bold text-sm tracking-wide">Cargando panel de repartidor...</p>
+      <div className="min-h-screen bg-[var(--bg)] text-[var(--tx)] flex flex-col items-center justify-center p-6">
+        <Loader2 className="w-9 h-9 animate-spin mb-3 text-emerald-600 dark:text-emerald-400" />
+        <p className="font-semibold text-sm">Cargando panel de repartidor...</p>
       </div>
     );
   }
@@ -1093,17 +1114,27 @@ export function ConfirmarEntregaPage() {
     const couriersConPin = couriers.filter((c) => c.activo !== false);
 
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-4 sm:p-6">
+      <div className="min-h-screen bg-[var(--bg)] text-[var(--tx)] flex flex-col items-center justify-center p-4 sm:p-6 relative">
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="absolute top-4 right-4 min-h-[40px] px-3 rounded-lg bg-cd border border-[var(--bd)] hover:bg-sf text-xs font-medium flex items-center gap-1.5 transition-colors"
+          title={theme === "light" ? "Cambiar a modo oscuro" : "Cambiar a modo claro"}
+        >
+          {theme === "light" ? <Moon size={15} /> : <Sun size={15} />}
+          <span>{theme === "light" ? "Oscuro" : "Claro"}</span>
+        </button>
+
         <form
           onSubmit={handlePinSubmit}
-          className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5"
+          className="w-full max-w-sm bg-cd border border-[var(--bd)] rounded-xl p-6 space-y-5"
         >
           <div className="text-center space-y-2">
-            <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400">
-              <KeyRound size={26} />
+            <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-600 dark:text-emerald-400">
+              <KeyRound size={22} />
             </div>
-            <h1 className="text-lg font-black uppercase tracking-tight">Portal Repartidores</h1>
-            <p className="text-xs text-slate-400 leading-snug">
+            <h1 className="text-lg font-bold tracking-tight">Portal Repartidores</h1>
+            <p className="text-xs tx-mu leading-snug">
               {id
                 ? "Ingresa tu PIN de motorista o PIN Maestro para confirmar la entrega del QR escaneado."
                 : "Ingresa tu PIN asignado para ver tu hoja de ruta y cobros del día."}
@@ -1112,7 +1143,7 @@ export function ConfirmarEntregaPage() {
 
           <div className="space-y-3">
             <div>
-              <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+              <label className="block text-[11px] font-semibold tx-mu mb-1">
                 ¿Quién ingresa?
               </label>
               <select
@@ -1121,7 +1152,7 @@ export function ConfirmarEntregaPage() {
                   setLoginTarget(e.target.value);
                   setPinError(null);
                 }}
-                className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-xs font-bold outline-none text-white focus:border-emerald-500"
+                className="w-full min-h-[44px] px-3 py-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs font-semibold outline-none text-[var(--tx)] focus:border-[var(--tx)]"
               >
                 <option value="auto">Detectar automáticamente por PIN</option>
                 <option value="admin">Supervisor / Admin (Ver todos)</option>
@@ -1134,7 +1165,7 @@ export function ConfirmarEntregaPage() {
             </div>
 
             <div>
-              <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+              <label className="block text-[11px] font-semibold tx-mu mb-1">
                 PIN Numérico (4 a 6 dígitos)
               </label>
               <div className="relative">
@@ -1149,12 +1180,12 @@ export function ConfirmarEntregaPage() {
                     setPinError(null);
                   }}
                   placeholder="••••"
-                  className="w-full p-3 pr-10 rounded-xl border border-slate-800 bg-slate-950 text-center text-xl tracking-[0.45em] font-mono font-black outline-none text-white focus:border-emerald-500"
+                  className="w-full min-h-[48px] p-3 pr-11 rounded-lg border border-[var(--bd)] bg-sf text-center text-xl tracking-[0.45em] font-mono tabular-nums font-bold outline-none text-[var(--tx)] focus:border-[var(--tx)]"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPin((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 min-h-[36px] min-w-[36px] flex items-center justify-center tx-mu hover:text-[var(--tx)]"
                   tabIndex={-1}
                 >
                   {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -1163,21 +1194,21 @@ export function ConfirmarEntregaPage() {
             </div>
 
             {pinError && (
-              <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs font-semibold text-center">
+              <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs font-medium text-center">
                 {pinError}
               </div>
             )}
 
             <button
               type="submit"
-              className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 transition-all"
+              className="w-full min-h-[46px] py-3 rounded-lg bg-[var(--tx)] hover:opacity-90 text-[var(--cd)] font-semibold text-xs flex items-center justify-center gap-2 transition-opacity"
             >
               <Lock size={15} /> Desbloquear Ruta
             </button>
           </div>
 
-          <p className="text-[10px] text-slate-500 text-center leading-snug pt-2 border-t border-slate-800">
-            Los PIN se configuran en <strong className="text-slate-300">Sistema → Couriers & Envíos</strong>.
+          <p className="text-[11px] tx-mu text-center leading-snug pt-3 border-t border-[var(--bd)]">
+            Los PIN se configuran en <strong className="text-[var(--tx)]">Sistema → Couriers & Envíos</strong>.
           </p>
         </form>
       </div>
@@ -1191,329 +1222,344 @@ export function ConfirmarEntregaPage() {
     const isCourierLocked = driverSession?.role === "courier" && Boolean(driverSession.courierName);
 
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col p-4 sm:p-6 max-w-lg mx-auto">
-        {/* Cabecera */}
-        <div className="flex items-center justify-between gap-2 pb-4 border-b border-slate-800">
-          <div>
-            <div className="flex items-center gap-2">
-              <Truck className="text-emerald-400" size={20} />
-              <h1 className="text-lg font-black tracking-tight uppercase">Mi Ruta de Hoy</h1>
+      <div className="min-h-screen bg-[var(--bg)] text-[var(--tx)]">
+        <div className="flex flex-col p-4 sm:p-6 max-w-xl mx-auto">
+          {/* Cabecera */}
+          <header className="flex items-center justify-between gap-2 pb-4 border-b border-[var(--bd)]">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Truck className="text-emerald-600 dark:text-emerald-400 shrink-0" size={18} />
+                <h1 className="text-lg font-bold tracking-tight truncate">Mi Ruta de Hoy</h1>
+              </div>
+              <p className="text-[11px] tx-mu font-mono tabular-nums mt-0.5">
+                El Salvador · {todaySv}
+              </p>
             </div>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Operación El Salvador · {todaySv}
-            </p>
-          </div>
 
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setMostrarCuadreModal(true)}
-              className="px-3 py-2 rounded-xl bg-emerald-600/20 border border-emerald-500/40 hover:bg-emerald-600/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition-colors"
-              title="Ver resumen de cuadre y efectivo del día"
-            >
-              <ClipboardList size={14} /> Cuadre
-            </button>
-
-            <button
-              type="button"
-              onClick={() => cargarDatos()}
-              className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300"
-              title="Recargar ruta"
-            >
-              <RotateCcw size={15} />
-            </button>
-
-            {driverAccess.requirePin && (
+            <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
-                onClick={handleLockPortal}
-                className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-rose-500/20 hover:border-rose-500/40 text-slate-300 hover:text-rose-300"
-                title="Cerrar sesión / Cambiar PIN"
+                onClick={() => setMostrarCuadreModal(true)}
+                className="min-h-[40px] px-3 py-2 rounded-lg bg-[var(--tx)] hover:opacity-90 text-[var(--cd)] text-xs font-semibold flex items-center gap-1.5 transition-opacity"
+                title="Ver resumen de cuadre y efectivo del día"
               >
-                <LogOut size={15} />
+                <ClipboardList size={14} /> Cuadre
               </button>
-            )}
-          </div>
-        </div>
 
-        {/* Toast flotante / inline */}
-        {toastInfo && (
-          <div
-            className={`mt-4 p-3 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 ${
-              toastInfo.tipo === "ok"
-                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-200"
-                : toastInfo.tipo === "err"
-                ? "bg-rose-500/15 border-rose-500/40 text-rose-200"
-                : "bg-amber-500/15 border-amber-500/40 text-amber-200"
-            }`}
-          >
-            <span>{toastInfo.texto}</span>
-            <button onClick={() => setToastInfo(null)} className="opacity-70 hover:opacity-100">
-              <X size={14} />
-            </button>
-          </div>
-        )}
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="min-h-[40px] min-w-[40px] p-2 rounded-lg bg-cd border border-[var(--bd)] hover:bg-sf text-[var(--tx)] flex items-center justify-center transition-colors"
+                title={theme === "light" ? "Cambiar a modo oscuro" : "Cambiar a modo claro"}
+              >
+                {theme === "light" ? <Moon size={15} /> : <Sun size={15} />}
+              </button>
 
-        {/* Selector de Courier + Buscador */}
-        <div className="mt-4 grid grid-cols-1 gap-2.5">
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-[10px] uppercase font-bold text-slate-400">
-                Motorista / Courier:
-              </label>
-              {isCourierLocked && (
-                <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
-                  <Lock size={10} /> Sesión exclusiva
-                </span>
-              )}
-            </div>
-            {isCourierLocked ? (
-              <div className="w-full p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs font-bold text-emerald-200 flex items-center justify-between">
-                <span>{driverSession?.courierName}</span>
+              <button
+                type="button"
+                onClick={() => cargarDatos()}
+                className="min-h-[40px] min-w-[40px] p-2 rounded-lg bg-cd border border-[var(--bd)] hover:bg-sf text-[var(--tx)] flex items-center justify-center transition-colors"
+                title="Recargar ruta"
+              >
+                <RotateCcw size={15} />
+              </button>
+
+              {driverAccess.requirePin && (
                 <button
                   type="button"
                   onClick={handleLockPortal}
-                  className="text-[10px] underline text-emerald-300 hover:text-white"
+                  className="min-h-[40px] min-w-[40px] p-2 rounded-lg bg-cd border border-[var(--bd)] hover:bg-rose-500/10 hover:border-rose-500/30 hover:text-rose-600 dark:hover:text-rose-400 text-[var(--tx)] flex items-center justify-center transition-colors"
+                  title="Cerrar sesión / Cambiar PIN"
                 >
-                  Cambiar usuario
+                  <LogOut size={15} />
                 </button>
-              </div>
-            ) : (
-              <select
-                value={courierSeleccionado}
-                onChange={(e) => handleCourierChange(e.target.value)}
-                className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-900 text-xs font-bold outline-none text-white focus:border-emerald-500"
-              >
-                <option value="Todos los Couriers">Todos los Motoristas</option>
-                {selectCourierOptions.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
+              )}
+            </div>
+          </header>
 
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input
-              type="text"
-              value={busquedaRuta}
-              onChange={(e) => setBusquedaRuta(e.target.value)}
-              placeholder="Buscar cliente, teléfono, zona o código..."
-              className="w-full pl-9 pr-8 py-2.5 rounded-xl border border-slate-800 bg-slate-900 text-xs text-white placeholder:text-slate-500 outline-none focus:border-emerald-500"
-            />
-            {busquedaRuta && (
-              <button
-                type="button"
-                onClick={() => setBusquedaRuta("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
-              >
+          {/* Toast flotante / inline */}
+          {toastInfo && (
+            <div
+              className={`mt-4 p-3 rounded-xl border text-xs font-medium flex items-center justify-between gap-2 ${
+                toastInfo.tipo === "ok"
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
+                  : toastInfo.tipo === "err"
+                  ? "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300"
+                  : "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300"
+              }`}
+            >
+              <span>{toastInfo.texto}</span>
+              <button onClick={() => setToastInfo(null)} className="opacity-70 hover:opacity-100 p-1">
                 <X size={14} />
               </button>
-            )}
-          </div>
-        </div>
-
-        {/* Tarjetas de Resumen del Día */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
-          <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center">
-            <span className="text-[9px] uppercase font-bold text-slate-400 block">En Ruta</span>
-            <span className="text-xl font-black text-amber-400 mt-0.5 block">{kpisRuta.enRuta}</span>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center">
-            <span className="text-[9px] uppercase font-bold text-slate-400 block">Entregados Hoy</span>
-            <span className="text-xl font-black text-emerald-400 mt-0.5 block">{kpisRuta.entregadosHoy}</span>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center">
-            <span className="text-[9px] uppercase font-bold text-slate-400 block">Efectivo Mano</span>
-            <span className="text-base font-black text-emerald-400 font-mono mt-1 block">
-              ${kpisRuta.efectivoHoy.toFixed(2)}
-            </span>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-center">
-            <span className="text-[9px] uppercase font-bold text-slate-400 block">Transfer / Pagado</span>
-            <span className="text-base font-black text-sky-400 font-mono mt-1 block">
-              ${kpisRuta.transferenciasHoy.toFixed(2)}
-            </span>
-          </div>
-        </div>
-
-        {/* Columna Única: Tu Ruta */}
-        <div className="mt-5 space-y-3 flex-1 pb-10">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-              Tu Ruta ({tuRutaFiltrada.length})
-            </h2>
-            {!isCourierLocked && (
-              <button
-                type="button"
-                onClick={() => navigate("/pedidos")}
-                className="text-[11px] text-emerald-400 font-bold hover:underline"
-              >
-                Ir a Pedidos OS →
-              </button>
-            )}
-          </div>
-
-          {tuRutaFiltrada.length === 0 ? (
-            <div className="p-8 text-center text-xs text-slate-500 bg-slate-900/60 rounded-2xl border border-slate-800">
-              {busquedaRuta
-                ? "No hay paquetes que coincidan con tu búsqueda."
-                : "No tienes paquetes pendientes en tu ruta por ahora."}
             </div>
-          ) : (
-            tuRutaFiltrada.map((p) => {
-              const entregado = p.estado === "entregado";
-              const novedad = hasOrderIssue(p);
-              const prepagado = isOrderPrepaid(p);
-              const cobroKind = getOrderCobroKind(p);
-              const risk = evaluateCustomerRisk(p.telefono, todosLosPedidos);
-              const avisado =
-                notificadosWaIds[p.id] ||
-                String(p.notas || "").includes("[Aviso llegada");
-              const wazeQuickUrl = `https://waze.com/ul?q=${encodeURIComponent(
-                `${p.direccion || ""}, El Salvador`
-              )}`;
+          )}
 
-              return (
-                <div
-                  key={p.id}
-                  onClick={() => openOrderForDelivery(p)}
-                  className={`p-4 rounded-2xl border cursor-pointer transition-all ${
-                    entregado
-                      ? "bg-slate-900/50 border-slate-800/80"
-                      : novedad
-                      ? "bg-slate-900 border-amber-500/40 shadow-lg"
-                      : "bg-slate-900 border-slate-800 hover:border-emerald-500/50 shadow-lg"
-                  }`}
+          {/* Selector de Courier + Buscador */}
+          <div className="mt-4 grid grid-cols-1 gap-2.5">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[11px] font-semibold tx-mu">
+                  Motorista / Courier
+                </label>
+                {isCourierLocked && (
+                  <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <Lock size={11} /> Sesión exclusiva
+                  </span>
+                )}
+              </div>
+              {isCourierLocked ? (
+                <div className="w-full min-h-[44px] px-3 py-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs font-semibold text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
+                  <span>{driverSession?.courierName}</span>
+                  <button
+                    type="button"
+                    onClick={handleLockPortal}
+                    className="text-[11px] underline hover:opacity-80"
+                  >
+                    Cambiar usuario
+                  </button>
+                </div>
+              ) : (
+                <select
+                  value={courierSeleccionado}
+                  onChange={(e) => handleCourierChange(e.target.value)}
+                  className="w-full min-h-[44px] px-3 py-2.5 rounded-lg border border-[var(--bd)] bg-cd text-xs font-semibold outline-none text-[var(--tx)] focus:border-[var(--tx)]"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[10px] font-mono font-bold text-slate-400">
-                          {p.pedido_codigo || `#${String(p.id).slice(0, 8).toUpperCase()}`}
+                  <option value="Todos los Couriers">Todos los Motoristas</option>
+                  {selectCourierOptions.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div className="relative">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 tx-mu" />
+              <input
+                type="text"
+                value={busquedaRuta}
+                onChange={(e) => setBusquedaRuta(e.target.value)}
+                placeholder="Buscar cliente, teléfono, zona o código..."
+                className="w-full min-h-[44px] pl-9 pr-9 py-2.5 rounded-lg border border-[var(--bd)] bg-cd text-xs text-[var(--tx)] placeholder:text-[var(--mu)] outline-none focus:border-[var(--tx)]"
+              />
+              {busquedaRuta && (
+                <button
+                  type="button"
+                  onClick={() => setBusquedaRuta("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 tx-mu hover:text-[var(--tx)]"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Tira KPI unificada con divisores finos */}
+          <div className="mt-4 bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[var(--bd)] overflow-hidden">
+            <div className="p-3 text-center">
+              <span className="text-[10px] font-medium tx-mu block">En Ruta</span>
+              <span className="text-xl font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400 mt-0.5 block">
+                {kpisRuta.enRuta}
+              </span>
+            </div>
+
+            <div className="p-3 text-center">
+              <span className="text-[10px] font-medium tx-mu block">Entregados Hoy</span>
+              <span className="text-xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-0.5 block">
+                {kpisRuta.entregadosHoy}
+              </span>
+            </div>
+
+            <div className="p-3 text-center">
+              <span className="text-[10px] font-medium tx-mu block">Efectivo Mano</span>
+              <span className="text-base font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1 block">
+                ${kpisRuta.efectivoHoy.toFixed(2)}
+              </span>
+            </div>
+
+            <div className="p-3 text-center">
+              <span className="text-[10px] font-medium tx-mu block">Transfer / Pagado</span>
+              <span className="text-base font-bold font-mono tabular-nums text-sky-600 dark:text-sky-400 mt-1 block">
+                ${kpisRuta.transferenciasHoy.toFixed(2)}
+              </span>
+            </div>
+          </div>
+
+          {/* Columna Única: Tu Ruta */}
+          <div className="mt-5 space-y-3 flex-1 pb-10">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-semibold tx-mu">
+                Tu Ruta <span className="font-mono tabular-nums">({tuRutaFiltrada.length})</span>
+              </h2>
+              {!isCourierLocked && (
+                <button
+                  type="button"
+                  onClick={() => navigate("/pedidos")}
+                  className="text-xs text-[var(--tx)] font-semibold hover:underline"
+                >
+                  Ir a Pedidos OS →
+                </button>
+              )}
+            </div>
+
+            {tuRutaFiltrada.length === 0 ? (
+              <div className="p-8 text-center text-xs tx-mu bg-cd rounded-xl border border-[var(--bd)]">
+                {busquedaRuta
+                  ? "No hay paquetes que coincidan con tu búsqueda."
+                  : "No tienes paquetes pendientes en tu ruta por ahora."}
+              </div>
+            ) : (
+              tuRutaFiltrada.map((p) => {
+                const entregado = p.estado === "entregado";
+                const novedad = hasOrderIssue(p);
+                const prepagado = isOrderPrepaid(p);
+                const cobroKind = getOrderCobroKind(p);
+                const risk = evaluateCustomerRisk(p.telefono, todosLosPedidos);
+                const avisado =
+                  notificadosWaIds[p.id] ||
+                  String(p.notas || "").includes("[Aviso llegada");
+                const wazeQuickUrl = `https://waze.com/ul?q=${encodeURIComponent(
+                  `${p.direccion || ""}, El Salvador`
+                )}`;
+
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => openOrderForDelivery(p)}
+                    className={`p-4 rounded-xl border cursor-pointer transition-colors ${
+                      entregado
+                        ? "bg-sf border-[var(--bd)] opacity-80"
+                        : novedad
+                        ? "bg-cd border-amber-500/50 hover:border-amber-500"
+                        : "bg-cd border-[var(--bd)] hover:border-[var(--tx)]"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                          <span className="font-mono tabular-nums font-medium tx-mu">
+                            {p.pedido_codigo || `#${String(p.id).slice(0, 8).toUpperCase()}`}
+                          </span>
+                          {risk.nivelRiesgo === "rojo" && (
+                            <span className="px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-[10px] font-semibold">
+                              Riesgo Alto
+                            </span>
+                          )}
+                          {risk.nivelRiesgo === "amarillo" && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[10px] font-semibold">
+                              Precaución
+                            </span>
+                          )}
+                          {novedad && !entregado && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[10px] font-semibold">
+                              Novedad
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="font-bold text-sm text-[var(--tx)] leading-tight mt-1 truncate">
+                          {p.nombre_cliente || "Sin nombre"}
+                        </h3>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <span className="text-base font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 block">
+                          ${Number(p.total || 0).toFixed(2)}
                         </span>
-                        {risk.nivelRiesgo === "rojo" && (
-                          <span className="px-1.5 py-0.5 rounded-md bg-rose-500/20 border border-rose-500/40 text-rose-300 text-[9px] font-bold">
-                            ⚠️ Riesgo Alto
-                          </span>
+                        <span className="text-[10px] font-medium tx-mu">
+                          {entregado
+                            ? cobroKind === "efectivo"
+                              ? "Efectivo"
+                              : cobroKind === "transferencia"
+                              ? "Transferencia"
+                              : "Prepagado"
+                            : prepagado
+                            ? "Ya pagado"
+                            : "Contra entrega"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-xs tx-mu mt-2 flex items-start gap-1.5 leading-snug">
+                      <MapPin size={13} className="shrink-0 mt-0.5" />
+                      <span className="text-[var(--tx)]/90">
+                        {p.direccion || "Sin dirección"}
+                        {p.departamento ? ` · ${p.departamento}` : ""}
+                      </span>
+                    </p>
+
+                    <div className="mt-3 pt-2.5 border-t border-[var(--bd)] flex items-center justify-between gap-2 text-xs">
+                      <span className="text-[11px] tx-mu font-mono flex items-center gap-1.5 truncate">
+                        <Package size={12} className="shrink-0" />
+                        <span className="truncate">{getOrderProductLabel(p)}</span>
+                      </span>
+
+                      <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        {!entregado && p.telefono && (
+                          <a
+                            href={buildDriverWaUrl(p)}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={() => handleAvisarLlegadaEvolution(p)}
+                            className={`min-h-[36px] px-3 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1.5 transition-colors ${
+                              avisado
+                                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
+                                : "bg-sf border-[var(--bd)] hover:bg-[var(--tx)] hover:text-[var(--cd)] text-[var(--tx)]"
+                            }`}
+                            title={
+                              avisado
+                                ? "Aviso por Evolution ya enviado (máx. 1 vez). Toca para abrir tu WhatsApp."
+                                : "Notifica 1 vez por Evolution y abre tu WhatsApp listo para enviar"
+                            }
+                          >
+                            {sendingWaId === p.id ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : avisado ? (
+                              <Check size={12} />
+                            ) : (
+                              <Send size={12} />
+                            )}
+                            {avisado ? "WhatsApp ✓" : "Voy llegando"}
+                          </a>
                         )}
-                        {risk.nivelRiesgo === "amarillo" && (
-                          <span className="px-1.5 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-bold">
-                            Precaución
-                          </span>
-                        )}
-                        {novedad && !entregado && (
-                          <span className="px-1.5 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[9px] font-bold">
-                            Novedad
-                          </span>
+
+                        {!entregado && p.direccion && (
+                          <a
+                            href={wazeQuickUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="min-h-[36px] min-w-[36px] p-2 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-700 dark:text-sky-300 hover:bg-sky-500/20 flex items-center justify-center transition-colors"
+                            title="Abrir en Waze"
+                          >
+                            <Compass size={14} />
+                          </a>
                         )}
                       </div>
-                      <h3 className="font-bold text-sm text-white leading-tight mt-1 truncate">
-                        {p.nombre_cliente || "Sin nombre"}
-                      </h3>
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      <span className="text-base font-black font-mono text-emerald-400 block">
-                        ${Number(p.total || 0).toFixed(2)}
-                      </span>
-                      <span className="text-[9px] font-bold text-slate-400">
-                        {entregado
-                          ? cobroKind === "efectivo"
-                            ? "💵 Efectivo"
-                            : cobroKind === "transferencia"
-                            ? "🏦 Transfer."
-                            : "✓ Prepagado"
-                          : prepagado
-                          ? "✓ Ya pagado"
-                          : "💰 Contra entrega"}
-                      </span>
                     </div>
                   </div>
-
-                  <p className="text-xs text-slate-300 mt-2 flex items-start gap-1.5 leading-snug">
-                    <MapPin size={13} className="text-slate-400 shrink-0 mt-0.5" />
-                    <span>
-                      {p.direccion || "Sin dirección"}
-                      {p.departamento ? ` · ${p.departamento}` : ""}
-                    </span>
-                  </p>
-
-                  <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between gap-2 text-xs">
-                    <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1 truncate">
-                      <Package size={12} className="shrink-0" />
-                      <span className="truncate">{getOrderProductLabel(p)}</span>
-                    </span>
-
-                    <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      {!entregado && p.telefono && (
-                        <a
-                          href={buildDriverWaUrl(p)}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={() => handleAvisarLlegadaEvolution(p)}
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 transition-colors ${
-                            avisado
-                              ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
-                              : "bg-slate-800 border-slate-700 hover:bg-emerald-600 hover:border-emerald-500 text-slate-200 hover:text-white"
-                          }`}
-                          title={
-                            avisado
-                              ? "Aviso por Evolution ya enviado (máx. 1 vez). Toca para abrir tu WhatsApp."
-                              : "Notifica 1 vez por Evolution y abre tu WhatsApp listo para enviar"
-                          }
-                        >
-                          {sendingWaId === p.id ? (
-                            <Loader2 size={11} className="animate-spin" />
-                          ) : avisado ? (
-                            <Check size={11} />
-                          ) : (
-                            <Send size={11} />
-                          )}
-                          {avisado ? "WhatsApp ✓" : "Voy llegando"}
-                        </a>
-                      )}
-
-                      {!entregado && p.direccion && (
-                        <a
-                          href={wazeQuickUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-1.5 rounded-lg bg-sky-600/20 border border-sky-500/30 text-sky-300 hover:bg-sky-600/30"
-                          title="Abrir en Waze"
-                        >
-                          <Compass size={12} />
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
+                );
+              })
+            )}
+          </div>
         </div>
 
         {/* MODAL: CUADRE / CIERRE DEL DÍA */}
         {mostrarCuadreModal && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm p-4"
             onClick={() => setMostrarCuadreModal(false)}
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 text-white shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
+              className="w-full max-w-md rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] overflow-hidden flex flex-col max-h-[85vh]"
             >
-              <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
-                <div className="flex items-center gap-2 text-emerald-400">
-                  <ClipboardList size={18} />
+              <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+                <div className="flex items-center gap-2">
+                  <ClipboardList size={17} className="text-emerald-600 dark:text-emerald-400" />
                   <div>
-                    <h3 className="font-bold text-sm text-white">Cuadre de Ruta · {todaySv}</h3>
-                    <p className="text-[10px] text-slate-400">
+                    <h3 className="font-bold text-sm">Cuadre de Ruta · {todaySv}</h3>
+                    <p className="text-[11px] tx-mu">
                       {courierSeleccionado === "Todos los Couriers"
                         ? "Todos los motoristas"
                         : courierSeleccionado}
@@ -1523,7 +1569,7 @@ export function ConfirmarEntregaPage() {
                 <button
                   type="button"
                   onClick={() => setMostrarCuadreModal(false)}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white"
+                  className="p-1.5 rounded-lg tx-mu hover:text-[var(--tx)]"
                 >
                   <X size={16} />
                 </button>
@@ -1531,62 +1577,68 @@ export function ConfirmarEntregaPage() {
 
               <div className="p-4 space-y-3 overflow-y-auto">
                 <div className="grid grid-cols-2 gap-2.5">
-                  <div className="p-3 rounded-2xl bg-emerald-950/30 border border-emerald-500/30">
-                    <span className="text-[10px] uppercase font-bold text-emerald-400 block">
-                      💵 Efectivo a Entregar
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                    <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 block">
+                      Efectivo a Entregar
                     </span>
-                    <span className="text-2xl font-black font-mono text-white mt-0.5 block">
+                    <span className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-0.5 block">
                       ${kpisRuta.efectivoHoy.toFixed(2)}
                     </span>
                   </div>
 
-                  <div className="p-3 rounded-2xl bg-sky-950/30 border border-sky-500/30">
-                    <span className="text-[10px] uppercase font-bold text-sky-400 block">
-                      🏦 Transferencias / Ya Pagado
+                  <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/30">
+                    <span className="text-[10px] font-semibold text-sky-700 dark:text-sky-400 block">
+                      Transferencias / Pagado
                     </span>
-                    <span className="text-2xl font-black font-mono text-white mt-0.5 block">
+                    <span className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-0.5 block">
                       ${kpisRuta.transferenciasHoy.toFixed(2)}
                     </span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 text-center bg-slate-950 p-3 rounded-2xl border border-slate-800">
-                  <div>
-                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Entregados</span>
-                    <span className="text-base font-black text-emerald-400">{kpisRuta.entregadosHoy}</span>
+                <div className="grid grid-cols-3 text-center bg-sf rounded-xl border border-[var(--bd)] divide-x divide-[var(--bd)]">
+                  <div className="p-2.5">
+                    <span className="text-[10px] font-medium tx-mu block">Entregados</span>
+                    <span className="text-base font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+                      {kpisRuta.entregadosHoy}
+                    </span>
                   </div>
-                  <div>
-                    <span className="text-[9px] uppercase font-bold text-slate-400 block">En Ruta</span>
-                    <span className="text-base font-black text-amber-400">{kpisRuta.enRuta}</span>
+                  <div className="p-2.5">
+                    <span className="text-[10px] font-medium tx-mu block">En Ruta</span>
+                    <span className="text-base font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400">
+                      {kpisRuta.enRuta}
+                    </span>
                   </div>
-                  <div>
-                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Novedades</span>
-                    <span className="text-base font-black text-rose-400">{kpisRuta.novedades}</span>
+                  <div className="p-2.5">
+                    <span className="text-[10px] font-medium tx-mu block">Novedades</span>
+                    <span className="text-base font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400">
+                      {kpisRuta.novedades}
+                    </span>
                   </div>
                 </div>
 
                 <div className="space-y-1.5">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                  <span className="text-[11px] font-semibold tx-mu block">
                     Entregas Completadas Hoy ({entregadosHoyList.length})
                   </span>
                   {entregadosHoyList.length === 0 ? (
-                    <p className="text-xs text-slate-500 py-4 text-center bg-slate-950 rounded-xl border border-slate-800">
+                    <p className="text-xs tx-mu py-4 text-center bg-sf rounded-xl border border-[var(--bd)]">
                       Todavía no hay paquetes entregados hoy.
                     </p>
                   ) : (
-                    <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                    <div className="divide-y divide-[var(--bd)] border border-[var(--bd)] rounded-xl bg-sf max-h-56 overflow-y-auto">
                       {entregadosHoyList.map((p) => {
                         const kind = getOrderCobroKind(p);
                         return (
                           <div
                             key={p.id}
-                            className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2 text-xs"
+                            className="p-2.5 flex items-center justify-between gap-2 text-xs"
                           >
                             <div className="min-w-0">
-                              <p className="font-bold text-white truncate">
+                              <p className="font-semibold text-[var(--tx)] truncate">
                                 {p.nombre_cliente || "Cliente"}
                               </p>
-                              <p className="text-[10px] text-slate-400 truncate">
+                              <p className="text-[11px] tx-mu font-mono truncate">
                                 {p.pedido_codigo || `#${String(p.id).slice(0, 8)}`} ·{" "}
                                 {kind === "efectivo"
                                   ? "Efectivo"
@@ -1595,7 +1647,7 @@ export function ConfirmarEntregaPage() {
                                   : "Prepagado"}
                               </p>
                             </div>
-                            <span className="font-mono font-bold text-emerald-400 shrink-0">
+                            <span className="font-mono tabular-nums font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
                               ${Number(p.total || 0).toFixed(2)}
                             </span>
                           </div>
@@ -1606,18 +1658,18 @@ export function ConfirmarEntregaPage() {
                 </div>
               </div>
 
-              <div className="p-4 border-t border-slate-800 bg-slate-950 flex gap-2">
+              <div className="p-4 border-t border-[var(--bd)] bg-sf flex gap-2">
                 <button
                   type="button"
                   onClick={() => setMostrarCuadreModal(false)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-800 text-xs font-bold text-slate-400 hover:text-white"
+                  className="min-h-[42px] px-4 py-2 rounded-lg border border-[var(--bd)] bg-cd text-xs font-semibold tx-mu hover:text-[var(--tx)]"
                 >
                   Cerrar
                 </button>
                 <button
                   type="button"
                   onClick={handleCopyCuadre}
-                  className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                  className="flex-1 min-h-[42px] py-2 px-4 rounded-lg bg-[var(--tx)] hover:opacity-90 text-[var(--cd)] text-xs font-semibold flex items-center justify-center gap-1.5 transition-opacity"
                 >
                   {cuadreCopiado ? <Check size={14} /> : <Copy size={14} />}
                   {cuadreCopiado ? "¡Resumen Copiado!" : "Copiar Resumen de Cuadre"}
@@ -1635,22 +1687,34 @@ export function ConfirmarEntregaPage() {
   /* ========================================================================= */
   if (!pedido) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-rose-500 p-6 text-center max-w-md mx-auto">
-        <AlertTriangle className="w-14 h-14 mb-3" />
-        <h1 className="text-xl font-black">Pedido no encontrado</h1>
-        <p className="text-xs mt-1 text-slate-400">
-          El código escaneado puede ser inválido o el pedido ya fue retirado.
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            setModoRuta(true);
-            if (id) navigate("/repartidor");
-          }}
-          className="mt-5 px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs font-bold"
-        >
-          Ver Mi Ruta del Día
-        </button>
+      <div className="min-h-screen bg-[var(--bg)] text-[var(--tx)] flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-full max-w-md bg-cd border border-[var(--bd)] rounded-xl p-6 space-y-3">
+          <AlertTriangle className="w-11 h-11 mx-auto text-rose-600 dark:text-rose-400" />
+          <h1 className="text-lg font-bold">Pedido no encontrado</h1>
+          <p className="text-xs tx-mu">
+            El código escaneado puede ser inválido o el pedido ya fue retirado.
+          </p>
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="min-h-[42px] px-3 py-2 bg-sf border border-[var(--bd)] rounded-lg text-xs font-medium flex items-center gap-1.5"
+            >
+              {theme === "light" ? <Moon size={14} /> : <Sun size={14} />}
+              {theme === "light" ? "Modo Oscuro" : "Modo Claro"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setModoRuta(true);
+                if (id) navigate("/repartidor");
+              }}
+              className="min-h-[42px] px-4 py-2 bg-[var(--tx)] text-[var(--cd)] rounded-lg text-xs font-semibold"
+            >
+              Ver Mi Ruta del Día
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -1663,7 +1727,7 @@ export function ConfirmarEntregaPage() {
   const riskPedido = evaluateCustomerRisk(pedido.telefono, todosLosPedidos);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-start p-4 sm:p-6 pb-20">
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--tx)] flex flex-col items-center justify-start p-3 sm:p-6 pb-20">
       <input
         type="file"
         ref={fileInputRef}
@@ -1674,38 +1738,48 @@ export function ConfirmarEntregaPage() {
       />
 
       {/* Contenedor Móvil */}
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+      <div className="w-full max-w-lg bg-cd border border-[var(--bd)] rounded-xl overflow-hidden flex flex-col">
         {/* Cabecera Móvil */}
-        <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+        <div className="px-4 py-3 bg-sf border-b border-[var(--bd)] flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => {
               setModoRuta(true);
               if (id) navigate("/repartidor");
             }}
-            className="p-1.5 rounded-xl hover:bg-slate-900 text-slate-400 flex items-center gap-1 text-xs font-bold"
+            className="min-h-[38px] px-2.5 py-1.5 rounded-lg hover:bg-cd tx-mu hover:text-[var(--tx)] flex items-center gap-1.5 text-xs font-semibold transition-colors"
           >
             <ArrowLeft size={16} /> Volver a Ruta
           </button>
 
-          <span className="font-mono font-bold text-xs text-slate-400">
-            {pedido.pedido_codigo || `#${String(pedido.id).slice(0, 8).toUpperCase()}`}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="font-mono tabular-nums font-semibold text-xs tx-mu">
+              {pedido.pedido_codigo || `#${String(pedido.id).slice(0, 8).toUpperCase()}`}
+            </span>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="min-h-[36px] min-w-[36px] p-1.5 rounded-lg bg-cd border border-[var(--bd)] hover:bg-sf text-[var(--tx)] flex items-center justify-center transition-colors"
+              title={theme === "light" ? "Cambiar a modo oscuro" : "Cambiar a modo claro"}
+            >
+              {theme === "light" ? <Moon size={14} /> : <Sun size={14} />}
+            </button>
+          </div>
         </div>
 
         {/* Toast inline en vista de entrega */}
         {toastInfo && (
           <div
-            className={`mx-4 mt-4 p-3 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 ${
+            className={`mx-4 mt-4 p-3 rounded-lg border text-xs font-medium flex items-center justify-between gap-2 ${
               toastInfo.tipo === "ok"
-                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-200"
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
                 : toastInfo.tipo === "err"
-                ? "bg-rose-500/15 border-rose-500/40 text-rose-200"
-                : "bg-amber-500/15 border-amber-500/40 text-amber-200"
+                ? "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300"
+                : "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300"
             }`}
           >
             <span>{toastInfo.texto}</span>
-            <button onClick={() => setToastInfo(null)} className="opacity-70 hover:opacity-100">
+            <button onClick={() => setToastInfo(null)} className="opacity-70 hover:opacity-100 p-1">
               <X size={14} />
             </button>
           </div>
@@ -1714,20 +1788,20 @@ export function ConfirmarEntregaPage() {
         {/* PANTALLA DE ÉXITO */}
         {exito || yaEntregado ? (
           <div className="p-8 flex flex-col items-center text-center">
-            <div className="w-20 h-20 bg-emerald-500/10 border border-emerald-500/30 rounded-full flex items-center justify-center mb-5">
-              <CheckCircle2 className="w-12 h-12 text-emerald-400" />
+            <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/30 rounded-full flex items-center justify-center mb-4">
+              <CheckCircle2 className="w-9 h-9 text-emerald-600 dark:text-emerald-400" />
             </div>
-            <h2 className="text-2xl font-black text-white">
+            <h2 className="text-xl font-bold">
               {exito ? "¡Entrega Confirmada!" : "Pedido Ya Entregado"}
             </h2>
-            <p className="text-xs text-slate-400 mt-2 mb-6 max-w-xs">
+            <p className="text-xs tx-mu mt-1.5 mb-6 max-w-xs">
               {exito
                 ? `Entrega registrada (${esPrepagado ? "Prepagado" : cobroTipo === "transferencia" ? "Transferencia" : "Efectivo"}).`
                 : "Este pedido ya fue completado previamente."}
             </p>
 
             {fotoEntrega && (
-              <div className="w-24 h-24 rounded-xl border border-slate-800 overflow-hidden mb-6">
+              <div className="w-24 h-24 rounded-xl border border-[var(--bd)] overflow-hidden mb-6">
                 <img src={fotoEntrega} alt="Foto de entrega" className="w-full h-full object-cover" />
               </div>
             )}
@@ -1739,18 +1813,18 @@ export function ConfirmarEntregaPage() {
                 setModoRuta(true);
                 if (id) navigate("/repartidor");
               }}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 rounded-2xl transition-colors text-xs uppercase tracking-wider"
+              className="w-full min-h-[46px] bg-[var(--tx)] hover:opacity-90 text-[var(--cd)] font-semibold py-3 rounded-lg transition-opacity text-xs"
             >
               Ir al Siguiente Paquete →
             </button>
           </div>
         ) : (
           /* FORMULARIO DE ACCIÓN EN CALLE */
-          <div className="p-5 space-y-4">
+          <div className="p-4 sm:p-5 space-y-4">
             {/* Alerta de Riesgo si aplica */}
             {riskPedido.nivelRiesgo === "rojo" && (
-              <div className="p-3 rounded-2xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs flex items-start gap-2">
-                <ShieldAlert size={16} className="text-rose-400 shrink-0 mt-0.5" />
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2">
+                <ShieldAlert size={16} className="text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
                 <div>
                   <span className="font-bold block">Cliente con Alerta / Lista Negra</span>
                   <span className="text-[11px] opacity-90">
@@ -1761,32 +1835,34 @@ export function ConfirmarEntregaPage() {
             )}
 
             {/* Recuadro de Cobro Destacado */}
-            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-center">
+            <div className="p-4 rounded-xl bg-sf border border-[var(--bd)] text-center">
               <span
-                className={`text-[10px] font-bold uppercase tracking-widest ${
-                  esContraEntrega ? "text-amber-400" : "text-emerald-400"
+                className={`text-[11px] font-semibold uppercase tracking-wider ${
+                  esContraEntrega
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-emerald-600 dark:text-emerald-400"
                 }`}
               >
-                {esContraEntrega ? "💰 Cobrar Contra Entrega" : "✓ Pedido Ya Pagado / Transferencia Previa"}
+                {esContraEntrega ? "Cobrar Contra Entrega" : "Pedido Ya Pagado / Transferencia Previa"}
               </span>
-              <div className="text-3xl font-black font-mono mt-1 text-white">
+              <div className="text-3xl font-bold font-mono tabular-nums mt-1 text-[var(--tx)]">
                 ${Number(pedido.total || 0).toFixed(2)}{" "}
-                <span className="text-xs font-normal text-slate-500">USD</span>
+                <span className="text-xs font-normal tx-mu">USD</span>
               </div>
 
               {esContraEntrega && (
                 <>
-                  <div className="grid grid-cols-2 gap-1.5 mt-3">
+                  <div className="grid grid-cols-2 gap-2 mt-3">
                     <button
                       type="button"
                       onClick={() => setCobroTipo("efectivo")}
-                      className={`py-2 px-2.5 rounded-xl text-[11px] font-bold border flex items-center justify-center gap-1.5 transition-colors ${
+                      className={`min-h-[42px] py-2 px-3 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1.5 transition-colors ${
                         cobroTipo === "efectivo"
-                          ? "bg-emerald-600/20 border-emerald-500 text-emerald-300"
-                          : "bg-slate-900 border-slate-800 text-slate-400"
+                          ? "bg-emerald-500/15 border-emerald-500 text-emerald-700 dark:text-emerald-300"
+                          : "bg-cd border-[var(--bd)] tx-mu hover:text-[var(--tx)]"
                       }`}
                     >
-                      <Wallet size={13} /> Efectivo
+                      <Wallet size={14} /> Efectivo
                     </button>
                     <button
                       type="button"
@@ -1794,13 +1870,13 @@ export function ConfirmarEntregaPage() {
                         setCobroTipo("transferencia");
                         setMostrarCalculadora(false);
                       }}
-                      className={`py-2 px-2.5 rounded-xl text-[11px] font-bold border flex items-center justify-center gap-1.5 transition-colors ${
+                      className={`min-h-[42px] py-2 px-3 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1.5 transition-colors ${
                         cobroTipo === "transferencia"
-                          ? "bg-sky-600/20 border-sky-500 text-sky-300"
-                          : "bg-slate-900 border-slate-800 text-slate-400"
+                          ? "bg-sky-500/15 border-sky-500 text-sky-700 dark:text-sky-300"
+                          : "bg-cd border-[var(--bd)] tx-mu hover:text-[var(--tx)]"
                       }`}
                     >
-                      <Landmark size={13} /> Transferencia
+                      <Landmark size={14} /> Transferencia
                     </button>
                   </div>
 
@@ -1808,7 +1884,7 @@ export function ConfirmarEntregaPage() {
                     <button
                       type="button"
                       onClick={() => setMostrarCalculadora(!mostrarCalculadora)}
-                      className="mt-2.5 text-xs font-bold text-emerald-400 hover:underline flex items-center justify-center gap-1 mx-auto"
+                      className="mt-2.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center justify-center gap-1 mx-auto py-1"
                     >
                       <Calculator size={13} />{" "}
                       {mostrarCalculadora ? "Ocultar Calculadora" : "Calcular Cambio / Vuelto"}
@@ -1820,8 +1896,8 @@ export function ConfirmarEntregaPage() {
 
             {/* Calculadora de Vuelto Desplegable */}
             {mostrarCalculadora && esContraEntrega && cobroTipo === "efectivo" && (
-              <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">
+              <div className="p-3.5 bg-sf border border-[var(--bd)] rounded-xl space-y-2.5">
+                <span className="text-[11px] font-semibold tx-mu block">
                   ¿Con cuánto paga el cliente?
                 </span>
                 <div className="grid grid-cols-4 gap-1.5">
@@ -1830,10 +1906,10 @@ export function ConfirmarEntregaPage() {
                       key={monto}
                       type="button"
                       onClick={() => setPagaCon(String(monto))}
-                      className={`py-1.5 rounded-lg text-xs font-mono font-bold border ${
+                      className={`min-h-[40px] py-1.5 rounded-lg text-xs font-mono tabular-nums font-bold border transition-colors ${
                         pagaCon === String(monto)
-                          ? "bg-emerald-600 border-emerald-500 text-white"
-                          : "bg-slate-900 border-slate-800 text-slate-300"
+                          ? "bg-[var(--tx)] border-[var(--tx)] text-[var(--cd)]"
+                          : "bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf"
                       }`}
                     >
                       ${monto}
@@ -1841,23 +1917,23 @@ export function ConfirmarEntregaPage() {
                   ))}
                 </div>
 
-                <div className="flex gap-2 pt-1">
+                <div className="flex gap-2">
                   <input
                     type="number"
                     step="0.50"
                     placeholder="Otro valor (ej. 100)"
                     value={pagaCon}
                     onChange={(e) => setPagaCon(e.target.value)}
-                    className="flex-1 p-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold outline-none text-white focus:border-emerald-500"
+                    className="flex-1 min-h-[42px] px-3 py-2 bg-cd border border-[var(--bd)] rounded-lg text-xs font-mono tabular-nums font-bold outline-none text-[var(--tx)] focus:border-[var(--tx)]"
                   />
                 </div>
 
                 {pagaConNum > 0 && (
-                  <div className="p-2.5 bg-emerald-950/30 border border-emerald-500/30 rounded-xl text-center">
-                    <span className="text-[10px] uppercase font-bold text-emerald-400 block">
+                  <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-center">
+                    <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 block">
                       {pagaConNum >= totalNum ? "Dar de Cambio / Vuelto:" : "Falta por completar:"}
                     </span>
-                    <span className="text-2xl font-black font-mono text-emerald-400">
+                    <span className="text-2xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
                       ${Math.abs(pagaConNum >= totalNum ? cambio : totalNum - pagaConNum).toFixed(2)} USD
                     </span>
                   </div>
@@ -1866,61 +1942,61 @@ export function ConfirmarEntregaPage() {
             )}
 
             {/* Datos del Cliente y Dirección */}
-            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+            <div className="p-4 rounded-xl bg-sf border border-[var(--bd)] space-y-3">
               <div className="flex items-start gap-3">
-                <div className="p-2 rounded-xl bg-slate-900 text-slate-400 mt-0.5">
-                  <User size={16} />
+                <div className="p-2 rounded-lg bg-cd border border-[var(--bd)] tx-mu mt-0.5">
+                  <User size={15} />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Cliente</span>
-                  <p className="text-sm font-bold text-white truncate">
+                  <span className="text-[10px] font-semibold tx-mu block">Cliente</span>
+                  <p className="text-sm font-bold text-[var(--tx)] truncate">
                     {pedido.nombre_cliente || "Sin nombre"}
                   </p>
                   {pedido.telefono && (
-                    <span className="text-[11px] font-mono text-slate-400">{pedido.telefono}</span>
+                    <span className="text-[11px] font-mono tabular-nums tx-mu">{pedido.telefono}</span>
                   )}
                 </div>
               </div>
 
               <div className="flex items-start gap-3">
-                <div className="p-2 rounded-xl bg-slate-900 text-slate-400 mt-0.5">
-                  <MapPin size={16} />
+                <div className="p-2 rounded-lg bg-cd border border-[var(--bd)] tx-mu mt-0.5">
+                  <MapPin size={15} />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                  <span className="text-[10px] font-semibold tx-mu block">
                     Dirección de Entrega
                   </span>
-                  <p className="text-xs text-slate-200 leading-snug">
+                  <p className="text-xs text-[var(--tx)] leading-snug">
                     {pedido.direccion || "Sin dirección registrada"}
                   </p>
                   {pedido.departamento && (
-                    <span className="text-[10px] text-emerald-400 font-semibold block mt-0.5">
-                      📍 {pedido.departamento}
+                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold block mt-0.5">
+                      {pedido.departamento}
                     </span>
                   )}
                 </div>
               </div>
 
               <div className="flex items-start gap-3">
-                <div className="p-2 rounded-xl bg-slate-900 text-slate-400 mt-0.5">
-                  <Package size={16} />
+                <div className="p-2 rounded-lg bg-cd border border-[var(--bd)] tx-mu mt-0.5">
+                  <Package size={15} />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                  <span className="text-[10px] font-semibold tx-mu block">
                     Producto / SKU
                   </span>
-                  <p className="text-xs font-mono font-bold text-white break-words">
+                  <p className="text-xs font-mono font-semibold text-[var(--tx)] break-words">
                     {getOrderProductLabel(pedido)}
                   </p>
                 </div>
               </div>
 
               {pedido.notas && (
-                <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-xs text-slate-300">
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">
-                    Nota del pedido:
+                <div className="p-2.5 bg-cd rounded-lg border border-[var(--bd)] text-xs text-[var(--tx)]">
+                  <span className="text-[10px] font-semibold tx-mu block">
+                    Nota del pedido
                   </span>
-                  <p className="text-[11px] mt-0.5 italic break-words">{pedido.notas}</p>
+                  <p className="text-[11px] mt-0.5 tx-mu break-words">{pedido.notas}</p>
                 </div>
               )}
             </div>
@@ -1931,7 +2007,7 @@ export function ConfirmarEntregaPage() {
                 href={urlWaze}
                 target="_blank"
                 rel="noreferrer"
-                className="py-3 px-3 rounded-2xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow transition-colors"
+                className="min-h-[44px] py-2.5 px-3 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
               >
                 <Compass size={16} /> Abrir en Waze
               </a>
@@ -1940,19 +2016,19 @@ export function ConfirmarEntregaPage() {
                 href={urlMaps}
                 target="_blank"
                 rel="noreferrer"
-                className="py-3 px-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow transition-colors"
+                className="min-h-[44px] py-2.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
               >
                 <Navigation size={16} /> Google Maps
               </a>
             </div>
 
             {/* SELECTOR RÁPIDO DE TIEMPO + COMUNICACIÓN */}
-            <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5">
+            <div className="p-3.5 rounded-xl bg-sf border border-[var(--bd)] space-y-2.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
-                  <Clock size={12} className="text-emerald-400" /> Tiempo estimado de llegada:
+                <span className="text-[11px] font-semibold tx-mu flex items-center gap-1.5">
+                  <Clock size={12} className="text-emerald-600 dark:text-emerald-400" /> Tiempo estimado:
                 </span>
-                <span className="text-[10px] font-bold text-emerald-400">
+                <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
                   {DRIVER_TIME_PRESETS.find((t) => t.value === tiempoEstimado)?.label || tiempoEstimado}
                 </span>
               </div>
@@ -1965,10 +2041,10 @@ export function ConfirmarEntregaPage() {
                       key={preset.label}
                       type="button"
                       onClick={() => setTiempoEstimado(preset.value)}
-                      className={`px-2.5 py-2 rounded-xl text-[11px] font-bold border transition-all flex-1 min-w-[72px] text-center ${
+                      className={`min-h-[40px] px-2.5 py-2 rounded-lg text-[11px] font-semibold border transition-colors flex-1 min-w-[74px] text-center ${
                         active
-                          ? "bg-emerald-600 border-emerald-500 text-white shadow"
-                          : "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700"
+                          ? "bg-[var(--tx)] border-[var(--tx)] text-[var(--cd)]"
+                          : "bg-cd border-[var(--bd)] text-[var(--tx)] hover:border-[var(--tx)]/40"
                       }`}
                     >
                       {preset.label}
@@ -1977,7 +2053,7 @@ export function ConfirmarEntregaPage() {
                 })}
               </div>
 
-              <p className="text-[11px] text-slate-400 bg-slate-900/80 border border-slate-800 rounded-xl p-2.5 leading-snug italic">
+              <p className="text-[11px] tx-mu bg-cd border border-[var(--bd)] rounded-lg p-2.5 leading-snug italic">
                 “{mensajeWa}”
               </p>
 
@@ -1985,12 +2061,12 @@ export function ConfirmarEntregaPage() {
                 {telHrefPedido ? (
                   <a
                     href={telHrefPedido}
-                    className="py-3 px-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 transition-colors"
+                    className="min-h-[44px] py-2.5 px-3 rounded-lg bg-cd hover:bg-sf text-[var(--tx)] font-semibold text-xs flex items-center justify-center gap-2 border border-[var(--bd)] transition-colors"
                   >
-                    <Phone size={16} className="text-emerald-400" /> Llamar Cliente
+                    <Phone size={15} className="text-emerald-600 dark:text-emerald-400" /> Llamar Cliente
                   </a>
                 ) : (
-                  <div className="py-3 px-3 rounded-2xl bg-slate-800/50 text-slate-500 font-bold text-xs text-center border border-slate-800">
+                  <div className="min-h-[44px] py-2.5 px-3 rounded-lg bg-cd/60 tx-mu font-semibold text-xs flex items-center justify-center border border-[var(--bd)]">
                     Sin Teléfono
                   </div>
                 )}
@@ -2001,9 +2077,9 @@ export function ConfirmarEntregaPage() {
                     target="_blank"
                     rel="noreferrer"
                     onClick={() => handleAvisarLlegadaEvolution(pedido)}
-                    className={`py-3 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 shadow transition-colors ${
+                    className={`min-h-[44px] py-2.5 px-3 rounded-lg font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors ${
                       yaAvisado
-                        ? "bg-emerald-600/20 border border-emerald-500/40 text-emerald-300"
+                        ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
                         : "bg-emerald-600 hover:bg-emerald-500 text-white"
                     }`}
                   >
@@ -2017,14 +2093,14 @@ export function ConfirmarEntregaPage() {
                     {yaAvisado ? "Abrir WhatsApp ✓" : "Avisar Llegada"}
                   </a>
                 ) : (
-                  <div className="py-3 px-3 rounded-2xl bg-slate-800/50 text-slate-500 font-bold text-xs text-center border border-slate-800">
+                  <div className="min-h-[44px] py-2.5 px-3 rounded-lg bg-cd/60 tx-mu font-semibold text-xs flex items-center justify-center border border-[var(--bd)]">
                     Sin WhatsApp
                   </div>
                 )}
               </div>
 
               {urlWa && (
-                <p className="text-[10px] text-slate-500 text-center leading-snug">
+                <p className="text-[10px] tx-mu text-center leading-snug">
                   {yaAvisado
                     ? "El aviso automático de tienda ya se envió (solo 1 vez, sin spam). Tocar de nuevo solo abre tu WhatsApp."
                     : "Envía 1 aviso automático desde el número de tienda (Evolution) y abre tu WhatsApp listo con los datos."}
@@ -2033,34 +2109,34 @@ export function ConfirmarEntregaPage() {
             </div>
 
             {/* PRUEBA DE ENTREGA: FOTO Y FIRMA */}
-            <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-3">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">
-                Prueba de Entrega (Opcional):
+            <div className="p-3.5 bg-sf border border-[var(--bd)] rounded-xl space-y-3">
+              <span className="text-[11px] font-semibold tx-mu block">
+                Prueba de Entrega (Opcional)
               </span>
 
               <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex-1 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-xs font-bold text-slate-200 flex items-center justify-center gap-1.5"
+                  className="flex-1 min-h-[42px] py-2 px-3 rounded-lg bg-cd border border-[var(--bd)] hover:border-[var(--tx)]/40 text-xs font-semibold text-[var(--tx)] flex items-center justify-center gap-1.5 transition-colors"
                 >
-                  <Camera size={14} className="text-emerald-400" />{" "}
+                  <Camera size={14} className="text-emerald-600 dark:text-emerald-400" />{" "}
                   {fotoEntrega ? "Foto Tomada ✓" : "Tomar Foto"}
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setMostrarFirma(!mostrarFirma)}
-                  className="flex-1 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-xs font-bold text-slate-200 flex items-center justify-center gap-1.5"
+                  className="flex-1 min-h-[42px] py-2 px-3 rounded-lg bg-cd border border-[var(--bd)] hover:border-[var(--tx)]/40 text-xs font-semibold text-[var(--tx)] flex items-center justify-center gap-1.5 transition-colors"
                 >
-                  <Edit3 size={14} className="text-indigo-400" />{" "}
+                  <Edit3 size={14} className="text-indigo-600 dark:text-indigo-400" />{" "}
                   {hayFirma ? "Firma Lista ✓" : "Firma en Pantalla"}
                 </button>
               </div>
 
               {fotoEntrega && (
                 <div className="flex items-center gap-3 pt-1">
-                  <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-800 shrink-0">
+                  <div className="relative w-16 h-16 rounded-lg overflow-hidden border border-[var(--bd)] shrink-0">
                     <img src={fotoEntrega} alt="Preview" className="w-full h-full object-cover" />
                     <button
                       type="button"
@@ -2075,12 +2151,12 @@ export function ConfirmarEntregaPage() {
                   </div>
 
                   {pedido.telefono && (
-                    <label className="flex items-start gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
+                    <label className="flex items-start gap-2 text-[11px] text-[var(--tx)] cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={enviarFotoCliente}
                         onChange={(e) => setEnviarFotoCliente(e.target.checked)}
-                        className="mt-0.5 accent-emerald-500 rounded cursor-pointer"
+                        className="mt-0.5 accent-emerald-600 rounded cursor-pointer"
                       />
                       <span>Enviar esta foto como comprobante al cliente por WhatsApp</span>
                     </label>
@@ -2089,10 +2165,10 @@ export function ConfirmarEntregaPage() {
               )}
 
               {mostrarFirma && (
-                <div className="space-y-2 pt-1 border-t border-slate-800">
-                  <div className="flex justify-between items-center text-[10px] text-slate-400 font-bold">
+                <div className="space-y-2 pt-2 border-t border-[var(--bd)]">
+                  <div className="flex justify-between items-center text-[11px] tx-mu font-semibold">
                     <span>El cliente firma aquí con el dedo:</span>
-                    <button type="button" onClick={limpiarFirma} className="text-rose-400 hover:underline">
+                    <button type="button" onClick={limpiarFirma} className="text-rose-600 dark:text-rose-400 hover:underline">
                       Borrar trazo
                     </button>
                   </div>
@@ -2107,19 +2183,19 @@ export function ConfirmarEntregaPage() {
                     onTouchStart={startDrawing}
                     onTouchMove={draw}
                     onTouchEnd={stopDrawing}
-                    className="w-full h-[130px] bg-white rounded-xl touch-none border border-slate-700 cursor-crosshair"
+                    className="w-full h-[130px] bg-white rounded-lg touch-none border border-[var(--bd)] cursor-crosshair"
                   />
                 </div>
               )}
             </div>
 
             {/* BOTÓN PRINCIPAL: CONFIRMAR ENTREGA Y COBRO */}
-            <div className="pt-2 space-y-2">
+            <div className="pt-1 space-y-2">
               <button
                 type="button"
                 onClick={handleEntregar}
                 disabled={actualizando}
-                className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-black py-4 rounded-2xl shadow-xl shadow-emerald-600/30 transition-all text-sm uppercase tracking-wider"
+                className="w-full min-h-[50px] flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-bold py-3.5 rounded-xl transition-all text-sm"
               >
                 {actualizando ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
@@ -2138,7 +2214,7 @@ export function ConfirmarEntregaPage() {
                   handleSelectTipoNovedad("Cliente no contestó llamadas/mensajes");
                   setMostrarNovedadModal(true);
                 }}
-                className="w-full py-2.5 rounded-xl border border-rose-500/30 hover:bg-rose-500/10 text-rose-400 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                className="w-full min-h-[44px] py-2.5 rounded-xl border border-rose-500/30 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
               >
                 <AlertTriangle size={14} /> Reportar Novedad / Reintento de Entrega
               </button>
@@ -2150,32 +2226,36 @@ export function ConfirmarEntregaPage() {
       {/* MODAL: REPORTAR NOVEDAD EN RUTA */}
       {mostrarNovedadModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm p-4"
           onClick={() => setMostrarNovedadModal(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900 text-white shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
+            className="w-full max-w-sm rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] overflow-hidden max-h-[90vh] overflow-y-auto"
           >
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
-              <div className="flex items-center gap-2 text-rose-400">
-                <AlertTriangle size={18} />
+            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                <AlertTriangle size={17} />
                 <h3 className="font-bold text-sm">Reportar Novedad en Ruta</h3>
               </div>
-              <button type="button" onClick={() => setMostrarNovedadModal(false)} className="p-1 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setMostrarNovedadModal(false)}
+                className="p-1 rounded-lg tx-mu hover:text-[var(--tx)]"
+              >
                 <X size={16} />
               </button>
             </div>
 
-            <div className="p-5 space-y-4">
+            <div className="p-4 sm:p-5 space-y-4">
               <div>
-                <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1.5">
+                <label className="block text-[11px] font-semibold tx-mu mb-1.5">
                   ¿Por qué no se pudo entregar?
                 </label>
                 <select
                   value={tipoNovedad}
                   onChange={(e) => handleSelectTipoNovedad(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-xs font-semibold outline-none text-white focus:border-rose-500"
+                  className="w-full min-h-[42px] px-3 py-2 rounded-lg border border-[var(--bd)] bg-sf text-xs font-semibold outline-none text-[var(--tx)] focus:border-rose-500"
                 >
                   <option value="Cliente no contestó llamadas/mensajes">
                     Cliente no contestó llamadas/mensajes
@@ -2197,18 +2277,18 @@ export function ConfirmarEntregaPage() {
 
               {/* Reprogramar fecha si el cliente lo solicitó */}
               {tipoNovedad === "Cliente pide reprogramar entrega" && (
-                <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 space-y-2.5">
-                  <div className="flex items-center gap-1.5 text-indigo-300 text-xs font-bold">
+                <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 space-y-2.5">
+                  <div className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 text-xs font-bold">
                     <Calendar size={14} /> Nueva fecha acordada
                   </div>
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
                       type="button"
                       onClick={() => setNuevaFechaReprogramar(addDaysSv(1))}
-                      className={`py-1.5 rounded-lg text-[11px] font-bold border ${
+                      className={`min-h-[38px] py-1.5 rounded-lg text-xs font-semibold border ${
                         nuevaFechaReprogramar === addDaysSv(1)
-                          ? "bg-indigo-600 border-indigo-500 text-white"
-                          : "bg-slate-950 border-slate-800 text-slate-300"
+                          ? "bg-indigo-600 border-indigo-600 text-white"
+                          : "bg-cd border-[var(--bd)] text-[var(--tx)]"
                       }`}
                     >
                       Mañana
@@ -2216,10 +2296,10 @@ export function ConfirmarEntregaPage() {
                     <button
                       type="button"
                       onClick={() => setNuevaFechaReprogramar(addDaysSv(2))}
-                      className={`py-1.5 rounded-lg text-[11px] font-bold border ${
+                      className={`min-h-[38px] py-1.5 rounded-lg text-xs font-semibold border ${
                         nuevaFechaReprogramar === addDaysSv(2)
-                          ? "bg-indigo-600 border-indigo-500 text-white"
-                          : "bg-slate-950 border-slate-800 text-slate-300"
+                          ? "bg-indigo-600 border-indigo-600 text-white"
+                          : "bg-cd border-[var(--bd)] text-[var(--tx)]"
                       }`}
                     >
                       Pasado mañana
@@ -2229,14 +2309,14 @@ export function ConfirmarEntregaPage() {
                     type="date"
                     value={nuevaFechaReprogramar}
                     onChange={(e) => setNuevaFechaReprogramar(e.target.value)}
-                    className="w-full p-2 rounded-xl border border-slate-800 bg-slate-950 text-xs text-white outline-none focus:border-indigo-500"
+                    className="w-full min-h-[40px] px-3 py-2 rounded-lg border border-[var(--bd)] bg-cd text-xs text-[var(--tx)] outline-none focus:border-indigo-500 font-mono"
                   />
-                  <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer">
+                  <label className="flex items-center gap-2 text-[11px] text-[var(--tx)] cursor-pointer">
                     <input
                       type="checkbox"
                       checked={moverAProgramado}
                       onChange={(e) => setMoverAProgramado(e.target.checked)}
-                      className="accent-indigo-500 rounded cursor-pointer"
+                      className="accent-indigo-600 rounded cursor-pointer"
                     />
                     Mover a columna "Encargos / Programados"
                   </label>
@@ -2245,40 +2325,40 @@ export function ConfirmarEntregaPage() {
 
               {/* Opción de cancelar en Kárdex si rechazó en la puerta */}
               {tipoNovedad === "Cliente canceló / rechaza producto" && (
-                <label className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-2.5 text-[11px] text-rose-200 cursor-pointer">
+                <label className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-2.5 text-[11px] text-rose-700 dark:text-rose-300 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={cancelarPorRechazo}
                     onChange={(e) => setCancelarPorRechazo(e.target.checked)}
-                    className="mt-0.5 accent-rose-500 rounded cursor-pointer"
+                    className="mt-0.5 accent-rose-600 rounded cursor-pointer"
                   />
                   <span>
-                    <strong className="block text-white">Marcar pedido como Cancelado ahora</strong>
+                    <strong className="block text-[var(--tx)]">Marcar pedido como Cancelado ahora</strong>
                     Libera automáticamente las unidades reservadas de vuelta al Kárdex.
                   </span>
                 </label>
               )}
 
               <div>
-                <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1.5">
-                  Nota del repartidor (Opcional):
+                <label className="block text-[11px] font-semibold tx-mu mb-1.5">
+                  Nota del repartidor (Opcional)
                 </label>
                 <textarea
                   rows={2}
                   value={notaNovedad}
                   onChange={(e) => setNotaNovedad(e.target.value)}
                   placeholder="Ej. Estuve 15 minutos en el portón pero no salió nadie..."
-                  className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-950 text-xs outline-none text-white focus:border-rose-500 resize-none"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none text-[var(--tx)] placeholder:text-[var(--mu)] focus:border-rose-500 resize-none"
                 />
               </div>
 
               {/* Checkbox para boletinar en la Lista Negra / DICOM */}
               <div
                 onClick={() => setBoletinarEnListaNegra(!boletinarEnListaNegra)}
-                className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-start gap-2.5 select-none ${
+                className={`p-3 rounded-xl border cursor-pointer transition-colors flex items-start gap-2.5 select-none ${
                   boletinarEnListaNegra
-                    ? "border-rose-500/50 bg-rose-500/10 text-rose-300"
-                    : "border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700"
+                    ? "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+                    : "border-[var(--bd)] bg-sf tx-mu hover:border-[var(--tx)]/30"
                 }`}
               >
                 <input
@@ -2289,20 +2369,20 @@ export function ConfirmarEntregaPage() {
                   className="mt-0.5 rounded text-rose-600 focus:ring-0 accent-rose-600 cursor-pointer"
                 />
                 <div>
-                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <ShieldAlert size={14} className="text-rose-500" /> Boletinar en Lista Negra (DICOM Interno)
+                  <span className="text-xs font-bold text-[var(--tx)] flex items-center gap-1.5">
+                    <ShieldAlert size={14} className="text-rose-600 dark:text-rose-400" /> Boletinar en Lista Negra (DICOM Interno)
                   </span>
-                  <span className="text-[10px] text-slate-400 block mt-0.5 leading-snug">
+                  <span className="text-[11px] tx-mu block mt-0.5 leading-snug">
                     Alerta a la oficina para bloquear futuros pedidos o exigir flete anticipado a este número de WhatsApp.
                   </span>
                 </div>
               </div>
 
-              <div className="pt-2 flex justify-end gap-2">
+              <div className="pt-1 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setMostrarNovedadModal(false)}
-                  className="px-4 py-2 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400"
+                  className="min-h-[40px] px-4 py-2 border border-[var(--bd)] bg-sf rounded-lg text-xs font-semibold tx-mu hover:text-[var(--tx)]"
                 >
                   Volver
                 </button>
@@ -2310,7 +2390,7 @@ export function ConfirmarEntregaPage() {
                   type="button"
                   disabled={enviandoNovedad}
                   onClick={handleReportarNovedad}
-                  className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5"
+                  className="min-h-[40px] px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5"
                 >
                   {enviandoNovedad ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                   {enviandoNovedad ? "Enviando..." : "Enviar Reporte"}
