@@ -98,6 +98,7 @@ import type { StockItem, KardexMovement } from "@/types/inventory";
 
 export interface Pedido {
   id: string;
+  pedido_codigo?: string | null;
   nombre_cliente: string | null;
   total: number | null;
   estado: string | null;
@@ -715,25 +716,16 @@ export function PedidosPage() {
 
   /* --------------------------- Liquidar Pedido en Finanzas --------------------------- */
   const confirmarLiquidacion = async () => {
-    if (!pedidoALiquidar) return;
+    if (!pedidoALiquidar || pedidoALiquidar.liquidado || liquidando) return;
     setLiquidando(true);
     const prevEstado = normalizarEstado(pedidoALiquidar.estado);
 
     try {
       const monto = Number(pedidoALiquidar.total || 0);
+      const codigo = pedidoALiquidar.pedido_codigo || `#${pedidoALiquidar.id.slice(0, 8).toUpperCase()}`;
 
-      // 1. Asentar ingreso en el Money Engine
-      await addManualTransaction({
-        account_id: cuentaLiquidacion,
-        tipo: 'income',
-        categoria: 'venta_contraentrega',
-        monto,
-        descripcion: `Liquidación contra entrega #${pedidoALiquidar.id.slice(0, 8).toUpperCase()} (${pedidoALiquidar.nombre_cliente || 'Cliente'})`,
-        fecha: new Date().toISOString().slice(0, 10)
-      });
-
-      // 2. Marcar como liquidado en DB
-      await supabase
+      // 1. Marcar como liquidado en DB primero
+      const { error: updErr } = await supabase
         .from("whatsapp_orders")
         .update({
           liquidado: true,
@@ -742,6 +734,20 @@ export function PedidosPage() {
           estado: 'entregado'
         })
         .eq("id", pedidoALiquidar.id);
+
+      if (updErr) throw updErr;
+
+      // 2. Asentar ingreso en el Money Engine (solo al liquidar)
+      if (monto > 0) {
+        await addManualTransaction({
+          account_id: cuentaLiquidacion,
+          tipo: 'income',
+          categoria: 'venta_contraentrega',
+          monto,
+          descripcion: `Liquidación pedido ${codigo} (${pedidoALiquidar.nombre_cliente || 'Cliente'})`,
+          fecha: new Date().toISOString().slice(0, 10)
+        });
+      }
 
       // 3. Si aún no estaba marcado como entregado, descontar de Bodega idempotentemente
       if (prevEstado !== 'entregado') {

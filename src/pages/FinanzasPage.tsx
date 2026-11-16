@@ -28,7 +28,9 @@ import {
   RefreshCw,
   Megaphone,
   ExternalLink,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Truck,
+  Clock
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { 
@@ -58,6 +60,57 @@ type PagoFijo = {
   frecuencia: string;
   categoria: string;
 };
+
+type PendingSettlementOrder = {
+  id: string;
+  pedido_codigo?: string | null;
+  nombre_cliente?: string | null;
+  total?: number | null;
+  estado?: string | null;
+  liquidado?: boolean | null;
+  courier?: string | null;
+  metodo_pago?: string | null;
+  created_at?: string | null;
+};
+
+const FINANCE_TRIGGER_PATCH_SQL = `-- ============================================================================
+-- PATCH: Solo sumar a Finanzas al pulsar "Liquidar Pedido" (NO al pasar a Entregado)
+-- Ejecutar en: Supabase SQL Editor
+-- ============================================================================
+create or replace function finance.project_os_event() returns trigger
+language plpgsql security definer as $$
+declare
+  v_amount numeric;
+  v_campaign text;
+begin
+  -- NOTA: order.delivered ya NO inserta cobros ni suma dinero automáticamente a Finanzas.
+  -- El dinero entra a cuentas únicamente cuando se ejecuta "Liquidar Pedido" en Pedidos OS.
+  if NEW.type = 'marketing.ad.expense' then
+    v_amount   := coalesce((NEW.payload->>'amount')::numeric, 0);
+    v_campaign := coalesce(NEW.payload->>'campaign_id', 'Campaña');
+
+    if v_amount > 0 then
+      insert into finance.money_transactions (
+        account_id, tipo, categoria, monto, descripcion, fecha, source_event_id, source_table, source_id, es_manual
+      ) values (
+        'tarjeta_pauta', 'expense', 'pauta_publicidad', v_amount,
+        'Gasto publicitario diario ' || v_campaign,
+        current_date, NEW.id, NEW.source_table, NEW.source_id, false
+      );
+
+      update finance.cash_accounts
+         set saldo_actual = saldo_actual - v_amount
+       where id = 'tarjeta_pauta';
+    end if;
+  end if;
+
+  update os.event_consumers
+     set last_event_id = NEW.id, updated_at = now()
+   where consumer_name = 'finance_projector';
+
+  return NEW;
+end;
+$$;`;
 
 const SPRINT2_SQL_CODE = `-- ============================================================================
 -- TODOENUNO OS — SPRINT 2: MONEY ENGINE & CONTROL DE PRESUPUESTOS (BUDGETS)
@@ -149,32 +202,12 @@ $$;
 create or replace function finance.project_os_event() returns trigger
 language plpgsql security definer as $$
 declare
-  v_total numeric;
-  v_order_code text;
-  v_client text;
   v_amount numeric;
   v_campaign text;
 begin
-  if NEW.type = 'order.delivered' then
-    v_total      := coalesce((NEW.payload->>'total')::numeric, 0);
-    v_order_code := coalesce(NEW.payload->>'pedido_codigo', NEW.source_id);
-    v_client     := coalesce(NEW.payload->>'nombre_cliente', 'Cliente');
-
-    if v_total > 0 then
-      insert into finance.money_transactions (
-        account_id, tipo, categoria, monto, descripcion, fecha, source_event_id, source_table, source_id, es_manual
-      ) values (
-        'caja_efectivo', 'income', 'venta_pedido', v_total,
-        'Cobro liquidado pedido ' || v_order_code || ' (' || v_client || ')',
-        current_date, NEW.id, NEW.source_table, NEW.source_id, false
-      );
-
-      update finance.cash_accounts
-         set saldo_actual = saldo_actual + v_total
-       where id = 'caja_efectivo';
-    end if;
-
-  elsif NEW.type = 'marketing.ad.expense' then
+  -- NOTA: order.delivered ya NO inserta cobros ni suma dinero automáticamente a Finanzas.
+  -- El dinero entra a cuentas únicamente cuando se ejecuta "Liquidar Pedido".
+  if NEW.type = 'marketing.ad.expense' then
     v_amount   := coalesce((NEW.payload->>'amount')::numeric, 0);
     v_campaign := coalesce(NEW.payload->>'campaign_id', 'Campaña');
 
@@ -274,8 +307,12 @@ export function FinanzasPage() {
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [transactions, setTransactions] = useState<MoneyTransaction[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<PendingSettlementOrder[]>([]);
   const [isRealDb, setIsRealDb] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [copiedPatchSql, setCopiedPatchSql] = useState(false);
+  const [cleaningPremature, setCleaningPremature] = useState(false);
+  const [confirmCleanPremature, setConfirmCleanPremature] = useState(false);
 
   // Pagos Fijos (Suscripciones previas)
   const [pagosFijos, setPagosFijos] = useState<PagoFijo[]>([]);
@@ -404,16 +441,25 @@ export function FinanzasPage() {
   // Carga de datos
   const loadFinanceData = async (silent = false) => {
     if (!silent) setLoading(true);
-    const [accData, budData, txData] = await Promise.all([
+    const [accData, budData, txData, ordersRes] = await Promise.all([
       fetchCashAccounts(),
       fetchBudgets(),
-      fetchMoneyTransactions()
+      fetchMoneyTransactions(),
+      supabase
+        .from('whatsapp_orders')
+        .select('id, pedido_codigo, nombre_cliente, total, estado, liquidado, courier, metodo_pago, created_at')
+        .in('estado', ['en_camino', 'entregado'])
+        .order('created_at', { ascending: false })
+        .limit(500)
     ]);
 
     setAccounts(accData.accounts);
     setBudgets(budData.budgets);
     setTransactions(txData.transactions);
     setIsRealDb(accData.isRealDb || txData.isRealDb);
+    if (!ordersRes.error && ordersRes.data) {
+      setPendingOrders(ordersRes.data as PendingSettlementOrder[]);
+    }
 
     // Cargar suscripciones fijas desde panel_pagos
     try {
@@ -449,6 +495,81 @@ export function FinanzasPage() {
 
     return { ingresos, egresos, utilidadNeta, margen };
   }, [transactions]);
+
+  // Estimado en calle / pendiente de liquidar (no sumado aún a cuentas hasta pulsar Liquidar Pedido)
+  const estimadoPorEntrar = useMemo(() => {
+    let entregadosTotal = 0;
+    let entregadosCount = 0;
+    let enCaminoTotal = 0;
+    let enCaminoCount = 0;
+    const byCourierMap = new Map<string, { courier: string; total: number; count: number }>();
+
+    pendingOrders.forEach(o => {
+      if (o.liquidado) return;
+      const monto = Number(o.total || 0);
+      if (o.estado === 'entregado') {
+        entregadosTotal += monto;
+        entregadosCount += 1;
+        const cName = String(o.courier || 'Sin courier').trim() || 'Sin courier';
+        const prev = byCourierMap.get(cName) || { courier: cName, total: 0, count: 0 };
+        prev.total += monto;
+        prev.count += 1;
+        byCourierMap.set(cName, prev);
+      } else if (o.estado === 'en_camino') {
+        enCaminoTotal += monto;
+        enCaminoCount += 1;
+      }
+    });
+
+    const courierBreakdown = Array.from(byCourierMap.values()).sort((a, b) => b.total - a.total);
+    return {
+      entregadosTotal,
+      entregadosCount,
+      enCaminoTotal,
+      enCaminoCount,
+      totalAfuera: entregadosTotal + enCaminoTotal,
+      totalCount: entregadosCount + enCaminoCount,
+      courierBreakdown,
+    };
+  }, [pendingOrders]);
+
+  // Detectar cobros automáticos antiguos (venta_pedido) de pedidos que aún NO han sido liquidados
+  const prematureAutoTxs = useMemo(() => {
+    const orderById = new Map(pendingOrders.map(o => [String(o.id), o]));
+    return transactions.filter(t => {
+      if (t.categoria !== 'venta_pedido' || t.es_manual || t.source_table !== 'whatsapp_orders') {
+        return false;
+      }
+      if (!t.source_id) return false;
+      const ord = orderById.get(String(t.source_id));
+      return ord ? !ord.liquidado : false;
+    });
+  }, [transactions, pendingOrders]);
+
+  const prematureTotal = useMemo(
+    () => prematureAutoTxs.reduce((sum, tx) => sum + (Number(tx.monto) || 0), 0),
+    [prematureAutoTxs]
+  );
+
+  const handleCleanPrematureSales = async () => {
+    if (prematureAutoTxs.length === 0 || cleaningPremature) return;
+    setCleaningPremature(true);
+    try {
+      for (const tx of prematureAutoTxs) {
+        await deleteMoneyTransaction(tx.id);
+      }
+      setConfirmCleanPremature(false);
+      await loadFinanceData(true);
+    } finally {
+      setCleaningPremature(false);
+    }
+  };
+
+  const copyPatchSql = () => {
+    navigator.clipboard.writeText(FINANCE_TRIGGER_PATCH_SQL);
+    setCopiedPatchSql(true);
+    setTimeout(() => setCopiedPatchSql(false), 2200);
+  };
 
   // Presupuestos con cálculo reactivo del gasto real del mes
   const budgetsWithRealSpent = useMemo(() => {
@@ -746,6 +867,143 @@ export function FinanzasPage() {
               </div>
               <span className="text-[10px] tx-mu mt-1 block">Margen: {metricasMes.margen.toFixed(1)}%</span>
             </div>
+          </div>
+
+          {/* Estimado en Calle / Por Entrar (Entregados sin liquidar + En Camino) */}
+          <div className="p-5 rounded-2xl bg-cd border border-amber-500/30 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Clock size={16} className="text-amber-500 shrink-0" />
+                  <h2 className="text-sm font-bold text-[var(--tx)]">
+                    Estimado en Calle / Por Entrar (Sin Liquidar)
+                  </h2>
+                </div>
+                <p className="text-[11px] tx-mu mt-0.5">
+                  Los pedidos pasan a <strong>Entregado</strong> sin sumarse a tus cuentas; solo ingresan a Finanzas al pulsar <strong>Liquidar Pedido</strong>.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={copyPatchSql}
+                  className="px-3 py-1.5 rounded-xl border border-[var(--bd)] bg-sf hover:bg-cd text-[11px] font-bold flex items-center gap-1.5 transition-colors"
+                  title="Copia el SQL para desactivar el auto-cobro al pasar a Entregado en Supabase"
+                >
+                  {copiedPatchSql ? <Check size={13} className="text-emerald-500" /> : <Code size={13} />}
+                  {copiedPatchSql ? '¡Patch SQL Copiado!' : 'Copiar Patch SQL Trigger'}
+                </button>
+                <a
+                  href="/pedidos"
+                  className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-600 dark:text-amber-300 text-[11px] font-bold flex items-center gap-1.5 transition-colors"
+                >
+                  Ir a Liquidar Pedidos <ExternalLink size={12} />
+                </a>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25">
+                <span className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-300 block">
+                  Entregados Pendientes de Depósito
+                </span>
+                <div className="text-xl font-black font-mono text-amber-600 dark:text-amber-300 mt-1">
+                  ${estimadoPorEntrar.entregadosTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <span className="text-[10px] tx-mu mt-0.5 block">
+                  {estimadoPorEntrar.entregadosCount} {estimadoPorEntrar.entregadosCount === 1 ? 'pedido entregado' : 'pedidos entregados'} sin liquidar
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-sky-500/10 border border-sky-500/25">
+                <span className="text-[10px] uppercase font-bold text-sky-600 dark:text-sky-300 block">
+                  En Ruta por Cobrar
+                </span>
+                <div className="text-xl font-black font-mono text-sky-600 dark:text-sky-300 mt-1">
+                  ${estimadoPorEntrar.enCaminoTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <span className="text-[10px] tx-mu mt-0.5 block">
+                  {estimadoPorEntrar.enCaminoCount} {estimadoPorEntrar.enCaminoCount === 1 ? 'paquete en camino' : 'paquetes en camino'}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-sf border border-[var(--bd)]">
+                <span className="text-[10px] uppercase font-bold tx-mu block">
+                  Total Estimado por Entrar
+                </span>
+                <div className="text-xl font-black font-mono text-[var(--tx)] mt-1">
+                  ${estimadoPorEntrar.totalAfuera.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <span className="text-[10px] tx-mu mt-0.5 block">
+                  {estimadoPorEntrar.totalCount} {estimadoPorEntrar.totalCount === 1 ? 'pedido activo' : 'pedidos activos'} fuera de caja
+                </span>
+              </div>
+            </div>
+
+            {estimadoPorEntrar.courierBreakdown.length > 0 && (
+              <div className="pt-2 border-t border-[var(--bd)] flex flex-wrap items-center gap-2">
+                <span className="text-[10px] uppercase font-bold tx-mu flex items-center gap-1 mr-1">
+                  <Truck size={12} /> Por motorista:
+                </span>
+                {estimadoPorEntrar.courierBreakdown.map(item => (
+                  <span
+                    key={item.courier}
+                    className="px-2.5 py-1 rounded-lg bg-sf border border-[var(--bd)] text-[11px] font-semibold flex items-center gap-1.5"
+                  >
+                    <span>{item.courier}:</span>
+                    <span className="font-mono font-bold text-amber-600 dark:text-amber-300">
+                      ${item.total.toFixed(2)}
+                    </span>
+                    <span className="text-[10px] tx-mu">({item.count})</span>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {prematureAutoTxs.length > 0 && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                <div className="flex items-start gap-2 text-rose-700 dark:text-rose-200">
+                  <AlertCircle size={16} className="shrink-0 mt-0.5 text-rose-500" />
+                  <div>
+                    <p className="font-bold">
+                      Hay {prematureAutoTxs.length} cobro(s) automáticos de pedidos que aún no has liquidado (${prematureTotal.toFixed(2)}).
+                    </p>
+                    <p className="text-[11px] opacity-85 mt-0.5">
+                      Ejecuta el <strong>Patch SQL Trigger</strong> en Supabase para que no vuelvan a sumarse solos al entregar, y revierte estos cobros prematuros para cuadrar tu caja.
+                    </p>
+                  </div>
+                </div>
+
+                {confirmCleanPremature ? (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      disabled={cleaningPremature}
+                      onClick={handleCleanPrematureSales}
+                      className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] disabled:opacity-50"
+                    >
+                      {cleaningPremature ? 'Revirtiendo...' : 'Confirmar Reversión'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmCleanPremature(false)}
+                      className="px-2.5 py-1.5 rounded-lg border border-[var(--bd)] bg-cd text-[11px] font-semibold"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCleanPremature(true)}
+                    className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] shrink-0"
+                  >
+                    Revertir {prematureAutoTxs.length} cobro(s) sin liquidar
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Cuentas de Dinero (Billeteras) */}
@@ -1466,7 +1724,7 @@ export function FinanzasPage() {
                 <p className="font-semibold text-[var(--tx)]">Instrucciones para Supabase:</p>
                 <p>1. Copia el script abajo.</p>
                 <p>2. Pégalo en tu SQL Editor de Supabase y presiona <strong>Run</strong>.</p>
-                <p>3. Creará el schema <code className="font-mono bg-cd px-1 rounded">finance</code>, las cuentas de dinero, el libro de movimientos y el trigger que proyecta automáticamente pedidos entregados a cobros de caja.</p>
+                <p>3. Creará el schema <code className="font-mono bg-cd px-1 rounded">finance</code>, las cuentas de dinero, el libro de movimientos y el trigger de gastos de pauta (los cobros de pedidos ingresan únicamente al pulsar <strong>Liquidar Pedido</strong>).</p>
               </div>
 
               <div className="relative">

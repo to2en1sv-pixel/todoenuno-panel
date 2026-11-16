@@ -227,9 +227,10 @@ export function ConfirmarEntregaPage() {
     }
   }, [driverSession]);
 
-  // Notificaciones Evolution en 1 clic
+  // Notificaciones Evolution en 1 clic (máximo 1 envío por pedido)
   const [sendingWaId, setSendingWaId] = useState<string | null>(null);
   const [notificadosWaIds, setNotificadosWaIds] = useState<Record<string, boolean>>({});
+  const evoSentOrInFlightRef = useRef<Set<string>>(new Set());
   const [toastInfo, setToastInfo] = useState<{ tipo: "ok" | "warn" | "err"; texto: string } | null>(null);
 
   // Modal Cuadre / Cierre del Día
@@ -582,12 +583,29 @@ export function ConfirmarEntregaPage() {
     return `https://wa.me/${waPhone}?text=${encodeURIComponent(fullMsg)}`;
   };
 
-  // Enviar aviso de llegada directo vía Evolution API (en paralelo a abrir WhatsApp del repartidor)
+  // Enviar aviso de llegada directo vía Evolution API (máximo 1 vez por pedido; siempre abre WhatsApp del repartidor)
   const handleAvisarLlegadaEvolution = async (targetOrder: any) => {
+    if (!targetOrder?.id) return;
     if (!targetOrder?.telefono) {
       showToast("err", "Este pedido no tiene teléfono registrado.");
       return;
     }
+
+    const alreadySent =
+      Boolean(notificadosWaIds[targetOrder.id]) ||
+      String(targetOrder.notas || "").includes("[Aviso llegada") ||
+      evoSentOrInFlightRef.current.has(targetOrder.id);
+
+    if (alreadySent) {
+      showToast(
+        "ok",
+        `El aviso de tienda para ${targetOrder.nombre_cliente || "el cliente"} ya se envió una vez (sin spam). Se abrió tu WhatsApp.`
+      );
+      return;
+    }
+
+    // Bloqueo síncrono inmediato para evitar envíos duplicados por doble toque
+    evoSentOrInFlightRef.current.add(targetOrder.id);
 
     const waPhone = formatSvWaPhone(targetOrder.telefono);
     const text = renderWhatsappTemplate(driverTemplate, targetOrder, {
@@ -626,8 +644,10 @@ export function ConfirmarEntregaPage() {
         setPedido((prev: any) => (prev ? { ...prev, notas: nextNotas } : prev));
       }
 
-      showToast("ok", `Aviso de tienda enviado y WhatsApp abierto para ${targetOrder.nombre_cliente || "cliente"}.`);
+      showToast("ok", `Aviso de tienda enviado (1/1) y WhatsApp abierto para ${targetOrder.nombre_cliente || "cliente"}.`);
     } catch (err: any) {
+      // Si falló la red o Evolution, permitir reintentar luego
+      evoSentOrInFlightRef.current.delete(targetOrder.id);
       console.error("Error enviando aviso de llegada:", err);
       showToast(
         "warn",
@@ -1442,7 +1462,11 @@ export function ConfirmarEntregaPage() {
                               ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
                               : "bg-slate-800 border-slate-700 hover:bg-emerald-600 hover:border-emerald-500 text-slate-200 hover:text-white"
                           }`}
-                          title="Notifica por Evolution y abre tu WhatsApp listo para enviar"
+                          title={
+                            avisado
+                              ? "Aviso por Evolution ya enviado (máx. 1 vez). Toca para abrir tu WhatsApp."
+                              : "Notifica 1 vez por Evolution y abre tu WhatsApp listo para enviar"
+                          }
                         >
                           {sendingWaId === p.id ? (
                             <Loader2 size={11} className="animate-spin" />
@@ -1451,7 +1475,7 @@ export function ConfirmarEntregaPage() {
                           ) : (
                             <Send size={11} />
                           )}
-                          {avisado ? "Avisado" : "Voy llegando"}
+                          {avisado ? "WhatsApp ✓" : "Voy llegando"}
                         </a>
                       )}
 
@@ -1990,7 +2014,7 @@ export function ConfirmarEntregaPage() {
                     ) : (
                       <MessageCircle size={15} />
                     )}
-                    {yaAvisado ? "Volver a Avisar" : "Avisar Llegada"}
+                    {yaAvisado ? "Abrir WhatsApp ✓" : "Avisar Llegada"}
                   </a>
                 ) : (
                   <div className="py-3 px-3 rounded-2xl bg-slate-800/50 text-slate-500 font-bold text-xs text-center border border-slate-800">
@@ -2001,7 +2025,9 @@ export function ConfirmarEntregaPage() {
 
               {urlWa && (
                 <p className="text-[10px] text-slate-500 text-center leading-snug">
-                  Envía aviso desde el número de tienda (Evolution) y abre tu WhatsApp listo con los datos.
+                  {yaAvisado
+                    ? "El aviso automático de tienda ya se envió (solo 1 vez, sin spam). Tocar de nuevo solo abre tu WhatsApp."
+                    : "Envía 1 aviso automático desde el número de tienda (Evolution) y abre tu WhatsApp listo con los datos."}
                 </p>
               )}
             </div>
