@@ -616,26 +616,26 @@ export function BovedaProductosRoas() {
     switch (ciclo) {
       case 'escala':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 flex items-center gap-1">
+          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 inline-flex items-center gap-1">
             <Flame size={11} className="text-emerald-500" /> Escala Activa
           </span>
         );
       case 'hibernacion':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/10 text-sky-600 border border-sky-500/30 flex items-center gap-1">
-            <Snowflake size={11} className="text-sky-500" /> En Hibernación (Cíclico)
+          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/25 inline-flex items-center gap-1">
+            <Snowflake size={11} className="text-sky-500" /> En Hibernación
           </span>
         );
       case 'testeo':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/30 flex items-center gap-1">
+          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/25 inline-flex items-center gap-1">
             <FlaskConical size={11} className="text-amber-500" /> En Testeo
           </span>
         );
       case 'quemado':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 border border-rose-500/30 flex items-center gap-1">
-            <Ban size={11} className="text-rose-500" /> Quemado / Pausado
+          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/25 inline-flex items-center gap-1">
+            <Ban size={11} className="text-rose-500" /> Pausado
           </span>
         );
     }
@@ -754,97 +754,99 @@ export function BovedaProductosRoas() {
       )}
 
       {/* Encabezado de la Bóveda con Botón de Unificación, Reinicio & Atribución */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-cd p-5 rounded-xl border border-[var(--bd)] gap-4">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
-            <Sparkles className="text-amber-500" size={24} />
-            <h2 className="text-xl font-black">Bóveda de Productos Ganadores & Ciclos de Pauta</h2>
-            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/30">
-              Memoria Histórica & Catálogo Maestro
+            <Sparkles className="tx-mu" size={18} />
+            <h2 className="text-base font-bold tracking-tight">Bóveda de Productos Ganadores & Ciclos de Pauta</h2>
+            <span className="text-[10px] font-mono uppercase font-medium px-2 py-0.5 rounded bg-sf tx-mu border border-[var(--bd)]">
+              Catálogo Maestro
             </span>
           </div>
           <p className="text-xs text-[var(--mu)] mt-1">
-            Consolidación inteligente: agrupa pedidos y gastos de anuncios bajo el <strong>Producto del Catálogo</strong>, unificando variantes de texto y códigos de pauta.
+            Agrupa pedidos y gastos de anuncios bajo el <strong>Producto del Catálogo</strong>, unificando variantes de texto y códigos de pauta.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setModalMapeoAbierto(true)}
-            className="px-3.5 py-2 border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
+            className="px-3 py-2 border border-[var(--bd)] bg-cd hover:bg-sf text-[var(--tx)] rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5"
           >
-            <LinkIcon size={14} /> Mapeo de Atribución & Alias
+            <LinkIcon size={13} /> Mapeo & Alias
           </button>
 
           <button
             onClick={() => setModalResetAbierto(true)}
-            className="px-3.5 py-2 border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
+            className="px-3 py-2 border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/15 text-rose-600 dark:text-rose-400 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5"
             title="Archivar datos legacy y empezar la Bóveda desde 0 con tus productos nuevos"
           >
-            <RotateCcw size={14} /> Reiniciar Bóveda desde 0
+            <RotateCcw size={13} /> Reiniciar desde 0
           </button>
 
           <button
             onClick={cargarHistorico}
             disabled={cargando}
-            className="p-2 border border-[var(--bd)] bg-sf hover:bg-cd rounded-xl text-xs font-bold transition-colors"
+            className="p-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-semibold transition-colors"
             title="Actualizar datos"
           >
-            <RefreshCw size={15} className={cargando ? 'animate-spin' : ''} />
+            <RefreshCw size={14} className={cargando ? 'animate-spin' : ''} />
           </button>
         </div>
       </div>
 
-      {/* Tarjetas KPI de la Bóveda con Rentabilidad Contable Real */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Catálogo Consolidado</span>
-          <div className="text-2xl font-black mt-1 text-[var(--tx)]">
-            {kpisBoveda.totalProductos} <span className="text-xs font-normal tx-mu">Maestros</span>
+      {/* Tira KPI Unificada de la Bóveda */}
+      <div className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 lg:grid-cols-5 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu font-medium block">Catálogo Consolidado</span>
+          <div className="text-xl font-bold font-mono tabular-nums mt-1 text-[var(--tx)]">
+            {kpisBoveda.totalProductos} <span className="text-xs font-normal tx-mu">maestros</span>
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Pedidos y pauta unificada</span>
+          <span className="text-[11px] tx-mu mt-0.5 block">Pedidos y pauta unificada</span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">ROAS Acumulado Global</span>
-          <div className="text-2xl font-black mt-1 text-[var(--ac)]">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu font-medium block">ROAS Acumulado</span>
+          <div className="text-xl font-bold font-mono tabular-nums mt-1 text-[var(--tx)]">
             {formatRoas(kpisBoveda.roasGlobal)}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Ads: {formatCurrency(kpisBoveda.gastoTotal)} · Venta: {formatCurrency(kpisBoveda.ventasTotales)}</span>
+          <span className="text-[11px] tx-mu font-mono tabular-nums mt-0.5 block">
+            Ads: {formatCurrency(kpisBoveda.gastoTotal)}
+          </span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm col-span-2 sm:col-span-1">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block flex items-center justify-between">
+        <div className="p-4 col-span-2 sm:col-span-1">
+          <span className="text-[11px] tx-mu font-medium flex items-center justify-between gap-2">
             <span>Utilidad Neta Real</span>
-            <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${kpisBoveda.margenNetoGlobal >= 20 ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'}`}>
-              {kpisBoveda.margenNetoGlobal.toFixed(1)}% Margen
+            <span className={`text-[10px] font-mono font-semibold ${kpisBoveda.margenNetoGlobal >= 20 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+              {kpisBoveda.margenNetoGlobal.toFixed(1)}%
             </span>
           </span>
-          <div className={`text-2xl font-black mt-1 font-mono ${kpisBoveda.gananciaNetaTotal >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+          <div className={`text-xl font-bold mt-1 font-mono tabular-nums ${kpisBoveda.gananciaNetaTotal >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
             {formatCurrency(kpisBoveda.gananciaNetaTotal)}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">COGS mercadería: {formatCurrency(kpisBoveda.cogsTotal)}</span>
+          <span className="text-[11px] tx-mu font-mono tabular-nums mt-0.5 block">COGS: {formatCurrency(kpisBoveda.cogsTotal)}</span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Ganadores Comprobados</span>
-          <div className="text-2xl font-black mt-1 text-emerald-500">
-            {kpisBoveda.ganadores} <span className="text-xs font-normal tx-mu">productos</span>
+        <div className="p-4">
+          <span className="text-[11px] tx-mu font-medium block">Ganadores (&gt;2.5x)</span>
+          <div className="text-xl font-bold font-mono tabular-nums mt-1 text-emerald-600 dark:text-emerald-400">
+            {kpisBoveda.ganadores} <span className="text-xs font-normal tx-mu">SKUs</span>
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">ROAS histórico &gt; 2.5x</span>
+          <span className="text-[11px] tx-mu mt-0.5 block">ROAS comprobado</span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">En Hibernación (Cíclicos)</span>
-          <div className="text-2xl font-black mt-1 text-sky-500">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu font-medium block">En Hibernación</span>
+          <div className="text-xl font-bold font-mono tabular-nums mt-1 text-sky-600 dark:text-sky-400">
             {kpisBoveda.hibernando} <span className="text-xs font-normal tx-mu">listos</span>
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Listos para relanzar en su temporada</span>
+          <span className="text-[11px] tx-mu mt-0.5 block">Relanzar en temporada</span>
         </div>
       </div>
 
       {/* Barra de Búsqueda y Filtros de Ciclo de Vida */}
-      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-cd p-3 rounded-2xl border border-[var(--bd)]">
+      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-cd p-3 rounded-xl border border-[var(--bd)]">
         <div className="relative flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 tx-mu" />
           <input
@@ -852,25 +854,25 @@ export function BovedaProductosRoas() {
             placeholder="Buscar por producto, SKU, variante o anuncio..."
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 bg-sf border border-[var(--bd)] rounded-xl text-xs outline-none focus:border-[var(--ac)]"
+            className="w-full pl-9 pr-3 py-1.5 bg-sf border border-[var(--bd)] rounded-lg text-xs outline-none focus:border-[var(--tx)]"
           />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Selector de Ciclo de Vida */}
-          <div className="flex bg-sf p-1 rounded-xl text-xs font-semibold overflow-x-auto">
+          <div className="flex bg-sf p-0.5 rounded-lg border border-[var(--bd)] text-xs font-medium overflow-x-auto">
             {[
               { id: 'todos', label: 'Todos' },
-              { id: 'escala', label: '🔥 Escala' },
-              { id: 'hibernacion', label: '❄️ Hibernando' },
-              { id: 'testeo', label: '🧪 Testeo' },
-              { id: 'quemado', label: '🛑 Pausados' }
+              { id: 'escala', label: 'Escala' },
+              { id: 'hibernacion', label: 'Hibernando' },
+              { id: 'testeo', label: 'Testeo' },
+              { id: 'quemado', label: 'Pausados' }
             ].map(f => (
               <button
                 key={f.id}
                 onClick={() => setFiltroCiclo(f.id)}
-                className={`px-3 py-1 rounded-lg transition-colors whitespace-nowrap ${
-                  filtroCiclo === f.id ? 'bg-cd shadow-sm text-[var(--tx)] font-bold' : 'tx-mu hover:text-[var(--tx)]'
+                className={`px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${
+                  filtroCiclo === f.id ? 'bg-[var(--tx)] text-[var(--cd)] font-semibold' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
                 {f.label}
@@ -882,24 +884,24 @@ export function BovedaProductosRoas() {
           <select
             value={ordenarPor}
             onChange={e => setOrdenarPor(e.target.value as any)}
-            className="p-1.5 rounded-xl border border-[var(--bd)] bg-sf text-xs font-semibold outline-none"
+            className="px-2.5 py-1.5 rounded-lg border border-[var(--bd)] bg-sf text-xs font-medium outline-none"
           >
             <option value="roas">Mayor ROAS Histórico</option>
-            <option value="utilidad">💰 Mayor Utilidad Neta Real ($)</option>
-            <option value="margen">📈 Mayor Margen Neto (%)</option>
+            <option value="utilidad">Mayor Utilidad Neta ($)</option>
+            <option value="margen">Mayor Margen Neto (%)</option>
             <option value="ventas">Mayor Facturación ($)</option>
-            <option value="gasto">Mayor Inversión en Ads ($)</option>
+            <option value="gasto">Mayor Inversión Ads ($)</option>
           </select>
         </div>
       </div>
 
       {/* LISTA / GRID DE PRODUCTOS EN LA BÓVEDA */}
       {cargando ? (
-        <div className="text-center py-16 tx-mu bg-cd rounded-2xl border border-[var(--bd)]">
+        <div className="text-center py-16 tx-mu bg-cd rounded-xl border border-[var(--bd)] text-xs">
           Cargando y consolidando expediente histórico de la bóveda...
         </div>
       ) : productosFiltrados.length === 0 ? (
-        <div className="text-center py-16 tx-mu bg-cd rounded-2xl border border-[var(--bd)]">
+        <div className="text-center py-16 tx-mu bg-cd rounded-xl border border-[var(--bd)] text-xs">
           No se encontraron productos con los filtros seleccionados.
         </div>
       ) : (
@@ -912,12 +914,12 @@ export function BovedaProductosRoas() {
               <div
                 key={prod.sku}
                 onClick={() => handleAbrirDetalle(prod)}
-                className="bg-cd border border-[var(--bd)] rounded-2xl p-4 flex flex-col justify-between hover:border-[var(--ac)] hover:shadow-md transition-all cursor-pointer group relative overflow-hidden"
+                className="bg-cd border border-[var(--bd)] rounded-xl p-4 flex flex-col justify-between hover:border-[var(--tx)]/40 transition-colors cursor-pointer group relative overflow-hidden"
               >
                 {/* Alerta de Temporada Alta en Vivo */}
                 {esTemporadaAlta && (
-                  <div className="absolute top-0 right-0 bg-gradient-to-l from-amber-500 to-orange-500 text-white text-[9px] font-black uppercase px-3 py-0.5 rounded-bl-xl shadow flex items-center gap-1">
-                    <Flame size={11} /> ¡Temporada Alta ({mesActualNombre})!
+                  <div className="absolute top-0 right-0 bg-amber-500 text-zinc-950 text-[9px] font-bold uppercase px-2.5 py-0.5 rounded-bl-lg flex items-center gap-1">
+                    <Flame size={10} /> Temp. Alta ({mesActualNombre})
                   </div>
                 )}
 
@@ -1080,7 +1082,7 @@ export function BovedaProductosRoas() {
       {/* DRAWER / MODAL: EXPEDIENTE HISTÓRICO DEL PRODUCTO */}
       {productoSeleccionado && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setProductoSeleccionado(null)}>
-          <div onClick={e => e.stopPropagation()} className="w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl flex flex-col">
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] flex flex-col">
             {/* Header del Expediente */}
             <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
               <div className="flex items-center gap-3">
@@ -1449,7 +1451,7 @@ export function BovedaProductosRoas() {
       {/* MODAL GLOBAL: MAPEO DE ATRIBUCIÓN & UNIFICACIÓN DE PRODUCTOS */}
       {modalMapeoAbierto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setModalMapeoAbierto(false)}>
-          <div onClick={e => e.stopPropagation()} className="w-full max-w-xl max-h-[85vh] overflow-hidden rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl flex flex-col">
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-xl max-h-[85vh] overflow-hidden rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] flex flex-col">
             <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
               <div className="flex items-center gap-2">
                 <LinkIcon size={18} className="text-indigo-600" />
@@ -1554,7 +1556,7 @@ export function BovedaProductosRoas() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-lg overflow-hidden rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl flex flex-col"
+            className="w-full max-w-lg overflow-hidden rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] flex flex-col"
           >
             <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-rose-500/10">
               <div className="flex items-center gap-2">

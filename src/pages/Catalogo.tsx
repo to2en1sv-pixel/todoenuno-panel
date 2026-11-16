@@ -994,7 +994,7 @@ export function CatalogoPage() {
   }, [editPrecio, editCosto]);
 
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-5 pb-14 h-full">
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-16 h-full">
       {/* Inputs de archivo ocultos */}
       <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" className="hidden" />
       <input type="file" ref={newProdFileInputRef} onChange={handleNewProdFileUpload} accept="image/*" className="hidden" />
@@ -1002,16 +1002,16 @@ export function CatalogoPage() {
       {/* Toast flotante */}
       {toastMsg && (
         <div
-          className={`fixed bottom-5 right-5 z-[60] max-w-md px-4 py-3 rounded-2xl shadow-2xl border flex items-start gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-bottom-4 ${
+          className={`fixed bottom-5 right-5 z-[60] max-w-md px-4 py-3 rounded-xl shadow-lg border flex items-start gap-2.5 text-xs font-medium ${
             toastMsg.type === 'ok'
-              ? 'bg-emerald-950/95 border-emerald-500/50 text-emerald-200'
-              : 'bg-rose-950/95 border-rose-500/50 text-rose-200'
+              ? 'bg-cd border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+              : 'bg-cd border-rose-500/40 text-rose-700 dark:text-rose-300'
           }`}
         >
           {toastMsg.type === 'ok' ? (
-            <CheckCircle2 size={16} className="text-emerald-400 shrink-0 mt-0.5" />
+            <CheckCircle2 size={16} className="text-emerald-500 shrink-0 mt-0.5" />
           ) : (
-            <AlertTriangle size={16} className="text-rose-400 shrink-0 mt-0.5" />
+            <AlertTriangle size={16} className="text-rose-500 shrink-0 mt-0.5" />
           )}
           <div className="flex-1 space-y-1.5">
             <div>{toastMsg.text}</div>
@@ -1021,7 +1021,7 @@ export function CatalogoPage() {
                   setShowDeleteModal(false);
                   setShowSqlModal(true);
                 }}
-                className="px-2.5 py-1 bg-amber-400 text-zinc-950 rounded-lg text-[11px] font-black inline-flex items-center gap-1"
+                className="px-2.5 py-1 bg-amber-500 text-zinc-950 rounded-md text-[11px] font-semibold inline-flex items-center gap-1"
               >
                 <Code size={12} /> Abrir Script SQL Reparador
               </button>
@@ -1035,11 +1035,11 @@ export function CatalogoPage() {
 
       {/* Alerta SQL Supabase */}
       {(!isRealDb || dbError) && (
-        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="p-4 rounded-xl bg-cd border border-amber-500/35 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-start gap-2.5 text-xs">
-            <Database size={18} className="text-amber-500 shrink-0 mt-0.5" />
+            <Database size={16} className="text-amber-500 shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold text-amber-600 dark:text-amber-400 block">
+              <span className="font-semibold text-amber-600 dark:text-amber-400 block">
                 Conexión con Supabase pendiente de actualizar (Sprint 10)
               </span>
               <span className="tx-mu block mt-0.5">
@@ -1050,175 +1050,169 @@ export function CatalogoPage() {
           </div>
           <button
             onClick={() => setShowSqlModal(true)}
-            className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 rounded-xl text-xs font-black flex items-center gap-1.5 shrink-0 transition-colors"
+            className="px-3 py-1.5 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 rounded-lg text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-opacity"
           >
-            <Code size={14} /> Copiar SQL Reparador
+            <Code size={13} /> Copiar SQL Reparador
           </button>
         </div>
       )}
 
       {/* Encabezado Principal de Catálogo Visual */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
-        <div className="min-w-0 shrink-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <Tag className="text-[var(--ac)] shrink-0" size={24} />
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight whitespace-normal sm:whitespace-nowrap">
-              Catálogo Visual
-            </h1>
-            <span
-              className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border shrink-0 flex items-center gap-1 ${
-                isRealDb
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
-              }`}
-            >
-              <Database size={10} /> {isRealDb ? 'Supabase Conectado' : 'Modo Respaldo'}
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--tx)]">
+            Catálogo Visual
+          </h1>
+          <p className="text-xs tx-mu mt-1">
+            <span className={isRealDb ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-amber-600 dark:text-amber-400 font-medium'}>
+              {isRealDb ? 'Supabase Conectado' : 'Modo Respaldo'}
             </span>
-            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/30 flex items-center gap-1 shrink-0">
-              <Bot size={12} /> Todd Ready
-            </span>
-          </div>
-          <p className="text-xs text-[var(--mu)] mt-1 max-w-xl">
-            Fichas comerciales de tus productos: fotos, precios de venta, variantes, estado activo y entrenamiento de Bot Todd para WhatsApp.
+            {' · '}Bot Todd Ready · Fotos, precios, variantes y entrenamiento comercial
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <Link
             to="/inventario"
-            className="px-3.5 py-2 border border-[var(--bd)] bg-sf hover:bg-cd rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
+            className="px-3 py-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
           >
-            <Boxes size={15} className="text-emerald-500" /> Inventario & Kárdex <ExternalLink size={12} />
+            <Boxes size={14} className="tx-mu" /> Inventario <ExternalLink size={11} className="tx-mu" />
           </Link>
 
           <button
-            onClick={() => setShowProductoModal(true)}
-            className="flex-1 sm:flex-none px-4 py-2 bg-[var(--ac)] text-white hover:opacity-90 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-opacity shadow-sm"
-          >
-            <Plus size={14} /> Nuevo Producto
-          </button>
-
-          <button
             onClick={loadCatalogData}
-            className="p-2 border border-[var(--bd)] rounded-xl text-xs font-bold hover:bg-sf transition-colors"
+            className="p-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs transition-colors"
             title="Recargar catálogo desde Supabase"
           >
-            <RefreshCw size={16} className={loadingNative ? 'animate-spin' : ''} />
+            <RefreshCw size={15} className={loadingNative ? 'animate-spin' : ''} />
           </button>
 
           <button
             onClick={() => setShowSqlModal(true)}
-            className="p-2 border border-[var(--bd)] rounded-xl text-xs font-bold hover:bg-sf transition-colors"
+            className="p-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs transition-colors"
             title="Script SQL Sprint 10 (Supabase)"
           >
-            <Code size={16} />
+            <Code size={15} />
+          </button>
+
+          <button
+            onClick={() => setShowProductoModal(true)}
+            className="px-3.5 py-2 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-opacity"
+          >
+            <Plus size={14} /> Nuevo Producto
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* KPIs Comerciales del Catálogo (Solo productos activos) */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
+      {/* KPIs Comerciales del Catálogo (Franja unificada con divisores) */}
+      <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu uppercase font-medium tracking-wider block">
             Productos Activos
           </span>
-          <div className="text-2xl font-black mt-1 text-[var(--tx)]">{catalogStats.activos}</div>
-          <span className="text-[10px] tx-mu mt-1 block">Visibles para venta y Todd</span>
+          <div className="text-2xl font-bold font-mono tabular-nums mt-1 text-[var(--tx)]">
+            {catalogStats.activos}
+          </div>
+          <span className="text-[11px] tx-mu mt-1 block">Visibles para venta y Todd</span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu uppercase font-medium tracking-wider block">
             Valor en Venta (PVP)
           </span>
-          <div className="text-2xl font-black mt-1 text-emerald-500">
+          <div className="text-2xl font-bold font-mono tabular-nums mt-1 text-emerald-600 dark:text-emerald-400">
             ${catalogStats.valorVentaActivo.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Stock activo a precio venta</span>
+          <span className="text-[11px] tx-mu mt-1 block">Stock activo a precio venta</span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu uppercase font-medium tracking-wider block">
             Entrenados Bot Todd
           </span>
-          <div className="text-2xl font-black mt-1 text-purple-500">{catalogStats.toddReady}</div>
-          <span className="text-[10px] tx-mu mt-1 block">Activos con pitch WhatsApp</span>
+          <div className="text-2xl font-bold font-mono tabular-nums mt-1 text-[var(--tx)]">
+            {catalogStats.toddReady}
+          </div>
+          <span className="text-[11px] tx-mu mt-1 block">Activos con pitch WhatsApp</span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu uppercase font-medium tracking-wider block">
             Fichas sin Foto
           </span>
-          <div className="text-2xl font-black mt-1 text-amber-500">{catalogStats.sinFoto}</div>
-          <span className="text-[10px] tx-mu mt-1 block">Activos sin imagen</span>
+          <div className="text-2xl font-bold font-mono tabular-nums mt-1 text-amber-600 dark:text-amber-400">
+            {catalogStats.sinFoto}
+          </div>
+          <span className="text-[11px] tx-mu mt-1 block">Activos sin imagen</span>
         </div>
 
         <Link
           to="/inventario?filter=criticos"
-          className="p-4 rounded-2xl bg-cd border border-[var(--bd)] hover:border-[var(--ac)] transition-colors block col-span-2 md:col-span-1"
+          className="p-4 hover:bg-sf/50 transition-colors block col-span-2 md:col-span-1"
         >
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
+          <span className="text-[11px] tx-mu uppercase font-medium tracking-wider block">
             Alertas Stock Bajo
           </span>
-          <div className="text-2xl font-black mt-1 text-rose-500">{catalogStats.stockBajo}</div>
-          <span className="text-[10px] text-[var(--ac)] font-bold mt-1 inline-flex items-center gap-1">
+          <div className="text-2xl font-bold font-mono tabular-nums mt-1 text-rose-600 dark:text-rose-400">
+            {catalogStats.stockBajo}
+          </div>
+          <span className="text-[11px] text-[var(--ac)] font-medium mt-1 inline-flex items-center gap-1">
             Ver en Inventario →
           </span>
         </Link>
-      </div>
+      </section>
 
-      {/* Barra de Búsqueda y Filtros Visuales */}
-      <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3 bg-cd p-3 rounded-2xl border border-[var(--bd)]">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap bg-sf p-1 rounded-xl gap-1">
-            {(
-              [
-                ['activos', `Activos (${catalogStats.activos})`],
-                ['todd', `Bot Todd (${catalogStats.toddReady})`],
-                ['stock_bajo', `Stock Bajo (${catalogStats.stockBajo})`]
-              ] as [CatalogFilter, string][]
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setCatalogFilter(id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${
-                  catalogFilter === id
-                    ? 'bg-cd shadow-sm text-[var(--tx)]'
-                    : 'text-[var(--mu)] hover:text-[var(--tx)]'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+      {/* Navegación por filtro + Búsqueda */}
+      <div className="flex flex-col md:flex-row justify-between items-stretch md:items-end gap-3 border-b border-[var(--bd)] pb-0">
+        <nav className="flex items-center gap-6 overflow-x-auto">
+          {(
+            [
+              ['activos', `Activos (${catalogStats.activos})`],
+              ['todd', `Bot Todd (${catalogStats.toddReady})`],
+              ['stock_bajo', `Stock Bajo (${catalogStats.stockBajo})`]
+            ] as [CatalogFilter, string][]
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setCatalogFilter(id)}
+              className={`pb-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap -mb-px ${
+                catalogFilter === id
+                  ? 'border-[var(--tx)] text-[var(--tx)] font-semibold'
+                  : 'border-transparent tx-mu hover:text-[var(--tx)]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
 
           {catalogStats.pausados > 0 && (
             <button
               onClick={() => setCatalogFilter(catalogFilter === 'pausados' ? 'activos' : 'pausados')}
-              className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-colors whitespace-nowrap ${
+              className={`pb-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap -mb-px ${
                 catalogFilter === 'pausados'
-                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-600 dark:text-amber-400'
-                  : 'bg-sf border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
+                  ? 'border-amber-500 text-amber-600 dark:text-amber-400 font-semibold'
+                  : 'border-transparent tx-mu hover:text-[var(--tx)]'
               }`}
               title="Ver productos pausados para reactivarlos"
             >
               Pausados ({catalogStats.pausados})
             </button>
           )}
-        </div>
+        </nav>
 
-        <div className="relative flex-1 md:max-w-xs">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 tx-mu" />
+        <div className="relative w-full md:w-72 pb-2.5">
+          <Search size={14} className="absolute left-3 top-[13px] tx-mu" />
           <input
             type="text"
             placeholder="Buscar por nombre, SKU o categoría..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-7 py-1.5 bg-sf border border-[var(--bd)] rounded-xl text-xs outline-none focus:border-[var(--ac)]"
+            className="w-full pl-9 pr-7 py-1.5 bg-cd border border-[var(--bd)] rounded-lg text-xs outline-none focus:border-[var(--tx)]"
           />
           {search && (
             <button
               onClick={() => setSearch('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 tx-mu hover:text-[var(--tx)]"
+              className="absolute right-2.5 top-[13px] tx-mu hover:text-[var(--tx)]"
             >
               <X size={13} />
             </button>
@@ -1226,24 +1220,22 @@ export function CatalogoPage() {
         </div>
       </div>
 
-      {/* Controles Globales de Bot Todd (Venta sin Stock y Privacidad de Unidades) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 bg-cd p-3.5 rounded-2xl border border-[var(--bd)]">
-        <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-sf border border-[var(--bd)]">
+      {/* Controles Globales de Bot Todd */}
+      <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
+        <div className="p-4 flex items-center justify-between gap-3">
           <div className="flex items-start gap-2.5 min-w-0">
-            <div className="p-2 rounded-lg bg-purple-500/15 text-purple-500 shrink-0 mt-0.5">
-              <PackageCheck size={16} />
-            </div>
+            <PackageCheck size={16} className="tx-mu shrink-0 mt-0.5" />
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-bold text-[var(--tx)]">Vender productos sin stock (Global)</span>
+                <span className="text-xs font-semibold text-[var(--tx)]">Vender productos sin stock (Global)</span>
                 {!toddSettings.allowBackorderGlobal && toddSettings.backorderSkus.length > 0 && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/25">
-                    {toddSettings.backorderSkus.length} por producto
+                  <span className="text-[11px] font-mono tx-mu">
+                    ({toddSettings.backorderSkus.length} por SKU)
                   </span>
                 )}
               </div>
               <p className="text-[11px] tx-mu mt-0.5 leading-snug">
-                Permite que Todd siga vendiendo y cerrando pedidos aunque el producto o variante esté en 0 uds, sin pausar el bot.
+                Permite que Todd siga cerrando pedidos aunque el producto o variante esté en 0 uds.
               </p>
             </div>
           </div>
@@ -1251,27 +1243,25 @@ export function CatalogoPage() {
             type="button"
             disabled={savingToddSettings}
             onClick={handleToggleGlobalBackorder}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-colors border ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 transition-colors border ${
               toddSettings.allowBackorderGlobal
-                ? 'bg-purple-600 text-white border-purple-500 shadow-sm'
-                : 'bg-cd border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
+                ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)]'
+                : 'bg-sf border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
             }`}
           >
-            {toddSettings.allowBackorderGlobal ? '✓ Activo Global' : 'Solo por SKU'}
+            {toddSettings.allowBackorderGlobal ? 'Activo Global' : 'Solo por SKU'}
           </button>
         </div>
 
-        <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-sf border border-[var(--bd)]">
+        <div className="p-4 flex items-center justify-between gap-3">
           <div className="flex items-start gap-2.5 min-w-0">
-            <div className="p-2 rounded-lg bg-emerald-500/15 text-emerald-500 shrink-0 mt-0.5">
-              <EyeOff size={16} />
-            </div>
+            <EyeOff size={16} className="tx-mu shrink-0 mt-0.5" />
             <div className="min-w-0">
-              <span className="text-xs font-bold text-[var(--tx)] block">
+              <span className="text-xs font-semibold text-[var(--tx)] block">
                 Ocultar unidades disponibles al cliente
               </span>
               <p className="text-[11px] tx-mu mt-0.5 leading-snug">
-                Todd confirma disponibilidad, colores y tallas, pero nunca revela cuántas unidades exactas quedan en bodega.
+                Todd confirma disponibilidad, colores y tallas sin revelar cuántas unidades quedan en bodega.
               </p>
             </div>
           </div>
@@ -1279,32 +1269,32 @@ export function CatalogoPage() {
             type="button"
             disabled={savingToddSettings}
             onClick={handleToggleHideExactStockCounts}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-colors border ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 transition-colors border ${
               toddSettings.hideExactStockCounts
-                ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                : 'bg-cd border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
+                ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)]'
+                : 'bg-sf border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
             }`}
           >
-            {toddSettings.hideExactStockCounts ? '✓ Oculto' : 'Visible'}
+            {toddSettings.hideExactStockCounts ? 'Oculto' : 'Visible'}
           </button>
         </div>
-      </div>
+      </section>
 
       {/* GRID VISUAL DEL CATÁLOGO */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         {loadingNative && filteredCatalog.length === 0 && (
-          <div className="col-span-full text-center p-8 tx-mu">Cargando catálogo visual...</div>
+          <div className="col-span-full text-center p-8 text-xs tx-mu">Cargando catálogo visual...</div>
         )}
         {!loadingNative && filteredCatalog.length === 0 && (
-          <div className="col-span-full text-center p-10 tx-mu bg-cd rounded-2xl border border-[var(--bd)] space-y-3">
-            <div className="text-3xl">📦</div>
-            <div className="font-bold text-sm text-[var(--tx)]">No hay productos con estos filtros</div>
+          <div className="col-span-full text-center p-10 tx-mu bg-cd rounded-xl border border-[var(--bd)] space-y-3">
+            <Package size={24} className="mx-auto tx-mu opacity-60" />
+            <div className="font-semibold text-sm text-[var(--tx)]">No hay productos con estos filtros</div>
             <p className="text-xs max-w-md mx-auto">
               Crea un producto nuevo haciendo clic en <strong>+ Nuevo Producto</strong> o limpia el filtro actual.
             </p>
             <button
               onClick={() => setShowProductoModal(true)}
-              className="px-4 py-2 bg-[var(--ac)] text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+              className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] rounded-lg text-xs font-semibold inline-flex items-center gap-1.5"
             >
               <Plus size={14} /> Crear Producto
             </button>
@@ -1318,38 +1308,38 @@ export function CatalogoPage() {
             <div
               key={item.key}
               onClick={() => handleOpenItem(item)}
-              className={`bg-cd border border-[var(--bd)] rounded-2xl p-3 flex flex-col justify-between cursor-pointer hover:border-[var(--ac)] hover:shadow-md transition-all group relative ${
-                !item.activo ? 'opacity-70' : ''
+              className={`bg-cd border border-[var(--bd)] rounded-xl p-3 flex flex-col justify-between cursor-pointer hover:border-[var(--tx)]/40 transition-colors group relative ${
+                !item.activo ? 'opacity-65' : ''
               }`}
             >
               <div>
-                <div className="aspect-square bg-sf rounded-xl overflow-hidden relative flex items-center justify-center">
+                <div className="aspect-square bg-sf rounded-lg overflow-hidden relative flex items-center justify-center border border-[var(--bd)]">
                   <ProductImg
                     src={item.image_url}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
                   />
 
-                  {/* Badge de Disponibilidad */}
+                  {/* Indicador compacto de Disponibilidad */}
                   <div className="absolute top-2 right-2">
                     <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md border shadow-sm ${
+                      className={`text-[10px] font-mono tabular-nums font-semibold px-1.5 py-0.5 rounded-md border ${
                         item.stock_disponible <= 0
-                          ? 'bg-rose-500/90 text-white border-rose-600'
+                          ? 'bg-rose-600 text-white border-rose-700'
                           : item.stock_disponible <= item.stock_minimo_alerta
-                          ? 'bg-amber-500/90 text-white border-amber-600'
-                          : 'bg-emerald-500/90 text-white border-emerald-600'
+                          ? 'bg-amber-500 text-zinc-950 border-amber-600'
+                          : 'bg-cd/95 text-[var(--tx)] border-[var(--bd)]'
                       }`}
                     >
-                      {item.stock_disponible} disp.
+                      {item.stock_disponible} uds
                     </span>
                   </div>
 
-                  {/* Badge de Todd Bot, Video How-To y Venta Bajo Pedido */}
+                  {/* Indicadores Bot Todd, Video How-To y Bajo Pedido */}
                   <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-1 pointer-events-none">
                     <div className="flex items-center gap-1">
                       {hasToddPitch && (
                         <span
-                          className="p-1 rounded-md bg-purple-600 text-white text-[10px] font-bold shadow flex items-center gap-0.5"
+                          className="p-1 rounded-md bg-cd/90 border border-[var(--bd)] text-[var(--tx)] flex items-center"
                           title="Entrenado para Bot Todd (WhatsApp)"
                         >
                           <Bot size={11} />
@@ -1357,7 +1347,7 @@ export function CatalogoPage() {
                       )}
                       {toddSettings.productVideos[item.sku.toUpperCase()] && (
                         <span
-                          className="p-1 rounded-md bg-rose-600 text-white text-[10px] font-bold shadow flex items-center gap-0.5"
+                          className="p-1 rounded-md bg-cd/90 border border-[var(--bd)] text-rose-500 flex items-center"
                           title="Tiene video How-To de YouTube vinculado"
                         >
                           <Video size={11} />
@@ -1367,7 +1357,7 @@ export function CatalogoPage() {
                     {item.stock_disponible <= 0 &&
                       (toddSettings.allowBackorderGlobal || backorderSkuSet.has(item.sku.toUpperCase())) && (
                         <span
-                          className="px-1.5 py-0.5 rounded-md bg-purple-600/95 text-white text-[9px] font-bold shadow border border-purple-400/50"
+                          className="px-1.5 py-0.5 rounded-md bg-cd/95 border border-[var(--bd)] text-[var(--tx)] text-[9px] font-semibold"
                           title="Bot Todd puede vender este producto aunque esté en 0 uds"
                         >
                           Bajo pedido
@@ -1377,13 +1367,13 @@ export function CatalogoPage() {
                 </div>
 
                 <div className="mt-3">
-                  <div className="flex items-center justify-between text-[10px] mono tx-mu">
-                    <span className="truncate font-semibold">{item.sku}</span>
+                  <div className="flex items-center justify-between text-[10px] font-mono tx-mu">
+                    <span className="truncate font-medium">{item.sku}</span>
                     {!item.activo && (
-                      <span className="text-rose-500 font-bold uppercase text-[9px]">Pausado</span>
+                      <span className="text-rose-500 font-semibold uppercase text-[9px]">Pausado</span>
                     )}
                   </div>
-                  <div className="font-bold text-xs line-clamp-2 leading-snug mt-0.5 text-[var(--tx)]">
+                  <div className="font-semibold text-xs line-clamp-2 leading-snug mt-0.5 text-[var(--tx)]">
                     {item.nombre}
                   </div>
                   {(() => {
@@ -1402,11 +1392,11 @@ export function CatalogoPage() {
                               style={{ backgroundColor: getColorHex(cv.color) }}
                             />
                             <span className="truncate max-w-[48px]">{cv.color}</span>
-                            <span className="font-mono opacity-60">{cv.stock}</span>
+                            <span className="font-mono tabular-nums opacity-65">{cv.stock}</span>
                           </span>
                         ))}
                         {cardVars.length > 4 && (
-                          <span className="text-[9px] tx-mu font-semibold">+{cardVars.length - 4}</span>
+                          <span className="text-[9px] tx-mu font-mono">+{cardVars.length - 4}</span>
                         )}
                       </div>
                     );
@@ -1416,17 +1406,17 @@ export function CatalogoPage() {
 
               <div className="mt-3 pt-2 border-t border-[var(--bd)] flex items-center justify-between text-[11px]">
                 <div>
-                  <span className="font-mono font-bold text-[var(--tx)] block">
+                  <span className="font-mono tabular-nums font-semibold text-[var(--tx)] block">
                     {item.precio_venta > 0 ? `$${item.precio_venta.toFixed(2)}` : 'Sin precio'}
                   </span>
                   {margin !== null && item.costo_unitario > 0 && (
-                    <span className="text-[9px] text-emerald-500 font-mono font-semibold">
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">
                       +${margin.toFixed(2)} margen
                     </span>
                   )}
                 </div>
-                <span className="text-[var(--ac)] font-bold group-hover:underline">
-                  Editar ficha →
+                <span className="tx-mu group-hover:text-[var(--tx)] font-medium">
+                  Editar →
                 </span>
               </div>
             </div>
@@ -1441,49 +1431,47 @@ export function CatalogoPage() {
             className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 transition-opacity"
             onClick={() => setSelectedItem(null)}
           />
-          <div className="fixed top-0 right-0 bottom-0 w-full sm:w-[500px] bg-cd z-50 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+          <div className="fixed top-0 right-0 bottom-0 w-full sm:w-[500px] bg-cd border-l border-[var(--bd)] z-50 shadow-2xl flex flex-col">
             {/* Header del Drawer */}
-            <div className="p-4 border-b border-[var(--bd)] flex justify-between items-center bg-sf">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex justify-between items-center">
               <div className="min-w-0">
-                <span className="text-[10px] font-mono tx-mu uppercase">SKU: {selectedItem.sku}</span>
-                <h2 className="font-black text-sm truncate max-w-[360px] text-[var(--tx)]">
+                <span className="text-[11px] font-mono tx-mu uppercase">SKU: {selectedItem.sku}</span>
+                <h2 className="font-bold text-sm truncate max-w-[360px] text-[var(--tx)]">
                   {editNombre || 'Sin nombre'}
                 </h2>
               </div>
-              <button onClick={() => setSelectedItem(null)} className="p-1.5 hover:bg-black/10 rounded-lg">
+              <button onClick={() => setSelectedItem(null)} className="p-1.5 hover:bg-sf rounded-lg tx-mu hover:text-[var(--tx)]">
                 <X size={18} />
               </button>
             </div>
 
             {/* Pestañas del Drawer */}
-            <div className="flex bg-sf/50 border-b border-[var(--bd)] p-1 text-xs">
+            <nav className="flex items-center gap-6 px-5 border-b border-[var(--bd)] text-xs">
               <button
                 onClick={() => setDrawerTab('info')}
-                className={`flex-1 py-2 font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
-                  drawerTab === 'info' ? 'bg-cd shadow-sm text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
+                className={`py-3 font-medium border-b-2 transition-colors flex items-center gap-1.5 -mb-px ${
+                  drawerTab === 'info' ? 'border-[var(--tx)] text-[var(--tx)] font-semibold' : 'border-transparent tx-mu hover:text-[var(--tx)]'
                 }`}
               >
-                <Package size={14} /> General & Foto
+                <Package size={13} /> General & Foto
               </button>
               <button
                 onClick={() => setDrawerTab('todd')}
-                className={`flex-1 py-2 font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
-                  drawerTab === 'todd'
-                    ? 'bg-purple-600 text-white shadow-sm'
-                    : 'text-purple-600 dark:text-purple-400 hover:bg-purple-500/10'
+                className={`py-3 font-medium border-b-2 transition-colors flex items-center gap-1.5 -mb-px ${
+                  drawerTab === 'todd' ? 'border-[var(--tx)] text-[var(--tx)] font-semibold' : 'border-transparent tx-mu hover:text-[var(--tx)]'
                 }`}
               >
-                <Bot size={14} /> Bot Todd
+                <Bot size={13} /> Bot Todd
               </button>
               <button
                 onClick={() => setDrawerTab('variantes')}
-                className={`flex-1 py-2 font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
-                  drawerTab === 'variantes' ? 'bg-cd shadow-sm text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
+                className={`py-3 font-medium border-b-2 transition-colors flex items-center gap-1.5 -mb-px ${
+                  drawerTab === 'variantes' ? 'border-[var(--tx)] text-[var(--tx)] font-semibold' : 'border-transparent tx-mu hover:text-[var(--tx)]'
                 }`}
               >
-                <Layers size={14} /> Variantes ({productVariants.length})
+                <Layers size={13} /> Variantes ({productVariants.length})
               </button>
-            </div>
+            </nav>
 
             {/* Contenido del Drawer */}
             <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
@@ -1491,21 +1479,21 @@ export function CatalogoPage() {
               {drawerTab === 'info' && (
                 <div className="space-y-4">
                   {/* Resumen de Existencia con Enlace al Módulo de Inventario */}
-                  <div className="p-3.5 rounded-2xl bg-emerald-500/5 border border-emerald-500/20 flex items-center justify-between gap-3">
+                  <div className="p-3.5 rounded-xl bg-sf border border-[var(--bd)] flex items-center justify-between gap-3">
                     <div>
-                      <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 block">
+                      <span className="text-[11px] uppercase font-medium tx-mu block">
                         Existencia en Bodega
                       </span>
                       <div className="text-xs mt-0.5 text-[var(--tx)]">
-                        <strong className="font-mono text-sm">{selectedItem.stock_disponible}</strong> disponibles ·{' '}
-                        <span className="tx-mu font-mono">
+                        <strong className="font-mono tabular-nums text-sm">{selectedItem.stock_disponible}</strong> disponibles ·{' '}
+                        <span className="tx-mu font-mono tabular-nums">
                           {selectedItem.stock_fisico} físico / {selectedItem.stock_reservado} res.
                         </span>
                       </div>
                     </div>
                     <Link
                       to={`/inventario?sku=${encodeURIComponent(selectedItem.sku)}`}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[11px] font-bold flex items-center gap-1 shrink-0 transition-colors"
+                      className="px-3 py-1.5 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 rounded-lg text-[11px] font-semibold flex items-center gap-1 shrink-0 transition-opacity"
                     >
                       <Boxes size={13} /> Ajustar Stock →
                     </Link>
@@ -1741,19 +1729,19 @@ export function CatalogoPage() {
                   {/* Switch de Estado */}
                   <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-[var(--tx)] block">Estado en Catálogo</span>
-                      <span className="text-[10px] tx-mu">Activo para ventas, pedidos y Bot Todd</span>
+                      <span className="text-xs font-semibold text-[var(--tx)] block">Estado en Catálogo</span>
+                      <span className="text-[11px] tx-mu">Activo para ventas, pedidos y Bot Todd</span>
                     </div>
                     <button
                       type="button"
                       onClick={() => setEditActivo(!editActivo)}
-                      className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-colors ${
                         editActivo
-                          ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
-                          : 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
+                          ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)]'
+                          : 'bg-cd border-[var(--bd)] text-rose-600 dark:text-rose-400'
                       }`}
                     >
-                      {editActivo ? '✓ Activo' : '✕ Pausado'}
+                      {editActivo ? 'Activo' : 'Pausado'}
                     </button>
                   </div>
                 </div>
@@ -1762,14 +1750,14 @@ export function CatalogoPage() {
               {/* SUB-PESTAÑA 2: BOT TODD */}
               {drawerTab === 'todd' && (
                 <div className="space-y-4">
-                  <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
+                  <div className="p-3.5 bg-sf border border-[var(--bd)] rounded-xl">
                     <div className="flex items-center gap-2">
-                      <Bot className="text-purple-600 dark:text-purple-400" size={18} />
-                      <h4 className="font-bold text-xs text-purple-700 dark:text-purple-300">
+                      <Bot className="text-[var(--tx)]" size={16} />
+                      <h4 className="font-semibold text-xs text-[var(--tx)]">
                         Entrenamiento de Ventas para Bot Todd
                       </h4>
                     </div>
-                    <p className="text-[11px] text-purple-900/80 dark:text-purple-200/80 mt-1 leading-relaxed">
+                    <p className="text-[11px] tx-mu mt-1 leading-relaxed">
                       Todd usará esta ficha en WhatsApp y UniChat leyendo la disponibilidad real desde Inventario y Variantes (colores/tallas).
                     </p>
                   </div>
@@ -1777,13 +1765,13 @@ export function CatalogoPage() {
                   {/* Resumen en vivo de Variantes alimentadas a Bot Todd */}
                   <div className="p-3 rounded-xl bg-sf border border-[var(--bd)] space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] uppercase font-bold tx-mu flex items-center gap-1">
-                        <Layers size={12} className="text-indigo-500" /> Variantes alimentando a Todd ({productVariants.length})
+                      <span className="text-[11px] uppercase font-medium tx-mu flex items-center gap-1">
+                        <Layers size={12} /> Variantes alimentando a Todd ({productVariants.length})
                       </span>
                       <button
                         type="button"
                         onClick={() => setDrawerTab('variantes')}
-                        className="text-[10px] font-bold text-[var(--ac)] hover:underline"
+                        className="text-[11px] font-semibold text-[var(--tx)] hover:underline"
                       >
                         Editar colores/tallas →
                       </button>
@@ -1798,7 +1786,7 @@ export function CatalogoPage() {
                           {productVariants.map(v => (
                             <span
                               key={v.variante_id}
-                              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-semibold ${
+                              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] font-medium ${
                                 v.stock > 0 || isSelectedBackorderEnabled
                                   ? 'bg-cd border-[var(--bd)] text-[var(--tx)]'
                                   : 'bg-rose-500/5 border-rose-500/20 text-rose-500'
@@ -1810,7 +1798,7 @@ export function CatalogoPage() {
                               />
                               {v.color}
                               {v.talla && v.talla !== 'Única' ? ` · ${v.talla}` : ''}:{' '}
-                              <strong className="font-mono">{v.stock}</strong>
+                              <strong className="font-mono tabular-nums">{v.stock}</strong>
                             </span>
                           ))}
                         </div>
@@ -1825,26 +1813,26 @@ export function CatalogoPage() {
 
                   <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-[var(--tx)] block">Venta Activa por Bot Todd</span>
-                      <span className="text-[10px] tx-mu">Permite que Todd ofrezca este producto</span>
+                      <span className="text-xs font-semibold text-[var(--tx)] block">Venta Activa por Bot Todd</span>
+                      <span className="text-[11px] tx-mu">Permite que Todd ofrezca este producto</span>
                     </div>
                     <button
                       type="button"
                       onClick={() => setEditActivoTodd(!editActivoTodd)}
-                      className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
-                        editActivoTodd ? 'bg-purple-600 text-white shadow-sm' : 'bg-sf border border-[var(--bd)] tx-mu'
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                        editActivoTodd ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)]' : 'bg-cd border-[var(--bd)] tx-mu'
                       }`}
                     >
-                      {editActivoTodd ? '✓ Habilitado' : '✕ Deshabilitado'}
+                      {editActivoTodd ? 'Habilitado' : 'Deshabilitado'}
                     </button>
                   </div>
 
                   <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-center justify-between gap-3">
                     <div>
-                      <span className="text-xs font-bold text-[var(--tx)] block">
+                      <span className="text-xs font-semibold text-[var(--tx)] block">
                         Vender sin stock (Bajo pedido)
                       </span>
-                      <span className="text-[10px] tx-mu block">
+                      <span className="text-[11px] tx-mu block">
                         {toddSettings.allowBackorderGlobal
                           ? 'Activo automáticamente por la regla Global del catálogo.'
                           : 'Todd venderá este producto aunque tenga 0 uds sin pausar el chat.'}
@@ -1854,18 +1842,16 @@ export function CatalogoPage() {
                       type="button"
                       disabled={savingToddSettings}
                       onClick={() => handleToggleSkuBackorder(selectedItem.sku)}
-                      className={`px-3 py-1 rounded-full text-xs font-bold transition-colors shrink-0 ${
-                        backorderSkuSet.has(selectedItem.sku.toUpperCase())
-                          ? 'bg-purple-600 text-white shadow-sm'
-                          : toddSettings.allowBackorderGlobal
-                          ? 'bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/30'
-                          : 'bg-cd border border-[var(--bd)] tx-mu'
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-colors shrink-0 ${
+                        backorderSkuSet.has(selectedItem.sku.toUpperCase()) || toddSettings.allowBackorderGlobal
+                          ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)]'
+                          : 'bg-cd border-[var(--bd)] tx-mu'
                       }`}
                     >
                       {backorderSkuSet.has(selectedItem.sku.toUpperCase())
-                        ? '✓ Bajo pedido'
+                        ? 'Bajo pedido'
                         : toddSettings.allowBackorderGlobal
-                        ? '✓ Global'
+                        ? 'Global'
                         : 'Solo con stock'}
                     </button>
                   </div>
@@ -1873,10 +1859,10 @@ export function CatalogoPage() {
                   {/* Estado del Video How-To en Bot Todd */}
                   <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <span className="text-xs font-bold text-[var(--tx)] flex items-center gap-1.5">
+                      <span className="text-xs font-semibold text-[var(--tx)] flex items-center gap-1.5">
                         <Video size={13} className="text-rose-500" /> Video How-To (YouTube)
                       </span>
-                      <span className="text-[10px] tx-mu block truncate mt-0.5">
+                      <span className="text-[11px] tx-mu block truncate mt-0.5">
                         {editVideoUrl.trim()
                           ? editVideoUrl.trim()
                           : 'Sin video asignado aún (se envía automático con la foto)'}
@@ -1885,67 +1871,67 @@ export function CatalogoPage() {
                     <button
                       type="button"
                       onClick={() => setDrawerTab('info')}
-                      className="px-2.5 py-1 rounded-lg border border-[var(--bd)] bg-cd hover:border-[var(--ac)] text-[10px] font-bold shrink-0"
+                      className="px-2.5 py-1 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-[11px] font-medium shrink-0"
                     >
-                      {editVideoUrl.trim() ? 'Cambiar' : '+ Agregar'}
+                      {editVideoUrl.trim() ? 'Cambiar' : 'Agregar'}
                     </button>
                   </div>
 
                   <div>
-                    <label className="block text-[10px] uppercase font-bold tx-mu mb-1 flex items-center gap-1.5">
-                      <Sparkles size={12} className="text-purple-500" /> Pitch de Venta & Beneficios Clave
+                    <label className="block text-[11px] uppercase font-medium tx-mu mb-1 flex items-center gap-1.5">
+                      <Sparkles size={12} /> Pitch de Venta & Beneficios Clave
                     </label>
                     <textarea
                       rows={3}
                       value={editToddPitch}
                       onChange={e => setEditToddPitch(e.target.value)}
                       placeholder="Ej. Alivia contracturas y dolores musculares en 15 minutos..."
-                      className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-purple-500 leading-relaxed resize-none"
+                      className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--tx)] leading-relaxed resize-none"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[10px] uppercase font-bold tx-mu mb-1 flex items-center gap-1.5">
-                      <MessageSquare size={12} className="text-purple-500" /> Ofertas & Reglas del Bot (incluye variantes sincronizadas)
+                    <label className="block text-[11px] uppercase font-medium tx-mu mb-1 flex items-center gap-1.5">
+                      <MessageSquare size={12} /> Ofertas & Reglas del Bot (incluye variantes sincronizadas)
                     </label>
                     <textarea
                       rows={3}
                       value={editToddInstrucciones}
                       onChange={e => setEditToddInstrucciones(e.target.value)}
                       placeholder="Ej. Ofrecer promoción 2 por $25."
-                      className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-purple-500 leading-relaxed resize-none"
+                      className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--tx)] leading-relaxed resize-none"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[10px] uppercase font-bold tx-mu mb-1 flex items-center gap-1.5">
-                      <Tag size={12} className="text-purple-500" /> Sinónimos y Palabras Clave
+                    <label className="block text-[11px] uppercase font-medium tx-mu mb-1 flex items-center gap-1.5">
+                      <Tag size={12} /> Sinónimos y Palabras Clave
                     </label>
                     <input
                       type="text"
                       value={editToddKeywords}
                       onChange={e => setEditToddKeywords(e.target.value)}
                       placeholder="masajeador, cuello, dolores, negro, gris"
-                      className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-purple-500"
+                      className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--tx)]"
                     />
                   </div>
 
-                  <div className="p-4 bg-sf rounded-2xl border border-[var(--bd)] space-y-3">
+                  <div className="p-4 bg-sf rounded-xl border border-[var(--bd)] space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-[var(--tx)] flex items-center gap-1.5">
-                        <Bot size={14} className="text-purple-500" /> Vista Previa: Respuesta de Todd
+                      <span className="text-xs font-semibold text-[var(--tx)] flex items-center gap-1.5">
+                        <Bot size={14} /> Vista Previa: Respuesta de Todd
                       </span>
                       <button
                         type="button"
                         onClick={handleSimulateTodd}
                         disabled={isSimulating}
-                        className="px-2.5 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-[10px] font-bold flex items-center gap-1"
+                        className="px-2.5 py-1 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 rounded-md text-[11px] font-semibold flex items-center gap-1"
                       >
                         <Sparkles size={11} /> Probar
                       </button>
                     </div>
 
-                    <div className="p-3 bg-emerald-950/10 dark:bg-emerald-900/20 rounded-xl border border-emerald-500/20 text-xs font-mono leading-relaxed whitespace-pre-wrap text-[var(--tx)]">
+                    <div className="p-3 bg-cd rounded-lg border border-[var(--bd)] text-xs font-mono leading-relaxed whitespace-pre-wrap text-[var(--tx)]">
                       {simRespuesta || (
                         <span className="tx-mu italic font-sans text-[11px]">
                           Presiona "Probar" para ver cómo responderá Todd con colores, tallas y disponibilidad.
@@ -1960,14 +1946,14 @@ export function CatalogoPage() {
               {drawerTab === 'variantes' && (
                 <div className="space-y-4">
                   {/* Barra de Sincronización con Bodega y Bot Todd */}
-                  <div className="p-3.5 rounded-2xl bg-indigo-500/5 border border-indigo-500/20 space-y-2.5">
+                  <div className="p-3.5 rounded-xl bg-sf border border-[var(--bd)] space-y-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div>
-                        <span className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 block">
+                        <span className="text-[11px] uppercase font-medium tx-mu block">
                           Stock Total por Variantes
                         </span>
-                        <div className="text-xs font-bold text-[var(--tx)] mt-0.5">
-                          <span className="font-mono text-sm text-emerald-600 dark:text-emerald-400">
+                        <div className="text-xs font-semibold text-[var(--tx)] mt-0.5">
+                          <span className="font-mono tabular-nums text-sm text-emerald-600 dark:text-emerald-400">
                             {totalVariantsStock} uds
                           </span>{' '}
                           <span className="tx-mu font-normal">en {productVariants.length} variante(s)</span>
@@ -1979,7 +1965,7 @@ export function CatalogoPage() {
                           type="button"
                           disabled={isSavingVariant}
                           onClick={handleForceSyncToddVariants}
-                          className="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl text-[10px] font-bold flex items-center gap-1"
+                          className="px-2.5 py-1.5 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 disabled:opacity-50 rounded-lg text-[11px] font-semibold flex items-center gap-1"
                           title="Sincronizar variantes hacia instrucciones de Bot Todd y Bodega"
                         >
                           <Bot size={12} /> Sincronizar Todd
@@ -2002,7 +1988,7 @@ export function CatalogoPage() {
                           type="checkbox"
                           checked={syncToddWithVariants}
                           onChange={e => setSyncToddWithVariants(e.target.checked)}
-                          className="accent-purple-600"
+                          className="accent-zinc-900 dark:accent-zinc-100"
                         />
                         <span>Alimentar Bot Todd</span>
                       </label>
@@ -2010,15 +1996,15 @@ export function CatalogoPage() {
                   </div>
 
                   {/* Selector de Modo de Creación */}
-                  <div className="p-3.5 rounded-2xl bg-sf border border-[var(--bd)] space-y-3">
+                  <div className="p-3.5 rounded-xl bg-sf border border-[var(--bd)] space-y-3">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-[var(--tx)]">Agregar Colores / Tallas</span>
-                      <div className="flex bg-cd p-0.5 rounded-lg border border-[var(--bd)] text-[10px] font-bold">
+                      <span className="text-xs font-semibold text-[var(--tx)]">Agregar Colores / Tallas</span>
+                      <div className="flex bg-cd p-0.5 rounded-lg border border-[var(--bd)] text-[11px] font-medium">
                         <button
                           type="button"
                           onClick={() => setVarMode('single')}
                           className={`px-2 py-1 rounded-md transition-colors ${
-                            varMode === 'single' ? 'bg-[var(--ac)] text-white' : 'tx-mu'
+                            varMode === 'single' ? 'bg-[var(--tx)] text-[var(--cd)] font-semibold' : 'tx-mu'
                           }`}
                         >
                           + Individual
@@ -2027,10 +2013,10 @@ export function CatalogoPage() {
                           type="button"
                           onClick={() => setVarMode('matrix')}
                           className={`px-2 py-1 rounded-md transition-colors ${
-                            varMode === 'matrix' ? 'bg-[var(--ac)] text-white' : 'tx-mu'
+                            varMode === 'matrix' ? 'bg-[var(--tx)] text-[var(--cd)] font-semibold' : 'tx-mu'
                           }`}
                         >
-                          ⚡ Matriz Rápida
+                          Matriz Rápida
                         </button>
                       </div>
                     </div>
@@ -2038,12 +2024,12 @@ export function CatalogoPage() {
                     {varMode === 'single' ? (
                       <form onSubmit={handleAddSingleVariant} className="space-y-3">
                         <div>
-                          <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                          <label className="block text-[11px] uppercase font-medium tx-mu mb-1">
                             Color *
                           </label>
                           <div className="flex items-center gap-2">
                             <span
-                              className="w-6 h-6 rounded-lg border border-[var(--bd)] shrink-0"
+                              className="w-6 h-6 rounded-md border border-[var(--bd)] shrink-0"
                               style={{ backgroundColor: getColorHex(varColor) }}
                             />
                             <input
@@ -2051,7 +2037,7 @@ export function CatalogoPage() {
                               value={varColor}
                               onChange={e => setVarColor(e.target.value)}
                               placeholder="Ej. Gris, Negro, Azul Marino..."
-                              className="flex-1 p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs outline-none focus:border-[var(--ac)]"
+                              className="flex-1 p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs outline-none focus:border-[var(--tx)]"
                             />
                           </div>
                           <div className="flex flex-wrap gap-1 mt-1.5">
@@ -2062,7 +2048,7 @@ export function CatalogoPage() {
                                 onClick={() => setVarColor(c)}
                                 className={`px-1.5 py-0.5 rounded-md border text-[10px] flex items-center gap-1 transition-colors ${
                                   varColor.toLowerCase() === c.toLowerCase()
-                                    ? 'border-[var(--ac)] bg-[var(--ac)]/10 font-bold'
+                                    ? 'border-[var(--tx)] bg-cd font-semibold text-[var(--tx)]'
                                     : 'border-[var(--bd)] bg-cd tx-mu hover:text-[var(--tx)]'
                                 }`}
                               >
@@ -2077,7 +2063,7 @@ export function CatalogoPage() {
                         </div>
 
                         <div>
-                          <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                          <label className="block text-[11px] uppercase font-medium tx-mu mb-1">
                             Talla / Tamaño
                           </label>
                           <input
@@ -2085,7 +2071,7 @@ export function CatalogoPage() {
                             value={varTalla}
                             onChange={e => setVarTalla(e.target.value)}
                             placeholder="Única, S, M, L, XL..."
-                            className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs outline-none focus:border-[var(--ac)]"
+                            className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs outline-none focus:border-[var(--tx)]"
                           />
                           <div className="flex flex-wrap gap-1 mt-1.5">
                             {QUICK_SIZES.map(sz => (
@@ -2093,9 +2079,9 @@ export function CatalogoPage() {
                                 key={sz}
                                 type="button"
                                 onClick={() => setVarTalla(sz)}
-                                className={`px-2 py-0.5 rounded-md border text-[10px] font-semibold ${
+                                className={`px-2 py-0.5 rounded-md border text-[10px] font-medium ${
                                   varTalla === sz
-                                    ? 'border-[var(--ac)] bg-[var(--ac)]/10 text-[var(--ac)]'
+                                    ? 'border-[var(--tx)] bg-cd text-[var(--tx)] font-semibold'
                                     : 'border-[var(--bd)] bg-cd tx-mu hover:text-[var(--tx)]'
                                 }`}
                               >
@@ -2107,7 +2093,7 @@ export function CatalogoPage() {
 
                         <div className="grid grid-cols-3 gap-2">
                           <div>
-                            <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                            <label className="block text-[11px] uppercase font-medium tx-mu mb-1">
                               Unidades *
                             </label>
                             <input
@@ -2115,11 +2101,11 @@ export function CatalogoPage() {
                               min="0"
                               value={varStock}
                               onChange={e => setVarStock(e.target.value)}
-                              className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs font-bold outline-none"
+                              className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs font-mono font-semibold outline-none"
                             />
                           </div>
                           <div>
-                            <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                            <label className="block text-[11px] uppercase font-medium tx-mu mb-1">
                               Precio ($)
                             </label>
                             <input
@@ -2129,11 +2115,11 @@ export function CatalogoPage() {
                               value={varPrecio}
                               onChange={e => setVarPrecio(e.target.value)}
                               placeholder={selectedItem.precio_venta ? String(selectedItem.precio_venta) : '15.00'}
-                              className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs font-bold outline-none"
+                              className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs font-mono font-semibold outline-none"
                             />
                           </div>
                           <div>
-                            <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                            <label className="block text-[11px] uppercase font-medium tx-mu mb-1">
                               SKU (Opc.)
                             </label>
                             <input
@@ -2141,7 +2127,7 @@ export function CatalogoPage() {
                               value={varCustomSku}
                               onChange={e => setVarCustomSku(e.target.value.toUpperCase())}
                               placeholder={buildVariantSku(selectedItem.sku, varColor, varTalla)}
-                              className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-[10px] font-mono outline-none"
+                              className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-[10px] font-mono outline-none"
                             />
                           </div>
                         </div>
@@ -2149,7 +2135,7 @@ export function CatalogoPage() {
                         <button
                           type="submit"
                           disabled={isSavingVariant}
-                          className="w-full py-2 bg-[var(--ac)] hover:opacity-90 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm"
+                          className="w-full py-2 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 disabled:opacity-50 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5"
                         >
                           <Plus size={14} /> {isSavingVariant ? 'Guardando...' : 'Agregar Variante'}
                         </button>
@@ -2157,7 +2143,7 @@ export function CatalogoPage() {
                     ) : (
                       <form onSubmit={handleGenerateMatrixVariants} className="space-y-3">
                         <div>
-                          <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                          <label className="block text-[11px] uppercase font-medium tx-mu mb-1">
                             Colores (separados por coma) *
                           </label>
                           <input
@@ -2165,12 +2151,12 @@ export function CatalogoPage() {
                             value={matrixColores}
                             onChange={e => setMatrixColores(e.target.value)}
                             placeholder="Ej. Negro, Gris, Azul, Rosado"
-                            className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs outline-none focus:border-[var(--ac)]"
+                            className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs outline-none focus:border-[var(--tx)]"
                           />
                         </div>
                         <div className="grid grid-cols-3 gap-2">
                           <div>
-                            <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                            <label className="block text-[11px] uppercase font-medium tx-mu mb-1">
                               Tallas (coma)
                             </label>
                             <input
@@ -2178,11 +2164,11 @@ export function CatalogoPage() {
                               value={matrixTallas}
                               onChange={e => setMatrixTallas(e.target.value)}
                               placeholder="Única o S, M, L"
-                              className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs outline-none"
+                              className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs outline-none"
                             />
                           </div>
                           <div>
-                            <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                            <label className="block text-[11px] uppercase font-medium tx-mu mb-1">
                               Uds c/u
                             </label>
                             <input
@@ -2190,11 +2176,11 @@ export function CatalogoPage() {
                               min="0"
                               value={matrixStockPorVar}
                               onChange={e => setMatrixStockPorVar(e.target.value)}
-                              className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs font-bold outline-none"
+                              className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs font-mono font-semibold outline-none"
                             />
                           </div>
                           <div>
-                            <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                            <label className="block text-[11px] uppercase font-medium tx-mu mb-1">
                               Precio ($)
                             </label>
                             <input
@@ -2204,14 +2190,14 @@ export function CatalogoPage() {
                               value={matrixPrecio}
                               onChange={e => setMatrixPrecio(e.target.value)}
                               placeholder={selectedItem.precio_venta ? String(selectedItem.precio_venta) : '15.00'}
-                              className="w-full p-2 rounded-xl border border-[var(--bd)] bg-cd text-xs font-bold outline-none"
+                              className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs font-mono font-semibold outline-none"
                             />
                           </div>
                         </div>
                         <button
                           type="submit"
                           disabled={isSavingVariant}
-                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm"
+                          className="w-full py-2 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 disabled:opacity-50 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5"
                         >
                           <Sparkles size={14} /> {isSavingVariant ? 'Generando...' : 'Generar Combinaciones'}
                         </button>
@@ -2221,12 +2207,12 @@ export function CatalogoPage() {
 
                   {/* Lista Editable de Variantes Registradas */}
                   <div className="space-y-2">
-                    <h4 className="font-bold text-xs uppercase tx-mu flex items-center justify-between">
+                    <h4 className="font-semibold text-[11px] uppercase tx-mu flex items-center justify-between">
                       <span className="flex items-center gap-1.5">
-                        <Package size={14} /> Variantes Registradas ({productVariants.length})
+                        <Package size={13} /> Variantes Registradas ({productVariants.length})
                       </span>
                       {toddVariantsPreview.bulletLines.length > 0 && (
-                        <span className="text-[10px] font-normal text-purple-500">Todd Activo ✓</span>
+                        <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Todd Activo</span>
                       )}
                     </h4>
 
@@ -2235,7 +2221,7 @@ export function CatalogoPage() {
                         Este producto aún no tiene variantes de color o talla. Agrega una arriba para dividir tu stock por color/talla y alimentar a Bot Todd.
                       </div>
                     ) : (
-                      <div className="flex flex-col gap-2">
+                      <div className="border border-[var(--bd)] rounded-xl divide-y divide-[var(--bd)] bg-sf">
                         {productVariants.map((v) => {
                           const inputVal =
                             editingVarStock[v.variante_id] !== undefined
@@ -2248,16 +2234,16 @@ export function CatalogoPage() {
                           return (
                             <div
                               key={v.variante_id || v.sku}
-                              className="p-3 bg-sf border border-[var(--bd)] rounded-xl flex items-center justify-between gap-2"
+                              className="p-3 flex items-center justify-between gap-2"
                             >
                               <div className="min-w-0 flex items-center gap-2.5">
                                 <span
-                                  className="w-7 h-7 rounded-lg border border-black/20 shrink-0 shadow-inner"
+                                  className="w-6 h-6 rounded-md border border-black/20 shrink-0"
                                   style={{ backgroundColor: getColorHex(v.color) }}
                                   title={v.color}
                                 />
                                 <div className="min-w-0">
-                                  <div className="text-xs font-bold text-[var(--tx)] truncate flex items-center gap-1.5">
+                                  <div className="text-xs font-semibold text-[var(--tx)] truncate flex items-center gap-1.5">
                                     <span>{v.color || 'Estándar'}</span>
                                     {v.talla && v.talla !== 'Única' && (
                                       <span className="px-1.5 py-0.2 rounded bg-cd border border-[var(--bd)] text-[10px] font-mono">
@@ -2265,7 +2251,7 @@ export function CatalogoPage() {
                                       </span>
                                     )}
                                   </div>
-                                  <div className="mono text-[10px] tx-mu truncate">
+                                  <div className="font-mono tabular-nums text-[10px] tx-mu truncate">
                                     {v.sku} · ${Number(v.precio || selectedItem.precio_venta || 0).toFixed(2)}
                                   </div>
                                 </div>
@@ -2276,7 +2262,7 @@ export function CatalogoPage() {
                                   type="button"
                                   disabled={isSavingVariant || v.stock <= 0}
                                   onClick={() => handleVariantStockUpdate(v, Math.max(v.stock - 1, 0))}
-                                  className="w-6 h-6 rounded-lg border border-[var(--bd)] bg-cd hover:bg-black/10 disabled:opacity-40 text-xs font-bold flex items-center justify-center"
+                                  className="w-6 h-6 rounded-md border border-[var(--bd)] bg-cd hover:bg-black/10 disabled:opacity-40 text-xs font-bold flex items-center justify-center"
                                   title="Restar 1 unidad"
                                 >
                                   −
@@ -2296,13 +2282,13 @@ export function CatalogoPage() {
                                       handleVariantStockUpdate(v, parseInt(inputVal || '0', 10) || 0);
                                     }
                                   }}
-                                  className="w-12 p-1 text-center rounded-lg border border-[var(--bd)] bg-cd text-xs font-mono font-bold outline-none focus:border-[var(--ac)]"
+                                  className="w-12 p-1 text-center rounded-md border border-[var(--bd)] bg-cd text-xs font-mono tabular-nums font-semibold outline-none focus:border-[var(--tx)]"
                                 />
                                 <button
                                   type="button"
                                   disabled={isSavingVariant}
                                   onClick={() => handleVariantStockUpdate(v, v.stock + 1)}
-                                  className="w-6 h-6 rounded-lg border border-[var(--bd)] bg-cd hover:bg-black/10 disabled:opacity-40 text-xs font-bold flex items-center justify-center"
+                                  className="w-6 h-6 rounded-md border border-[var(--bd)] bg-cd hover:bg-black/10 disabled:opacity-40 text-xs font-bold flex items-center justify-center"
                                   title="Sumar 1 unidad"
                                 >
                                   +
@@ -2312,7 +2298,7 @@ export function CatalogoPage() {
                                     type="button"
                                     disabled={isSavingVariant}
                                     onClick={() => handleVariantStockUpdate(v, parseInt(inputVal || '0', 10) || 0)}
-                                    className="px-2 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-bold"
+                                    className="px-2 py-1 rounded-md bg-emerald-600 text-white text-[10px] font-semibold"
                                   >
                                     OK
                                   </button>
@@ -2321,7 +2307,7 @@ export function CatalogoPage() {
                                   type="button"
                                   disabled={isSavingVariant}
                                   onClick={() => handleDeleteVariant(v)}
-                                  className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
+                                  className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-md transition-colors"
                                   title="Eliminar variante"
                                 >
                                   <Trash2 size={13} />
@@ -2345,7 +2331,7 @@ export function CatalogoPage() {
                   setDeleteErrorBanner(null);
                   setShowDeleteModal(true);
                 }}
-                className="px-3 py-2 border border-rose-500/20 text-rose-600 hover:bg-rose-500/10 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
+                className="px-3 py-2 border border-rose-500/25 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
               >
                 <Trash2 size={14} /> Eliminar
               </button>
@@ -2354,7 +2340,7 @@ export function CatalogoPage() {
                 type="button"
                 onClick={handleSaveProductDetails}
                 disabled={isSavingDetails}
-                className="px-5 py-2 bg-[var(--ac)] hover:opacity-90 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm"
+                className="px-5 py-2 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 font-semibold rounded-lg text-xs flex items-center gap-1.5"
               >
                 <Save size={14} /> {isSavingDetails ? 'Guardando...' : 'Guardar Cambios'}
               </button>
@@ -2413,10 +2399,10 @@ export function CatalogoPage() {
                   type="button"
                   disabled={isSavingDetails}
                   onClick={() => handleDeleteProduct(false)}
-                  className="w-full text-left p-3.5 rounded-xl border border-[var(--bd)] bg-sf hover:border-amber-500/50 hover:bg-amber-500/5 transition-all"
+                  className="w-full text-left p-3.5 rounded-xl border border-[var(--bd)] bg-sf hover:border-amber-500/50 transition-colors"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-amber-600">⏸️ Desactivar / Pausar</span>
+                    <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">Desactivar / Pausar</span>
                     <ChevronRight size={14} className="tx-mu" />
                   </div>
                   <p className="text-[11px] tx-mu mt-1">
@@ -2428,10 +2414,10 @@ export function CatalogoPage() {
                   type="button"
                   disabled={isSavingDetails}
                   onClick={() => handleDeleteProduct(true)}
-                  className="w-full text-left p-3.5 rounded-xl border border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10 transition-all"
+                  className="w-full text-left p-3.5 rounded-xl border border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10 transition-colors"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-rose-600">🗑️ Eliminar Definitivamente de Supabase</span>
+                    <span className="text-xs font-semibold text-rose-600 dark:text-rose-400">Eliminar Definitivamente de Supabase</span>
                     <ChevronRight size={14} className="text-rose-500" />
                   </div>
                   <p className="text-[11px] text-rose-600/80 dark:text-rose-400/80 mt-1">
@@ -2444,7 +2430,7 @@ export function CatalogoPage() {
                 <button
                   type="button"
                   onClick={() => setShowDeleteModal(false)}
-                  className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold hover:bg-sf"
+                  className="px-4 py-2 border border-[var(--bd)] rounded-lg text-xs font-medium hover:bg-sf"
                 >
                   Cancelar
                 </button>
@@ -2462,11 +2448,11 @@ export function CatalogoPage() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-md rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
+            className="w-full max-w-md rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
           >
-            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
               <h3 className="font-bold text-sm">Crear Producto en Catálogo</h3>
-              <button onClick={() => setShowProductoModal(false)} className="p-1 rounded-lg">
+              <button onClick={() => setShowProductoModal(false)} className="p-1 rounded-lg tx-mu hover:text-[var(--tx)]">
                 <X size={16} />
               </button>
             </div>
@@ -2474,7 +2460,7 @@ export function CatalogoPage() {
             <form onSubmit={handleSaveProducto} className="p-5 space-y-3 overflow-y-auto">
               <div className="grid grid-cols-3 gap-2">
                 <div className="col-span-2">
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                  <label className="block text-[11px] uppercase font-medium tx-mu mb-1">
                     Nombre del Producto *
                   </label>
                   <input
@@ -2482,37 +2468,37 @@ export function CatalogoPage() {
                     value={prodNombre}
                     onChange={e => setProdNombre(e.target.value)}
                     placeholder="Ej. Porta Bebés Ergonómico"
-                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--ac)]"
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--tx)]"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Categoría</label>
+                  <label className="block text-[11px] uppercase font-medium tx-mu mb-1">Categoría</label>
                   <input
                     type="text"
                     value={prodCategoria}
                     onChange={e => setProdCategoria(e.target.value)}
                     placeholder="General"
-                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--ac)]"
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--tx)]"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">SKU Único *</label>
+                  <label className="block text-[11px] uppercase font-medium tx-mu mb-1">SKU Único *</label>
                   <input
                     type="text"
                     value={prodSku}
                     onChange={e => setProdSku(e.target.value.toUpperCase().replace(/\s+/g, '-'))}
                     placeholder="PORTA-BEBE-01"
-                    className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs uppercase font-mono font-bold outline-none focus:border-[var(--ac)]"
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs uppercase font-mono font-semibold outline-none focus:border-[var(--tx)]"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                  <label className="block text-[11px] uppercase font-medium tx-mu mb-1">
                     Stock Inicial en Bodega
                   </label>
                   <input
@@ -2520,14 +2506,14 @@ export function CatalogoPage() {
                     min="0"
                     value={prodStockInicial}
                     onChange={e => setProdStockInicial(e.target.value)}
-                    className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs font-bold outline-none"
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono font-semibold outline-none"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Precio Venta ($)</label>
+                  <label className="block text-[11px] uppercase font-medium tx-mu mb-1">Precio Venta ($)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -2535,12 +2521,12 @@ export function CatalogoPage() {
                     value={prodPrecio}
                     onChange={e => setProdPrecio(e.target.value)}
                     placeholder="35.00"
-                    className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs font-bold outline-none"
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono font-semibold outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Costo ($)</label>
+                  <label className="block text-[11px] uppercase font-medium tx-mu mb-1">Costo ($)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -2548,24 +2534,24 @@ export function CatalogoPage() {
                     value={prodCosto}
                     onChange={e => setProdCosto(e.target.value)}
                     placeholder="8.50"
-                    className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs font-bold outline-none"
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono font-semibold outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Alerta Mín.</label>
+                  <label className="block text-[11px] uppercase font-medium tx-mu mb-1">Alerta Mín.</label>
                   <input
                     type="number"
                     min="0"
                     value={prodStockMinimo}
                     onChange={e => setProdStockMinimo(e.target.value)}
-                    className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs font-bold outline-none"
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono font-semibold outline-none"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
+                <label className="block text-[11px] uppercase font-medium tx-mu mb-1">
                   Imagen del Producto (Opcional)
                 </label>
                 <div className="flex gap-2">
@@ -2574,12 +2560,12 @@ export function CatalogoPage() {
                     value={prodImagen}
                     onChange={e => setProdImagen(e.target.value)}
                     placeholder="https://... o sube archivo →"
-                    className="flex-1 p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                    className="flex-1 p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
                   />
                   <button
                     type="button"
                     onClick={() => newProdFileInputRef.current?.click()}
-                    className="px-3 py-2 border border-[var(--bd)] bg-sf hover:bg-cd rounded-xl text-xs font-bold flex items-center gap-1"
+                    className="px-3 py-2 border border-[var(--bd)] bg-sf hover:bg-cd rounded-lg text-xs font-medium flex items-center gap-1"
                   >
                     <Upload size={13} /> Subir
                   </button>
@@ -2587,7 +2573,7 @@ export function CatalogoPage() {
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1 flex items-center gap-1">
+                <label className="block text-[11px] uppercase font-medium tx-mu mb-1 flex items-center gap-1">
                   <Video size={11} className="text-rose-500" /> Video How-To YouTube (Opcional)
                 </label>
                 <input
@@ -2595,12 +2581,12 @@ export function CatalogoPage() {
                   value={prodVideoUrl}
                   onChange={e => setProdVideoUrl(e.target.value)}
                   placeholder="https://youtube.com/shorts/... o https://youtu.be/..."
-                  className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-rose-500"
+                  className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--tx)]"
                 />
               </div>
 
-              <div className="p-3 bg-indigo-500/5 rounded-xl border border-indigo-500/20 space-y-2">
-                <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+              <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] space-y-2">
+                <span className="text-[11px] font-semibold text-[var(--tx)] flex items-center gap-1">
                   <Layers size={13} /> Variantes iniciales por Color / Talla (Opcional)
                 </span>
                 <div className="grid grid-cols-2 gap-2">
@@ -2609,14 +2595,14 @@ export function CatalogoPage() {
                     value={prodColoresInit}
                     onChange={e => setProdColoresInit(e.target.value)}
                     placeholder="Colores: Negro, Gris, Azul"
-                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs outline-none"
                   />
                   <input
                     type="text"
                     value={prodTallasInit}
                     onChange={e => setProdTallasInit(e.target.value)}
                     placeholder="Tallas: Única o S, M, L"
-                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs outline-none"
                   />
                 </div>
                 {prodColoresInit.trim() && (
@@ -2626,8 +2612,8 @@ export function CatalogoPage() {
                 )}
               </div>
 
-              <div className="p-3 bg-purple-500/5 rounded-xl border border-purple-500/20 space-y-2">
-                <span className="text-[11px] font-bold text-purple-600 dark:text-purple-400 flex items-center gap-1">
+              <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] space-y-2">
+                <span className="text-[11px] font-semibold text-[var(--tx)] flex items-center gap-1">
                   <Bot size={13} /> Preparar para Bot Todd (Opcional)
                 </span>
                 <input
@@ -2635,14 +2621,14 @@ export function CatalogoPage() {
                   value={prodToddPitch}
                   onChange={e => setProdToddPitch(e.target.value)}
                   placeholder="Pitch de venta: ¿Por qué comprarlo?"
-                  className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                  className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs outline-none"
                 />
                 <input
                   type="text"
                   value={prodToddKeywords}
                   onChange={e => setProdToddKeywords(e.target.value)}
                   placeholder="Palabras clave: porta bebe, ergonomico, bebe"
-                  className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                  className="w-full p-2 rounded-lg border border-[var(--bd)] bg-cd text-xs outline-none"
                 />
               </div>
 
@@ -2650,14 +2636,14 @@ export function CatalogoPage() {
                 <button
                   type="button"
                   onClick={() => setShowProductoModal(false)}
-                  className="px-3.5 py-1.5 border border-[var(--bd)] rounded-xl text-xs font-semibold"
+                  className="px-3.5 py-1.5 border border-[var(--bd)] rounded-lg text-xs font-medium"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingProd}
-                  className="px-4 py-1.5 bg-[var(--ac)] text-white font-bold rounded-xl text-xs"
+                  className="px-4 py-1.5 bg-[var(--tx)] text-[var(--cd)] font-semibold rounded-lg text-xs hover:opacity-90"
                 >
                   {isSavingProd ? 'Guardando...' : 'Crear Producto'}
                 </button>

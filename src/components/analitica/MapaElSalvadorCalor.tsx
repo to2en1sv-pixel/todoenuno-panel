@@ -270,20 +270,20 @@ export function MapaElSalvadorCalor({
   }, [deptoActivoInfo, statsPorMunicipio]);
 
   return (
-    <div className="bg-cd rounded-2xl border border-[var(--bd)] p-4 sm:p-5 space-y-6 shadow-sm">
+    <div className="bg-cd rounded-xl border border-[var(--bd)] p-4 sm:p-5 space-y-5">
       {/* Header del Mapa con Selector de Métrica */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500 shrink-0">
-              <MapPin size={20} />
+          <div className="flex items-center gap-2.5">
+            <span className="p-2 rounded-lg bg-sf border border-[var(--bd)] tx-mu shrink-0">
+              <MapPin size={18} />
             </span>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-base font-bold text-[var(--tx)]">
+                <h3 className="text-base font-bold text-[var(--tx)] tracking-tight">
                   Mapa de Calor Demográfico: El Salvador
                 </h3>
-                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                <span className="text-[10px] font-mono uppercase font-medium px-2 py-0.5 rounded bg-sf tx-mu border border-[var(--bd)] shrink-0">
                   14 Deptos + Municipios
                 </span>
               </div>
@@ -295,19 +295,19 @@ export function MapaElSalvadorCalor({
         </div>
 
         {/* Selector de Métrica del Mapa */}
-        <div className="flex flex-wrap items-center bg-sf p-1 rounded-xl border border-[var(--bd)] text-xs font-semibold gap-1 w-full xl:w-auto">
+        <div className="flex flex-wrap items-center bg-sf p-0.5 rounded-lg border border-[var(--bd)] text-xs font-medium gap-1 w-full xl:w-auto">
           {[
-            { id: 'pedidos', label: '📦 Pedidos' },
-            { id: 'ventas', label: '💵 Ventas ($)' },
-            { id: 'tasaEntrega', label: '🎯 Tasa Entrega' },
-            { id: 'ticketPromedio', label: '🏷️ Ticket Prom.' },
+            { id: 'pedidos', label: 'Pedidos' },
+            { id: 'ventas', label: 'Ventas ($)' },
+            { id: 'tasaEntrega', label: 'Tasa Entrega' },
+            { id: 'ticketPromedio', label: 'Ticket Prom.' },
           ].map(m => (
             <button
               key={m.id}
               onClick={() => setMetrica(m.id as MetricaCalor)}
-              className={`flex-1 xl:flex-none px-3 py-1.5 rounded-lg transition-all whitespace-nowrap text-center ${
+              className={`flex-1 xl:flex-none px-3 py-1.5 rounded-md transition-colors whitespace-nowrap text-center ${
                 metrica === m.id
-                  ? 'bg-indigo-600 text-white font-bold shadow-sm'
+                  ? 'bg-[var(--tx)] text-[var(--cd)] font-semibold'
                   : 'tx-mu hover:text-[var(--tx)]'
               }`}
             >
@@ -318,7 +318,7 @@ export function MapaElSalvadorCalor({
       </div>
 
       {/* Franja de Regiones (Occidente, Centro, Paracentro, Oriente) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="bg-sf rounded-xl border border-[var(--bd)] grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-[var(--bd)]">
         {(['Occidental', 'Central', 'Paracentral', 'Oriental'] as RegionElSalvador[]).map(r => {
           const cfg = REGIONES_CONFIG[r];
           const st = statsPorRegion[r];
@@ -327,19 +327,19 @@ export function MapaElSalvadorCalor({
             : '0';
 
           return (
-            <div key={r} className={`p-3 rounded-xl border border-[var(--bd)] bg-sf flex items-center justify-between`}>
+            <div key={r} className="p-3.5 flex items-center justify-between gap-2">
               <div>
-                <span className={`text-[10px] font-bold uppercase ${cfg.color} block`}>
+                <span className={`text-[10px] font-semibold uppercase ${cfg.color} block`}>
                   {cfg.nombre}
                 </span>
-                <span className="text-base font-black font-mono text-[var(--tx)] block mt-0.5">
+                <span className="text-base font-bold font-mono tabular-nums text-[var(--tx)] block mt-0.5">
                   {formatCurrency(st.ventas)}
                 </span>
-                <span className="text-[10px] tx-mu block">
-                  {st.pedidos} pedidos ({pctPedidos}%)
+                <span className="text-[11px] tx-mu font-mono tabular-nums block">
+                  {st.pedidos} ped. ({pctPedidos}%)
                 </span>
               </div>
-              <div className="w-10 h-10 rounded-xl bg-cd border border-[var(--bd)] flex items-center justify-center font-mono font-bold text-xs shrink-0">
+              <div className="w-10 h-10 rounded-lg bg-cd border border-[var(--bd)] flex items-center justify-center font-mono tabular-nums font-bold text-xs shrink-0">
                 {pctPedidos}%
               </div>
             </div>
@@ -350,7 +350,7 @@ export function MapaElSalvadorCalor({
       {/* ÁREA PRINCIPAL: MAPA VECTORIAL + PANEL LATERAL */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* MAPA SVG VECTORIAL DE EL SALVADOR */}
-        <div className="lg:col-span-8 bg-sf rounded-2xl border border-[var(--bd)] p-4 relative overflow-hidden flex flex-col justify-between min-h-[420px]">
+        <div className="lg:col-span-8 bg-sf rounded-xl border border-[var(--bd)] p-4 relative overflow-hidden flex flex-col justify-between min-h-[420px]">
           {/* Badge de Filtro Activo */}
           {deptoSeleccionado && (
             <div className="absolute top-3 left-3 z-10 flex items-center gap-2 bg-indigo-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-lg animate-in fade-in">
@@ -514,23 +514,23 @@ export function MapaElSalvadorCalor({
         <div className="lg:col-span-4 space-y-4">
           {/* Card Detalle del Departamento Activo */}
           {deptoActivoInfo ? (
-            <div className="p-4 rounded-2xl bg-sf border border-indigo-500/40 space-y-3.5 shadow-md animate-in fade-in">
+            <div className="p-4 rounded-xl bg-sf border border-[var(--bd)] space-y-3.5 animate-in fade-in">
               <div className="flex items-start justify-between">
                 <div>
-                  <span className="text-[10px] font-bold uppercase text-indigo-500 block">
+                  <span className="text-[10px] font-semibold uppercase text-indigo-600 dark:text-indigo-400 block">
                     {deptoActivoInfo.region} · Cabecera: {deptoActivoInfo.cabecera}
                   </span>
-                  <h4 className="text-lg font-black text-[var(--tx)]">
+                  <h4 className="text-lg font-bold text-[var(--tx)]">
                     {deptoActivoInfo.nombre}
                   </h4>
                 </div>
 
                 <button
                   onClick={() => onSeleccionarDepto(deptoSeleccionado === deptoActivoInfo.nombre ? null : deptoActivoInfo.nombre)}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all shadow-sm ${
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
                     deptoSeleccionado === deptoActivoInfo.nombre
-                      ? 'bg-rose-500 text-white'
-                      : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-[var(--tx)] text-[var(--cd)] hover:opacity-90'
                   }`}
                 >
                   {deptoSeleccionado === deptoActivoInfo.nombre ? 'Quitar Filtro' : 'Filtrar Depto'}
@@ -539,48 +539,48 @@ export function MapaElSalvadorCalor({
 
               {/* Cuadrícula de Métricas */}
               <div className="grid grid-cols-2 gap-2 text-center">
-                <div className="p-2 rounded-xl bg-cd border border-[var(--bd)]">
-                  <span className="text-[9px] uppercase font-bold tx-mu block">Pedidos</span>
-                  <span className="text-base font-black font-mono text-[var(--tx)] block mt-0.5">
+                <div className="p-2 rounded-lg bg-cd border border-[var(--bd)]">
+                  <span className="text-[9px] uppercase font-semibold tx-mu block">Pedidos</span>
+                  <span className="text-base font-bold font-mono tabular-nums text-[var(--tx)] block mt-0.5">
                     {deptoActivoInfo.pedidos}
                   </span>
-                  <span className="text-[9px] tx-mu block">
+                  <span className="text-[9px] tx-mu font-mono block">
                     {totalesNacionales.pedidos > 0 
                       ? `${((deptoActivoInfo.pedidos / totalesNacionales.pedidos) * 100).toFixed(1)}% país` 
                       : '0%'}
                   </span>
                 </div>
 
-                <div className="p-2 rounded-xl bg-cd border border-[var(--bd)]">
-                  <span className="text-[9px] uppercase font-bold tx-mu block">Ventas</span>
-                  <span className="text-base font-black font-mono text-emerald-600 block mt-0.5">
+                <div className="p-2 rounded-lg bg-cd border border-[var(--bd)]">
+                  <span className="text-[9px] uppercase font-semibold tx-mu block">Ventas</span>
+                  <span className="text-base font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 block mt-0.5">
                     {formatCurrency(deptoActivoInfo.ventas)}
                   </span>
-                  <span className="text-[9px] tx-mu block">
+                  <span className="text-[9px] tx-mu font-mono block">
                     Ticket: {formatCurrency(deptoActivoInfo.ticketPromedio)}
                   </span>
                 </div>
 
-                <div className="p-2 rounded-xl bg-cd border border-[var(--bd)]">
-                  <span className="text-[9px] uppercase font-bold tx-mu block">Efectividad COD</span>
-                  <span className={`text-sm font-black font-mono block mt-0.5 ${
-                    deptoActivoInfo.tasaEntrega >= 80 ? 'text-emerald-600' :
-                    deptoActivoInfo.tasaEntrega >= 60 ? 'text-amber-500' :
-                    'text-rose-500'
+                <div className="p-2 rounded-lg bg-cd border border-[var(--bd)]">
+                  <span className="text-[9px] uppercase font-semibold tx-mu block">Efectividad COD</span>
+                  <span className={`text-sm font-bold font-mono tabular-nums block mt-0.5 ${
+                    deptoActivoInfo.tasaEntrega >= 80 ? 'text-emerald-600 dark:text-emerald-400' :
+                    deptoActivoInfo.tasaEntrega >= 60 ? 'text-amber-600 dark:text-amber-400' :
+                    'text-rose-600 dark:text-rose-400'
                   }`}>
                     {deptoActivoInfo.tasaEntrega.toFixed(1)}%
                   </span>
-                  <span className="text-[9px] tx-mu block">
+                  <span className="text-[9px] tx-mu font-mono block">
                     {deptoActivoInfo.entregados} entregados
                   </span>
                 </div>
 
-                <div className="p-2 rounded-xl bg-cd border border-[var(--bd)]">
-                  <span className="text-[9px] uppercase font-bold tx-mu block">Cancelaciones</span>
-                  <span className="text-sm font-black font-mono text-rose-500 block mt-0.5">
+                <div className="p-2 rounded-lg bg-cd border border-[var(--bd)]">
+                  <span className="text-[9px] uppercase font-semibold tx-mu block">Cancelaciones</span>
+                  <span className="text-sm font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400 block mt-0.5">
                     {deptoActivoInfo.cancelados}
                   </span>
-                  <span className="text-[9px] tx-mu block">
+                  <span className="text-[9px] tx-mu font-mono block">
                     {deptoActivoInfo.enCamino} en ruta
                   </span>
                 </div>
@@ -589,11 +589,11 @@ export function MapaElSalvadorCalor({
               {/* DESGLOSE DE MUNICIPIOS DEL DEPARTAMENTO */}
               <div className="pt-2 border-t border-[var(--bd)]">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] font-bold uppercase tx-mu flex items-center gap-1">
-                    <Building2 size={12} className="text-indigo-500" />
+                  <span className="text-[10px] font-semibold uppercase tx-mu flex items-center gap-1">
+                    <Building2 size={12} className="tx-mu" />
                     Municipios / Zonas en {deptoActivoInfo.nombre}:
                   </span>
-                  <span className="text-[10px] font-mono text-indigo-500 font-bold">
+                  <span className="text-[10px] font-mono tabular-nums tx-mu font-semibold">
                     {municipiosDelDeptoActivo.length} detectados
                   </span>
                 </div>
@@ -606,17 +606,17 @@ export function MapaElSalvadorCalor({
                         : '0';
 
                       return (
-                        <div key={m.municipio} className="p-2 rounded-xl bg-cd border border-[var(--bd)] text-xs flex items-center justify-between">
+                        <div key={m.municipio} className="p-2 rounded-lg bg-cd border border-[var(--bd)] text-xs flex items-center justify-between">
                           <div className="min-w-0 pr-2">
-                            <span className="font-bold text-[var(--tx)] truncate block">
-                              📍 {m.municipio}
+                            <span className="font-semibold text-[var(--tx)] truncate block">
+                              {m.municipio}
                             </span>
-                            <span className="text-[9px] tx-mu block">
+                            <span className="text-[10px] tx-mu font-mono tabular-nums block">
                               Efectividad: {m.tasaEntrega.toFixed(0)}% · {formatCurrency(m.ventas)}
                             </span>
                           </div>
-                          <div className="text-right shrink-0 font-mono">
-                            <span className="font-black text-xs text-indigo-600 block">
+                          <div className="text-right shrink-0 font-mono tabular-nums">
+                            <span className="font-bold text-xs text-[var(--tx)] block">
                               {m.pedidos} ord
                             </span>
                             <span className="text-[9px] tx-mu block">
@@ -628,7 +628,7 @@ export function MapaElSalvadorCalor({
                     })}
                   </div>
                 ) : (
-                  <div className="p-2.5 rounded-xl bg-cd border border-[var(--bd)] text-center text-[11px] tx-mu">
+                  <div className="p-2.5 rounded-lg bg-cd border border-[var(--bd)] text-center text-[11px] tx-mu">
                     Sin pedidos registrados en este departamento para el rango actual.
                   </div>
                 )}
@@ -637,16 +637,16 @@ export function MapaElSalvadorCalor({
               {/* Top Productos en el Departamento */}
               {deptoActivoInfo.topProductos.length > 0 && (
                 <div className="pt-2 border-t border-[var(--bd)]">
-                  <span className="text-[10px] font-bold uppercase tx-mu block mb-1.5">
+                  <span className="text-[10px] font-semibold uppercase tx-mu block mb-1.5">
                     Top Productos más vendidos:
                   </span>
                   <div className="space-y-1">
                     {deptoActivoInfo.topProductos.map((p, idx) => (
                       <div key={p.nombre} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-cd border border-[var(--bd)]">
                         <span className="truncate flex-1 pr-2">
-                          <strong className="text-indigo-500">#{idx + 1}</strong> {p.nombre}
+                          <strong className="font-mono tx-mu">0{idx + 1}</strong> {p.nombre}
                         </span>
-                        <span className="font-mono font-bold text-[10px] tx-mu shrink-0">
+                        <span className="font-mono tabular-nums font-semibold text-[10px] tx-mu shrink-0">
                           {p.cantidad} uds
                         </span>
                       </div>
@@ -656,26 +656,26 @@ export function MapaElSalvadorCalor({
               )}
             </div>
           ) : (
-            <div className="p-5 rounded-2xl bg-sf border border-[var(--bd)] text-center text-xs tx-mu flex flex-col items-center justify-center py-10">
-              <Compass size={28} className="text-indigo-500 opacity-60 mb-2" />
-              <span className="font-bold text-[var(--tx)]">Explora la Geografía de El Salvador</span>
+            <div className="p-5 rounded-xl bg-sf border border-[var(--bd)] text-center text-xs tx-mu flex flex-col items-center justify-center py-10">
+              <Compass size={26} className="tx-mu opacity-60 mb-2" />
+              <span className="font-semibold text-[var(--tx)]">Explora la Geografía de El Salvador</span>
               <span className="text-[11px] mt-1">Pasa el cursor o haz clic en cualquier departamento para desglosar sus municipios y métricas de entrega.</span>
             </div>
           )}
 
           {/* Ranking Top 5: Departamentos vs Municipios */}
-          <div className="p-4 rounded-2xl bg-sf border border-[var(--bd)] space-y-3">
+          <div className="p-4 rounded-xl bg-sf border border-[var(--bd)] space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-[var(--tx)] flex items-center gap-1.5">
-                <TrendingUp size={14} className="text-indigo-500" /> Ranking Nacional
+              <span className="text-xs font-semibold text-[var(--tx)] flex items-center gap-1.5">
+                <TrendingUp size={13} className="tx-mu" /> Ranking Nacional
               </span>
 
               {/* Toggle Departamentos vs Municipios */}
-              <div className="flex bg-cd p-0.5 rounded-lg border border-[var(--bd)] text-[10px] font-bold">
+              <div className="flex bg-cd p-0.5 rounded-lg border border-[var(--bd)] text-[10px] font-semibold">
                 <button
                   onClick={() => setVistaRanking('deptos')}
                   className={`px-2 py-1 rounded-md transition-colors ${
-                    vistaRanking === 'deptos' ? 'bg-indigo-600 text-white' : 'tx-mu'
+                    vistaRanking === 'deptos' ? 'bg-[var(--tx)] text-[var(--cd)]' : 'tx-mu'
                   }`}
                 >
                   Deptos
@@ -683,7 +683,7 @@ export function MapaElSalvadorCalor({
                 <button
                   onClick={() => setVistaRanking('municipios')}
                   className={`px-2 py-1 rounded-md transition-colors ${
-                    vistaRanking === 'municipios' ? 'bg-indigo-600 text-white' : 'tx-mu'
+                    vistaRanking === 'municipios' ? 'bg-[var(--tx)] text-[var(--cd)]' : 'tx-mu'
                   }`}
                 >
                   Municipios

@@ -80,44 +80,48 @@ export function AnaliticaHorariaProductos({ pedidosData }: Props) {
   }, [pedidosData]);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {/* DISTRIBUCIÓN POR DÍAS DE LA SEMANA */}
-      <div className="bg-cd rounded-2xl border border-[var(--bd)] p-5 space-y-4 shadow-sm">
-        <div className="flex items-center gap-2">
-          <span className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500">
-            <Calendar size={18} />
-          </span>
+      <div className="bg-cd rounded-xl border border-[var(--bd)] p-5 space-y-4">
+        <div className="flex items-start justify-between gap-3 pb-3 border-b border-[var(--bd)]">
           <div>
-            <h4 className="text-sm font-bold text-[var(--tx)]">
-              Días de Mayor Conversión (Semana)
+            <h4 className="text-sm font-semibold text-[var(--tx)] flex items-center gap-2">
+              <Calendar size={15} className="tx-mu" />
+              Días de Mayor Conversión
             </h4>
-            <p className="text-[11px] tx-mu">
+            <p className="text-[11px] tx-mu mt-0.5">
               Volumen de pedidos por día para sincronizar campañas de anuncios y repartidores.
             </p>
           </div>
+          <span className="text-[10px] font-mono uppercase tracking-wider tx-mu">7 días</span>
         </div>
 
-        <div className="space-y-2 pt-1">
+        <div className="space-y-3">
           {diasData.map(d => {
             const pct = Math.min(Math.round((d.pedidos / maxDiaPedidos) * 100), 100);
             const esPico = d.pedidos === maxDiaPedidos && maxDiaPedidos > 0;
 
             return (
-              <div key={d.dia} className="space-y-1">
+              <div key={d.dia} className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs">
-                  <span className={`font-semibold flex items-center gap-1.5 ${esPico ? 'text-indigo-600 font-bold' : 'text-[var(--tx)]'}`}>
-                    {d.dia} {esPico && <span className="text-[9px] bg-indigo-500/10 text-indigo-500 px-1 rounded font-bold">Pico</span>}
+                  <span className={`font-medium flex items-center gap-1.5 ${esPico ? 'text-[var(--tx)] font-semibold' : 'text-[var(--tx)]'}`}>
+                    {d.dia}
+                    {esPico && (
+                      <span className="text-[10px] bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded font-medium">
+                        Pico
+                      </span>
+                    )}
                   </span>
-                  <div className="flex items-center gap-3 font-mono text-[11px]">
+                  <div className="flex items-center gap-3 font-mono tabular-nums text-[11px]">
                     <span className="tx-mu">{formatCurrency(d.ventas)}</span>
-                    <strong className="text-[var(--tx)]">{d.pedidos} pedidos</strong>
+                    <strong className="text-[var(--tx)]">{d.pedidos} ped.</strong>
                   </div>
                 </div>
 
-                <div className="w-full h-2 bg-sf rounded-full overflow-hidden">
-                  <div 
+                <div className="w-full h-1.5 bg-sf rounded-full overflow-hidden">
+                  <div
                     className={`h-full rounded-full transition-all ${
-                      esPico ? 'bg-indigo-600' : 'bg-indigo-400/60'
+                      esPico ? 'bg-[var(--tx)]' : 'bg-indigo-500/60'
                     }`}
                     style={{ width: `${pct}%` }}
                   />
@@ -129,33 +133,32 @@ export function AnaliticaHorariaProductos({ pedidosData }: Props) {
       </div>
 
       {/* TOP PRODUCTOS Y MÉTODOS DE PAGO */}
-      <div className="bg-cd rounded-2xl border border-[var(--bd)] p-5 space-y-5 shadow-sm flex flex-col justify-between">
+      <div className="bg-cd rounded-xl border border-[var(--bd)] p-5 space-y-5 flex flex-col justify-between">
         {/* Top 5 Productos */}
         <div>
-          <div className="flex items-center gap-2 mb-3">
-            <span className="p-2 rounded-xl bg-amber-500/10 text-amber-500">
-              <Package size={18} />
-            </span>
+          <div className="flex items-start justify-between gap-3 pb-3 border-b border-[var(--bd)] mb-3">
             <div>
-              <h4 className="text-sm font-bold text-[var(--tx)]">
+              <h4 className="text-sm font-semibold text-[var(--tx)] flex items-center gap-2">
+                <Package size={15} className="tx-mu" />
                 Top Productos Más Demandados
               </h4>
-              <p className="text-[11px] tx-mu">
+              <p className="text-[11px] tx-mu mt-0.5">
                 Unidades generadas en el período seleccionado.
               </p>
             </div>
+            <span className="text-[10px] font-mono uppercase tracking-wider tx-mu">Top 5</span>
           </div>
 
-          <div className="space-y-2">
+          <div className="divide-y divide-[var(--bd)] border border-[var(--bd)] rounded-lg bg-sf/40 overflow-hidden">
             {topProductos.map((p, idx) => (
-              <div key={p.nombre} className="flex items-center justify-between p-2 rounded-xl bg-sf border border-[var(--bd)] text-xs">
-                <span className="font-semibold truncate max-w-[200px] text-[var(--tx)]">
-                  <strong className="text-amber-500 mr-1.5">#{idx + 1}</strong>
-                  {p.nombre}
+              <div key={p.nombre} className="flex items-center justify-between px-3 py-2.5 text-xs">
+                <span className="font-medium truncate max-w-[210px] text-[var(--tx)] flex items-center gap-2">
+                  <span className="font-mono text-[11px] tx-mu w-5">#{idx + 1}</span>
+                  <span className="truncate">{p.nombre}</span>
                 </span>
-                <div className="flex items-center gap-3 font-mono text-xs shrink-0">
+                <div className="flex items-center gap-3 font-mono tabular-nums text-xs shrink-0">
                   <span className="tx-mu">{p.cantidad} uds</span>
-                  <strong className="text-emerald-600">{formatCurrency(p.monto)}</strong>
+                  <strong className="text-emerald-600 dark:text-emerald-400">{formatCurrency(p.monto)}</strong>
                 </div>
               </div>
             ))}
@@ -164,18 +167,20 @@ export function AnaliticaHorariaProductos({ pedidosData }: Props) {
 
         {/* Métodos de Pago */}
         <div className="pt-3 border-t border-[var(--bd)]">
-          <div className="flex items-center gap-2 mb-2">
-            <CreditCard size={14} className="text-indigo-500" />
-            <h5 className="text-xs font-bold text-[var(--tx)]">Preferencia de Métodos de Pago</h5>
+          <div className="flex items-center gap-2 mb-2.5">
+            <CreditCard size={14} className="tx-mu" />
+            <h5 className="text-xs font-semibold text-[var(--tx)]">Preferencia de Métodos de Pago</h5>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2.5">
             {metodosPago.map(m => (
-              <div key={m.nombre} className="p-2.5 rounded-xl bg-sf border border-[var(--bd)] text-xs">
-                <span className="text-[10px] tx-mu uppercase font-bold block truncate">{m.nombre}</span>
-                <div className="flex items-baseline justify-between mt-1">
-                  <span className="font-mono font-bold text-[var(--tx)]">{m.cantidad} pedidos</span>
-                  <span className="font-mono font-bold text-[10px] text-emerald-600">{formatCurrency(m.monto)}</span>
+              <div key={m.nombre} className="p-2.5 rounded-lg bg-sf border border-[var(--bd)] text-xs">
+                <span className="text-[10px] tx-mu uppercase tracking-wider font-semibold block truncate">{m.nombre}</span>
+                <div className="flex items-baseline justify-between mt-1 gap-2">
+                  <span className="font-mono tabular-nums font-semibold text-[var(--tx)]">{m.cantidad} ped.</span>
+                  <span className="font-mono tabular-nums font-semibold text-[11px] text-emerald-600 dark:text-emerald-400">
+                    {formatCurrency(m.monto)}
+                  </span>
                 </div>
               </div>
             ))}

@@ -497,11 +497,11 @@ export function HoyPage() {
   }, [orderTab, orderMetrics]);
 
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-5 pb-12">
-      {/* HERO OPERATIVO DEL DÍA */}
-      <section className="bg-cd bd rounded-2xl p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-16">
+      {/* Encabezado operativo del día */}
+      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-2">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 text-xs tx-mu tabular-nums">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--mu)] tabular-nums">
             <span className="capitalize">
               {now.toLocaleDateString('es-SV', { weekday: 'long', day: 'numeric', month: 'long' })}
             </span>
@@ -513,76 +513,69 @@ export function HoyPage() {
             <span>
               Todd {chatMetrics.toddCount} · Humano {chatMetrics.humanCount}
             </span>
+            <span aria-hidden="true">·</span>
+            <span>
+              {todayPosts.length} publicados hoy · {pendingPosts.length} en cola
+            </span>
           </div>
 
           <h1
-            className="text-xl sm:text-2xl lg:text-[26px] font-bold mt-2 tracking-tight leading-snug"
+            className="text-2xl font-bold tracking-tight text-[var(--tx)] mt-1"
             style={{ textWrap: 'balance' }}
           >
             {heroHeadline}
           </h1>
-
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs tx-mu tabular-nums">
-            <span>
-              Último post social: {lastPost ? fmtAgo(lastPost.posted_at) : 'Sin registros'}
-            </span>
-            <span aria-hidden="true">·</span>
-            <span>{todayPosts.length} publicados hoy</span>
-            <span aria-hidden="true">·</span>
-            <span>{pendingPosts.length} en cola</span>
-          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => loadDashboardData(true)}
             disabled={refreshing}
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-sf bd text-xs font-medium hover:opacity-85 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
             Actualizar
           </button>
 
           <Link
             to="/unichat"
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-sf bd text-xs font-medium hover:opacity-85 transition-opacity whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-xs font-semibold text-[var(--tx)] transition-colors whitespace-nowrap shrink-0"
           >
-            <MessageSquare size={14} />
+            <MessageSquare size={13} />
             UniChat ({chatMetrics.sinResponder.length})
           </Link>
 
           <button
             type="button"
             onClick={() => setShowOrderModal(true)}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-opacity hover:opacity-90 whitespace-nowrap shrink-0 cursor-pointer"
-            style={{ background: 'var(--tx)', color: 'var(--cd)' }}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 text-xs font-semibold transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Plus size={14} />
-            Nuevo Pedido
+            Nuevo pedido
           </button>
         </div>
-      </section>
+      </header>
 
-      {/* STRIP DE KPIs OPERATIVOS (4 COLUMNAS) */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+      {/* Franja unificada de 4 KPIs operativos */}
+      <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
         <Link
           to="/pedidos"
-          className="bg-cd bd rounded-2xl p-4 hover:border-[var(--ac)] transition-colors flex flex-col justify-between gap-2"
+          className="p-5 hover:bg-sf/50 transition-colors flex flex-col justify-between gap-1.5"
         >
-          <div className="flex items-center justify-between text-xs tx-mu">
+          <div className="flex items-center justify-between text-xs font-medium text-[var(--mu)]">
             <span>Ventas hoy</span>
-            <TrendingUp size={15} style={{ color: 'var(--ok)' }} />
+            <TrendingUp size={14} className="text-emerald-600 dark:text-emerald-400" />
           </div>
           {loadingCore ? (
             <Skeleton h={34} />
           ) : (
             <div>
-              <div className="text-xl sm:text-2xl font-bold mono tabular-nums">
+              <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)]">
                 {formatMoney(orderMetrics.ventasHoy)}
               </div>
-              <div className="text-xs tx-mu mt-0.5 tabular-nums">
-                {orderMetrics.pedidosHoyCount} pedido{orderMetrics.pedidosHoyCount === 1 ? '' : 's'} registrados hoy
+              <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
+                {orderMetrics.pedidosHoyCount} pedido{orderMetrics.pedidosHoyCount === 1 ? '' : 's'} hoy
               </div>
             </div>
           )}
@@ -590,139 +583,116 @@ export function HoyPage() {
 
         <Link
           to="/pedidos"
-          className="bg-cd bd rounded-2xl p-4 hover:border-[var(--ac)] transition-colors flex flex-col justify-between gap-2"
+          className="p-5 hover:bg-sf/50 transition-colors flex flex-col justify-between gap-1.5"
         >
-          <div className="flex items-center justify-between text-xs tx-mu">
+          <div className="flex items-center justify-between text-xs font-medium text-[var(--mu)]">
             <span>Por despachar</span>
-            <Truck size={15} style={{ color: 'var(--ac)' }} />
+            <Truck size={14} className="text-amber-600 dark:text-amber-400" />
           </div>
           {loadingCore ? (
             <Skeleton h={34} />
           ) : (
             <div>
-              <div className="text-xl sm:text-2xl font-bold mono tabular-nums">
+              <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)]">
                 {orderMetrics.porDespachar.length}
               </div>
-              <div className="text-xs tx-mu mt-0.5 tabular-nums">
-                {orderMetrics.enCaminoCount} en camino · {orderMetrics.encargosUrgentes.length} encargos próx.
+              <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
+                {orderMetrics.enCaminoCount} en camino · {orderMetrics.encargosUrgentes.length} encargos
               </div>
             </div>
           )}
         </Link>
 
         <Link
-          to="/pedidos"
-          className="bg-cd bd rounded-2xl p-4 hover:border-[var(--ac)] transition-colors flex flex-col justify-between gap-2"
+          to="/finanzas"
+          className="p-5 hover:bg-sf/50 transition-colors flex flex-col justify-between gap-1.5"
         >
-          <div className="flex items-center justify-between text-xs tx-mu">
+          <div className="flex items-center justify-between text-xs font-medium text-[var(--mu)]">
             <span>Cobros en calle</span>
-            <DollarSign size={15} className="tx-mu" />
+            <DollarSign size={14} className="text-[var(--mu)]" />
           </div>
           {loadingCore ? (
             <Skeleton h={34} />
           ) : (
             <div>
-              <div className="text-xl sm:text-2xl font-bold mono tabular-nums">
+              <div className="text-2xl font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400">
                 {formatMoney(orderMetrics.cobrosEnCalle)}
               </div>
-              <div className="text-xs tx-mu mt-0.5">Pendiente por liquidar</div>
+              <div className="text-xs text-[var(--mu)] mt-1">Pendiente por liquidar</div>
             </div>
           )}
         </Link>
 
         <Link
           to="/unichat"
-          className="bg-cd bd rounded-2xl p-4 hover:border-[var(--ac)] transition-colors flex flex-col justify-between gap-2"
+          className="p-5 hover:bg-sf/50 transition-colors flex flex-col justify-between gap-1.5"
         >
-          <div className="flex items-center justify-between text-xs tx-mu">
-            <span>UniChat & Todd</span>
-            <Bot size={15} style={{ color: 'var(--ac)' }} />
+          <div className="flex items-center justify-between text-xs font-medium text-[var(--mu)]">
+            <span>UniChat &amp; Todd</span>
+            <Bot size={14} className="text-[var(--mu)]" />
           </div>
           {loadingCore ? (
             <Skeleton h={34} />
           ) : (
             <div>
-              <div className="text-xl sm:text-2xl font-bold mono tabular-nums">
+              <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)]">
                 {chatMetrics.sinResponder.length}{' '}
-                <span className="text-xs font-normal tx-mu">sin resp.</span>
+                <span className="text-xs font-normal font-sans text-[var(--mu)]">sin resp.</span>
               </div>
-              <div className="text-xs tx-mu mt-0.5 tabular-nums">
-                {chatMetrics.toddCount} en Todd · {chatMetrics.humanCount} humano
+              <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
+                {chatMetrics.toddCount} Todd · {chatMetrics.humanCount} humano
               </div>
             </div>
           )}
         </Link>
       </section>
 
-      {/* CUERPO PRINCIPAL: 2 COLUMNAS */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        {/* COLUMNA IZQUIERDA (OPERACIÓN COD, UNICHAT Y COLA) */}
-        <div className="lg:col-span-2 flex flex-col gap-4">
-          {/* 1. DESPACHO & PEDIDOS DE HOY */}
-          <section className="bg-cd bd rounded-2xl p-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-              <div className="flex items-center gap-2">
-                <ShoppingBag size={16} style={{ color: 'var(--ac)' }} />
-                <h2 className="text-sm font-semibold">Operación COD & Despachos</h2>
-              </div>
+      {/* Cuerpo principal: 2 columnas */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Columna izquierda */}
+        <div className="lg:col-span-8 flex flex-col gap-6">
+          {/* 1. Despacho y pedidos */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
+            <div className="px-5 pt-4 border-b border-[var(--bd)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-[var(--tx)] pb-2 sm:pb-3">
+                Operación COD &amp; Despachos
+              </h2>
 
-              <div className="flex items-center gap-1 p-1 bg-sf bd rounded-xl overflow-x-auto">
-                <button
-                  type="button"
-                  onClick={() => setOrderTab('despachar')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    orderTab === 'despachar'
-                      ? 'bg-cd bd font-semibold'
-                      : 'tx-mu hover:text-[var(--tx)]'
-                  }`}
-                >
-                  Por despachar ({orderMetrics.porDespachar.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOrderTab('encargos')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    orderTab === 'encargos'
-                      ? 'bg-cd bd font-semibold'
-                      : 'tx-mu hover:text-[var(--tx)]'
-                  }`}
-                >
-                  Encargos ({orderMetrics.encargosUrgentes.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOrderTab('ruta')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    orderTab === 'ruta'
-                      ? 'bg-cd bd font-semibold'
-                      : 'tx-mu hover:text-[var(--tx)]'
-                  }`}
-                >
-                  En ruta ({orderMetrics.enRuta.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOrderTab('hoy')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    orderTab === 'hoy'
-                      ? 'bg-cd bd font-semibold'
-                      : 'tx-mu hover:text-[var(--tx)]'
-                  }`}
-                >
-                  Creados hoy ({orderMetrics.recientesHoy.length})
-                </button>
-              </div>
+              <nav className="flex items-center gap-5 overflow-x-auto">
+                {[
+                  { id: 'despachar', label: `Por despachar (${orderMetrics.porDespachar.length})` },
+                  { id: 'encargos', label: `Encargos (${orderMetrics.encargosUrgentes.length})` },
+                  { id: 'ruta', label: `En ruta (${orderMetrics.enRuta.length})` },
+                  { id: 'hoy', label: `Creados hoy (${orderMetrics.recientesHoy.length})` },
+                ].map(t => {
+                  const active = orderTab === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setOrderTab(t.id as any)}
+                      className={`pb-3 text-xs font-semibold whitespace-nowrap shrink-0 border-b-2 transition-colors cursor-pointer ${
+                        active
+                          ? 'border-[var(--tx)] text-[var(--tx)]'
+                          : 'border-transparent text-[var(--mu)] hover:text-[var(--tx)]'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </nav>
             </div>
 
             {loadingCore ? (
-              <div className="flex flex-col gap-2">
-                <Skeleton h={52} />
-                <Skeleton h={52} />
-                <Skeleton h={52} />
+              <div className="p-5 flex flex-col gap-2">
+                <Skeleton h={48} />
+                <Skeleton h={48} />
+                <Skeleton h={48} />
               </div>
             ) : activeTabList.length === 0 ? (
-              <div className="py-8 px-4 text-center bg-sf bd rounded-xl flex flex-col items-center gap-3">
-                <p className="text-sm tx-mu">
+              <div className="py-12 px-5 text-center flex flex-col items-center gap-3">
+                <p className="text-xs text-[var(--mu)]">
                   {orderTab === 'despachar' && 'No hay pedidos pendientes por empacar o despachar.'}
                   {orderTab === 'encargos' && 'No hay encargos programados para los próximos 2 días.'}
                   {orderTab === 'ruta' && 'No hay pedidos marcados en camino en este momento.'}
@@ -731,9 +701,9 @@ export function HoyPage() {
                 <button
                   type="button"
                   onClick={() => setShowOrderModal(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium bg-cd bd hover:border-[var(--ac)] cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-xs font-semibold text-[var(--tx)] transition-colors cursor-pointer"
                 >
-                  <Plus size={14} />
+                  <Plus size={13} />
                   Registrar pedido
                 </button>
               </div>
@@ -756,26 +726,27 @@ export function HoyPage() {
                   return (
                     <div
                       key={o.id}
-                      className="py-3 first:pt-1 last:pb-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                      className="px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-sf/50 transition-colors"
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 text-sm font-semibold truncate">
+                        <div className="flex items-center gap-2 text-sm font-medium text-[var(--tx)] truncate">
                           <span className="truncate">{o.nombre_cliente || 'Cliente sin nombre'}</span>
-                          <span className="text-xs font-normal tx-mu shrink-0">
+                          <span className="text-xs font-normal text-[var(--mu)] shrink-0">
                             · {getEstadoLabel(o.estado)}
                           </span>
                           {orderTab === 'encargos' && (
                             <span
-                              className="text-xs font-medium shrink-0"
-                              style={{
-                                color: diffEncargo !== null && diffEncargo <= 0 ? 'var(--er)' : 'var(--ac)',
-                              }}
+                              className={`text-xs font-medium shrink-0 ${
+                                diffEncargo !== null && diffEncargo <= 0
+                                  ? 'text-rose-600 dark:text-rose-400'
+                                  : 'text-amber-600 dark:text-amber-400'
+                              }`}
                             >
                               · {labelEncargo}
                             </span>
                           )}
                         </div>
-                        <div className="text-xs tx-mu truncate mt-0.5 tabular-nums">
+                        <div className="text-xs text-[var(--mu)] truncate mt-0.5 tabular-nums">
                           <span>{o.sku || o.catalogo_sku || 'Producto sin SKU'}</span>
                           {o.departamento ? <span> · {o.departamento}</span> : null}
                           {o.courier ? <span> · {o.courier}</span> : null}
@@ -785,16 +756,16 @@ export function HoyPage() {
 
                       <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0">
                         <div className="text-right">
-                          <div className="text-sm font-bold mono tabular-nums">
+                          <div className="text-sm font-bold font-mono tabular-nums text-[var(--tx)]">
                             {formatMoney(Number(o.total) || 0)}
                           </div>
-                          <div className="text-[11px] tx-mu">
+                          <div className="text-[11px] text-[var(--mu)]">
                             {o.metodo_pago || 'Contra entrega'}
                           </div>
                         </div>
                         <Link
                           to="/pedidos"
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sf bd text-xs font-medium hover:border-[var(--ac)] transition-colors whitespace-nowrap"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-xs font-medium text-[var(--tx)] transition-colors whitespace-nowrap"
                         >
                           Gestionar
                           <ArrowRight size={12} />
@@ -806,56 +777,67 @@ export function HoyPage() {
               </div>
             )}
 
-            <div className="mt-4 pt-3 border-t border-[var(--bd)] flex items-center justify-between text-xs">
-              <span className="tx-mu tabular-nums">
+            <div className="px-5 py-3 border-t border-[var(--bd)] bg-sf/30 flex items-center justify-between text-xs">
+              <span className="text-[var(--mu)] tabular-nums">
                 Mostrando {Math.min(activeTabList.length, 7)} de {activeTabList.length}
               </span>
-              <Link to="/pedidos" className="font-semibold hover:underline" style={{ color: 'var(--ac)' }}>
-                Ir al Centro de Pedidos →
+              <Link
+                to="/pedidos"
+                className="font-semibold text-[var(--tx)] hover:opacity-75 transition-opacity"
+              >
+                Ir a Pedidos →
               </Link>
             </div>
           </section>
 
-          {/* 2. PULSO UNICHAT & BOT TODD */}
-          <section className="bg-cd bd rounded-2xl p-5">
-            <div className="flex items-center justify-between gap-3 mb-4">
-              <div className="flex items-center gap-2">
-                <MessageSquare size={16} style={{ color: 'var(--ac)' }} />
-                <h2 className="text-sm font-semibold">Pulso WhatsApp & Bot Todd</h2>
+          {/* 2. Pulso UniChat & Bot Todd */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <h2 className="text-sm font-semibold text-[var(--tx)]">Pulso WhatsApp &amp; Bot Todd</h2>
+                {!loadingCore && (
+                  <span className="text-xs text-[var(--mu)] tabular-nums hidden sm:inline">
+                    · {chatMetrics.toddCount} Todd · {chatMetrics.humanCount} humano · {chatMetrics.sinResponder.length} sin responder
+                  </span>
+                )}
               </div>
               <Link
                 to="/unichat"
-                className="text-xs font-semibold hover:underline whitespace-nowrap"
-                style={{ color: 'var(--ac)' }}
+                className="text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] transition-colors whitespace-nowrap"
               >
                 Abrir UniChat →
               </Link>
             </div>
 
             {loadingCore ? (
-              <Skeleton h={90} />
+              <div className="p-5">
+                <Skeleton h={90} />
+              </div>
             ) : (
-              <div className="flex flex-col gap-3">
-                <div className="grid grid-cols-3 gap-3 p-3 bg-sf bd rounded-xl text-xs">
-                  <div>
-                    <div className="tx-mu">Activos Todd</div>
-                    <div className="text-base font-bold mono tabular-nums mt-0.5 flex items-center gap-1.5">
-                      <Bot size={14} style={{ color: 'var(--ac)' }} />
+              <div>
+                <div className="grid grid-cols-3 divide-x divide-[var(--bd)] border-b border-[var(--bd)] bg-sf/30 text-xs">
+                  <div className="px-5 py-3">
+                    <div className="text-[var(--mu)]">Activos Todd</div>
+                    <div className="text-base font-bold font-mono tabular-nums mt-0.5 flex items-center gap-1.5 text-[var(--tx)]">
+                      <Bot size={13} className="text-[var(--mu)]" />
                       {chatMetrics.toddCount}
                     </div>
                   </div>
-                  <div>
-                    <div className="tx-mu">Modo Humano</div>
-                    <div className="text-base font-bold mono tabular-nums mt-0.5 flex items-center gap-1.5">
-                      <User size={14} />
+                  <div className="px-5 py-3">
+                    <div className="text-[var(--mu)]">Modo Humano</div>
+                    <div className="text-base font-bold font-mono tabular-nums mt-0.5 flex items-center gap-1.5 text-[var(--tx)]">
+                      <User size={13} className="text-[var(--mu)]" />
                       {chatMetrics.humanCount}
                     </div>
                   </div>
-                  <div>
-                    <div className="tx-mu">Sin responder</div>
+                  <div className="px-5 py-3">
+                    <div className="text-[var(--mu)]">Sin responder</div>
                     <div
-                      className="text-base font-bold mono tabular-nums mt-0.5"
-                      style={{ color: chatMetrics.sinResponder.length > 0 ? 'var(--er)' : 'var(--ok)' }}
+                      className={`text-base font-bold font-mono tabular-nums mt-0.5 ${
+                        chatMetrics.sinResponder.length > 0
+                          ? 'text-rose-600 dark:text-rose-400'
+                          : 'text-emerald-600 dark:text-emerald-400'
+                      }`}
                     >
                       {chatMetrics.sinResponder.length}
                     </div>
@@ -863,7 +845,7 @@ export function HoyPage() {
                 </div>
 
                 {chatMetrics.sinResponder.length === 0 ? (
-                  <div className="text-xs tx-mu py-4 text-center bg-sf bd rounded-xl">
+                  <div className="text-xs text-[var(--mu)] py-8 text-center">
                     Todos los chats recientes han sido respondidos.
                   </div>
                 ) : (
@@ -872,21 +854,21 @@ export function HoyPage() {
                       <Link
                         key={c.id}
                         to="/unichat"
-                        className="py-2.5 first:pt-1 last:pb-1 flex items-center justify-between gap-3 hover:opacity-85 transition-opacity"
+                        className="px-5 py-3 flex items-center justify-between gap-3 hover:bg-sf/50 transition-colors"
                       >
                         <div className="min-w-0 flex-1">
-                          <div className="text-xs font-semibold truncate">
+                          <div className="text-xs font-semibold text-[var(--tx)] truncate">
                             {c.contact_name || formatShortPhone(c)}
-                            <span className="font-normal tx-mu">
+                            <span className="font-normal text-[var(--mu)]">
                               {' '}
                               · {c.status === 'human' ? 'Humano' : 'Bot Todd'}
                             </span>
                           </div>
-                          <div className="text-xs tx-mu truncate mt-0.5">
+                          <div className="text-xs text-[var(--mu)] truncate mt-0.5">
                             {c.last_message || 'Mensaje entrante sin vista previa'}
                           </div>
                         </div>
-                        <div className="text-[11px] tx-mu mono tabular-nums shrink-0">
+                        <div className="text-[11px] text-[var(--mu)] font-mono tabular-nums shrink-0">
                           {c.updated_at ? fmtAgo(c.updated_at) : ''}
                         </div>
                       </Link>
@@ -897,84 +879,93 @@ export function HoyPage() {
             )}
           </section>
 
-          {/* 3. COLA SOCIAL (PUBLICADO HOY + PRÓXIMOS) */}
-          <section className="bg-cd bd rounded-2xl p-5">
-            <div className="flex items-center justify-between gap-3 mb-4">
+          {/* 3. Cola de Contenido Social */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <Send size={15} className="tx-mu" />
-                <h2 className="text-sm font-semibold">Cola de Contenido Social</h2>
+                <h2 className="text-sm font-semibold text-[var(--tx)]">Cola de Contenido Social</h2>
+                {lastPost && (
+                  <span className="text-xs text-[var(--mu)] hidden sm:inline">
+                    · Último {fmtAgo(lastPost.posted_at)}
+                  </span>
+                )}
               </div>
-              <Link to="/cola" className="text-xs font-semibold hover:underline" style={{ color: 'var(--ac)' }}>
+              <Link
+                to="/cola"
+                className="text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] transition-colors"
+              >
                 Ver cola →
               </Link>
             </div>
 
             {queue.isLoading ? (
-              <Skeleton h={72} />
+              <div className="p-5">
+                <Skeleton h={72} />
+              </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <div className="text-xs font-medium tx-mu mb-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[var(--bd)]">
+                <div className="p-5">
+                  <div className="text-xs font-medium text-[var(--mu)] mb-3 tabular-nums">
                     Publicado hoy ({todayPosts.length})
                   </div>
                   {todayPosts.length === 0 ? (
-                    <div className="text-xs tx-mu py-4 px-3 text-center bg-sf bd rounded-xl">
+                    <div className="text-xs text-[var(--mu)] py-6 text-center">
                       Sin publicaciones automáticas hoy.
                     </div>
                   ) : (
-                    <div className="flex flex-col gap-2">
+                    <div className="divide-y divide-[var(--bd)]">
                       {todayPosts.slice(0, 3).map((p) => (
-                        <div key={p.id} className="flex items-center gap-3 p-2.5 bg-sf bd rounded-xl">
+                        <div key={p.id} className="py-2.5 first:pt-0 last:pb-0 flex items-center gap-3">
                           {p.image_url ? (
                             <img
                               src={p.image_url}
                               alt={p.nombre ?? 'Producto publicado'}
                               referrerPolicy="no-referrer"
-                              className="w-10 h-10 rounded-lg object-cover bg-cd bd shrink-0"
+                              className="w-9 h-9 rounded-lg object-cover bg-sf border border-[var(--bd)] shrink-0"
                             />
                           ) : (
-                            <div className="w-10 h-10 rounded-lg bg-cd bd grid place-items-center shrink-0">
-                              <Boxes size={14} className="tx-mu" />
+                            <div className="w-9 h-9 rounded-lg bg-sf border border-[var(--bd)] grid place-items-center shrink-0">
+                              <Boxes size={14} className="text-[var(--mu)]" />
                             </div>
                           )}
                           <div className="min-w-0 flex-1">
-                            <div className="text-xs font-semibold truncate">{p.nombre ?? p.sku ?? '—'}</div>
-                            <div className="text-[11px] tx-mu mono tabular-nums">{fmtAgo(p.posted_at)}</div>
+                            <div className="text-xs font-medium text-[var(--tx)] truncate">{p.nombre ?? p.sku ?? '—'}</div>
+                            <div className="text-[11px] text-[var(--mu)] font-mono tabular-nums">{fmtAgo(p.posted_at)}</div>
                           </div>
-                          <CheckCircle2 size={15} style={{ color: 'var(--ok)' }} className="shrink-0" />
+                          <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
 
-                <div>
-                  <div className="text-xs font-medium tx-mu mb-2">
+                <div className="p-5">
+                  <div className="text-xs font-medium text-[var(--mu)] mb-3 tabular-nums">
                     Próximos en cola ({pendingPosts.length})
                   </div>
                   {pendingPosts.length === 0 ? (
-                    <div className="text-xs tx-mu py-4 px-3 text-center bg-sf bd rounded-xl">
+                    <div className="text-xs text-[var(--mu)] py-6 text-center">
                       No hay productos en cola.
                     </div>
                   ) : (
-                    <div className="flex flex-col gap-2">
+                    <div className="divide-y divide-[var(--bd)]">
                       {pendingPosts.slice(0, 3).map((p) => (
-                        <div key={p.id} className="flex items-center gap-3 p-2.5 bg-sf bd rounded-xl">
+                        <div key={p.id} className="py-2.5 first:pt-0 last:pb-0 flex items-center gap-3">
                           {p.image_url ? (
                             <img
                               src={p.image_url}
                               alt={p.nombre ?? 'Producto en cola'}
                               referrerPolicy="no-referrer"
-                              className="w-10 h-10 rounded-lg object-cover bg-cd bd shrink-0"
+                              className="w-9 h-9 rounded-lg object-cover bg-sf border border-[var(--bd)] shrink-0"
                             />
                           ) : (
-                            <div className="w-10 h-10 rounded-lg bg-cd bd grid place-items-center shrink-0">
-                              <Clock size={14} className="tx-mu" />
+                            <div className="w-9 h-9 rounded-lg bg-sf border border-[var(--bd)] grid place-items-center shrink-0">
+                              <Clock size={14} className="text-[var(--mu)]" />
                             </div>
                           )}
                           <div className="min-w-0 flex-1">
-                            <div className="text-xs font-semibold truncate">{p.nombre ?? p.sku ?? '—'}</div>
-                            <div className="text-[11px] tx-mu">En espera</div>
+                            <div className="text-xs font-medium text-[var(--tx)] truncate">{p.nombre ?? p.sku ?? '—'}</div>
+                            <div className="text-[11px] text-[var(--mu)]">En espera</div>
                           </div>
                         </div>
                       ))}
@@ -986,45 +977,41 @@ export function HoyPage() {
           </section>
         </div>
 
-        {/* COLUMNA DERECHA (ALERTAS, FINANZAS HOY, NOTAS, BODEGA) */}
-        <div className="lg:col-span-1 flex flex-col gap-4">
-          {/* 1. CENTRO DE ALERTAS UNIFICADO (DARK-MODE SAFE) */}
-          <section className="bg-cd bd rounded-2xl p-5">
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <div className="flex items-center gap-2">
-                <AlertTriangle
-                  size={16}
-                  style={{ color: alertCount > 0 ? 'var(--ac)' : 'var(--ok)' }}
-                />
-                <h2 className="text-sm font-semibold">Centro de Alertas</h2>
-              </div>
-              <span className="text-xs tx-mu mono tabular-nums">{alertCount} activas</span>
+        {/* Columna derecha */}
+        <div className="lg:col-span-4 flex flex-col gap-6">
+          {/* 1. Centro de alertas */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-[var(--tx)]">Centro de alertas</h2>
+              <span className="text-xs text-[var(--mu)] font-mono tabular-nums">{alertCount} activas</span>
             </div>
 
             {loadingCore ? (
-              <Skeleton h={80} />
+              <div className="p-5">
+                <Skeleton h={80} />
+              </div>
             ) : alertCount === 0 ? (
-              <div className="text-xs tx-mu py-4 px-3 bg-sf bd rounded-xl text-center">
+              <div className="text-xs text-[var(--mu)] py-8 px-5 text-center">
                 Sin alertas operativas, de stock o de pagos próximos.
               </div>
             ) : (
-              <div className="flex flex-col gap-2.5">
+              <div className="divide-y divide-[var(--bd)]">
                 {orderMetrics.encargosUrgentes.slice(0, 3).map((e) => (
                   <Link
                     key={`enc-${e.id}`}
                     to="/pedidos"
-                    className="p-3 bg-sf bd rounded-xl hover:border-[var(--ac)] transition-colors flex items-start justify-between gap-2"
+                    className="px-5 py-3 hover:bg-sf/50 transition-colors flex items-start justify-between gap-2"
                   >
                     <div className="min-w-0">
-                      <div className="text-xs font-semibold flex items-center gap-1.5">
-                        <CalendarClock size={13} style={{ color: 'var(--er)' }} className="shrink-0" />
+                      <div className="text-xs font-semibold text-[var(--tx)] flex items-center gap-1.5">
+                        <CalendarClock size={13} className="text-rose-600 dark:text-rose-400 shrink-0" />
                         <span className="truncate">Encargo: {e.nombre_cliente || 'Cliente'}</span>
                       </div>
-                      <div className="text-[11px] tx-mu mt-0.5 truncate">
+                      <div className="text-[11px] text-[var(--mu)] mt-0.5 truncate">
                         {e.sku || e.catalogo_sku || 'Sin SKU'} · Fecha {e.fecha_programada || 'por confirmar'}
                       </div>
                     </div>
-                    <span className="text-xs font-bold mono tabular-nums shrink-0" style={{ color: 'var(--er)' }}>
+                    <span className="text-xs font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400 shrink-0">
                       {formatMoney(Number(e.total) || 0)}
                     </span>
                   </Link>
@@ -1033,37 +1020,40 @@ export function HoyPage() {
                 {pagosProximos.map((p) => (
                   <Link
                     key={`pago-${p.id}`}
-                    to="/pagos"
-                    className="p-3 bg-sf bd rounded-xl hover:border-[var(--ac)] transition-colors flex items-center justify-between gap-2"
+                    to="/finanzas"
+                    className="px-5 py-3 hover:bg-sf/50 transition-colors flex items-center justify-between gap-2"
                   >
                     <div className="min-w-0">
-                      <div className="text-xs font-semibold truncate">Pago próximo: {p.nombre}</div>
-                      <div className="text-[11px] tx-mu tabular-nums">Vence {p.fecha_vencimiento}</div>
+                      <div className="text-xs font-semibold text-[var(--tx)] truncate">Pago próximo: {p.nombre}</div>
+                      <div className="text-[11px] text-[var(--mu)] tabular-nums">Vence {p.fecha_vencimiento}</div>
                     </div>
-                    <span className="text-xs font-bold mono tabular-nums shrink-0" style={{ color: 'var(--ac)' }}>
+                    <span className="text-xs font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400 shrink-0">
                       {formatMoney(Number(p.monto) || 0)}
                     </span>
                   </Link>
                 ))}
 
                 {inventoryMetrics.lowStock.length > 0 && (
-                  <div className="p-3 bg-sf bd rounded-xl">
+                  <div className="px-5 py-3.5">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-semibold">Stock bajo real</span>
-                      <Link to="/inventario" className="text-[11px] hover:underline" style={{ color: 'var(--ac)' }}>
+                      <span className="text-xs font-semibold text-[var(--tx)]">Stock bajo real</span>
+                      <Link to="/inventario" className="text-[11px] font-medium text-[var(--mu)] hover:text-[var(--tx)]">
                         Kárdex →
                       </Link>
                     </div>
-                    <div className="divide-y divide-[var(--bd)]">
+                    <div className="space-y-1.5">
                       {inventoryMetrics.lowStock.slice(0, 4).map((item) => (
                         <div
                           key={item.sku}
-                          className="py-1.5 first:pt-0 last:pb-0 flex items-center justify-between gap-2 text-xs"
+                          className="flex items-center justify-between gap-2 text-xs"
                         >
-                          <span className="truncate">{item.nombre || item.sku}</span>
+                          <span className="truncate text-[var(--mu)]">{item.nombre || item.sku}</span>
                           <span
-                            className="mono tabular-nums font-semibold shrink-0"
-                            style={{ color: item.stock_disponible <= 0 ? 'var(--er)' : 'var(--ac)' }}
+                            className={`font-mono tabular-nums font-semibold shrink-0 ${
+                              item.stock_disponible <= 0
+                                ? 'text-rose-600 dark:text-rose-400'
+                                : 'text-amber-600 dark:text-amber-400'
+                            }`}
                           >
                             {item.stock_disponible} disp.
                           </span>
@@ -1076,142 +1066,136 @@ export function HoyPage() {
                 {queueErrors.length > 0 && (
                   <Link
                     to="/cola"
-                    className="p-3 bg-sf bd rounded-xl hover:border-[var(--er)] transition-colors flex items-center justify-between text-xs"
+                    className="px-5 py-3 hover:bg-sf/50 transition-colors flex items-center justify-between text-xs"
                   >
-                    <span className="font-semibold" style={{ color: 'var(--er)' }}>
+                    <span className="font-semibold text-rose-600 dark:text-rose-400">
                       {queueErrors.length} error{queueErrors.length > 1 ? 'es' : ''} en cola social
                     </span>
-                    <span className="tx-mu">Revisar →</span>
+                    <span className="text-[var(--mu)]">Revisar →</span>
                   </Link>
                 )}
               </div>
             )}
           </section>
 
-          {/* 2. PULSO DE CAJA Y PAUTA HOY */}
-          <section className="bg-cd bd rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Wallet size={16} style={{ color: 'var(--ok)' }} />
-                <h2 className="text-sm font-semibold">Caja & Pauta Hoy</h2>
-              </div>
-              <Link to="/finanzas" className="text-xs hover:underline" style={{ color: 'var(--ac)' }}>
+          {/* 2. Pulso de caja y pauta hoy */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-[var(--tx)]">Caja &amp; Pauta hoy</h2>
+              <Link to="/finanzas" className="text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)]">
                 Finanzas →
               </Link>
             </div>
 
             {loadingCore ? (
-              <Skeleton h={76} />
+              <div className="p-5">
+                <Skeleton h={76} />
+              </div>
             ) : (
-              <div className="flex flex-col gap-2.5">
-                <div className="p-3 bg-sf bd rounded-xl flex items-center justify-between">
-                  <div className="text-xs tx-mu">Saldo total cuentas</div>
-                  <div className="text-base font-bold mono tabular-nums">{formatMoney(totalCaja)}</div>
+              <div className="divide-y divide-[var(--bd)]">
+                <div className="px-5 py-3.5 flex items-center justify-between">
+                  <div className="text-xs text-[var(--mu)]">Saldo total cuentas</div>
+                  <div className="text-base font-bold font-mono tabular-nums text-[var(--tx)]">{formatMoney(totalCaja)}</div>
                 </div>
-                <div className="p-3 bg-sf bd rounded-xl flex items-center justify-between">
+                <div className="px-5 py-3.5 flex items-center justify-between">
                   <div>
-                    <div className="text-xs tx-mu">Pauta registrada hoy</div>
-                    <Link to="/rentabilidad" className="text-[11px] hover:underline" style={{ color: 'var(--ac)' }}>
+                    <div className="text-xs text-[var(--mu)]">Pauta registrada hoy</div>
+                    <Link to="/rentabilidad" className="text-[11px] font-medium text-[var(--mu)] hover:text-[var(--tx)]">
                       Ver ROAS del mes →
                     </Link>
                   </div>
-                  <div className="text-base font-bold mono tabular-nums">{formatMoney(adSpendToday)}</div>
+                  <div className="text-base font-bold font-mono tabular-nums text-[var(--tx)]">{formatMoney(adSpendToday)}</div>
                 </div>
               </div>
             )}
           </section>
 
-          {/* 3. NOTAS RÁPIDAS */}
-          <section className="bg-cd bd rounded-2xl p-5">
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <div className="flex items-center gap-2">
-                <StickyNote size={16} style={{ color: 'var(--ac)' }} />
-                <h2 className="text-sm font-semibold">Notas Rápidas</h2>
-              </div>
-              <span className="text-xs tx-mu mono tabular-nums">{notas.length}</span>
+          {/* 3. Notas rápidas */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-[var(--tx)]">Notas rápidas</h2>
+              <span className="text-xs text-[var(--mu)] font-mono tabular-nums">{notas.length}</span>
             </div>
 
-            <form onSubmit={handleAddNota} className="flex gap-2 mb-3">
-              <input
-                type="text"
-                value={nuevaNota}
-                onChange={(e) => setNuevaNota(e.target.value)}
-                placeholder="Anotar pendiente del día..."
-                className="flex-1 min-w-0 bg-sf bd rounded-xl px-3 py-2 text-xs outline-none focus:border-[var(--ac)]"
-              />
-              <button
-                type="submit"
-                disabled={savingNote || !nuevaNota.trim()}
-                aria-label="Agregar nota"
-                className="px-3 py-2 rounded-xl text-xs font-semibold hover:opacity-85 disabled:opacity-40 transition-opacity shrink-0 cursor-pointer"
-                style={{ background: 'var(--tx)', color: 'var(--cd)' }}
-              >
-                <Plus size={14} />
-              </button>
-            </form>
+            <div className="p-4 border-b border-[var(--bd)]">
+              <form onSubmit={handleAddNota} className="flex gap-2">
+                <input
+                  type="text"
+                  value={nuevaNota}
+                  onChange={(e) => setNuevaNota(e.target.value)}
+                  placeholder="Anotar pendiente del día..."
+                  className="flex-1 min-w-0 bg-sf border border-[var(--bd)] rounded-lg px-3 py-2 text-xs text-[var(--tx)] outline-none focus:border-[var(--tx)]"
+                />
+                <button
+                  type="submit"
+                  disabled={savingNote || !nuevaNota.trim()}
+                  aria-label="Agregar nota"
+                  className="px-3 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] text-xs font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity shrink-0 cursor-pointer"
+                >
+                  <Plus size={14} />
+                </button>
+              </form>
+            </div>
 
-            <div className="flex flex-col gap-2 max-h-56 overflow-y-auto">
+            <div className="divide-y divide-[var(--bd)] max-h-56 overflow-y-auto">
               {notas.map((nota) => (
                 <div
                   key={nota.id}
-                  className="flex items-start justify-between gap-2 p-2.5 bg-sf bd rounded-xl"
+                  className="flex items-start justify-between gap-2 px-5 py-3 hover:bg-sf/50 transition-colors"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs break-words">{nota.contenido}</div>
+                    <div className="text-xs text-[var(--tx)] break-words">{nota.contenido}</div>
                     {nota.created_at && (
-                      <div className="text-[10px] tx-mu mt-1 tabular-nums">{fmtAgo(nota.created_at)}</div>
+                      <div className="text-[10px] text-[var(--mu)] mt-1 tabular-nums">{fmtAgo(nota.created_at)}</div>
                     )}
                   </div>
                   <button
                     type="button"
                     onClick={() => handleDeleteNota(nota.id)}
                     aria-label="Eliminar nota"
-                    className="p-1.5 rounded-lg tx-mu hover:text-[var(--er)] transition-colors shrink-0 cursor-pointer"
+                    className="p-1.5 rounded-lg text-[var(--mu)] hover:text-rose-500 transition-colors shrink-0 cursor-pointer"
                   >
                     <Trash2 size={13} />
                   </button>
                 </div>
               ))}
               {notas.length === 0 && (
-                <div className="text-xs tx-mu text-center py-3">Sin notas pendientes para hoy.</div>
+                <div className="text-xs text-[var(--mu)] text-center py-6">Sin notas pendientes para hoy.</div>
               )}
             </div>
           </section>
 
-          {/* 4. INVENTARIO & CATÁLOGO REAL */}
-          <section className="bg-cd bd rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Package size={16} className="tx-mu" />
-                <h2 className="text-sm font-semibold">Bodega & Catálogo</h2>
-              </div>
-              <Link to="/catalogo" className="text-xs hover:underline" style={{ color: 'var(--ac)' }}>
+          {/* 4. Inventario y catálogo */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-[var(--tx)]">Bodega &amp; Catálogo</h2>
+              <Link to="/catalogo" className="text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)]">
                 Catálogo →
               </Link>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 text-xs">
-              <div className="p-3 bg-sf bd rounded-xl">
-                <div className="tx-mu">SKUs activos</div>
-                <div className="text-lg font-bold mono tabular-nums mt-0.5">
+            <div className="grid grid-cols-2 divide-x divide-y divide-[var(--bd)] text-xs">
+              <div className="p-4">
+                <div className="text-[var(--mu)]">SKUs activos</div>
+                <div className="text-lg font-bold font-mono tabular-nums mt-0.5 text-[var(--tx)]">
                   {inventoryMetrics.activeCount}
                 </div>
               </div>
-              <div className="p-3 bg-sf bd rounded-xl">
-                <div className="tx-mu">Unidades disp.</div>
-                <div className="text-lg font-bold mono tabular-nums mt-0.5">
+              <div className="p-4 border-t-0">
+                <div className="text-[var(--mu)]">Unidades disp.</div>
+                <div className="text-lg font-bold font-mono tabular-nums mt-0.5 text-[var(--tx)]">
                   {inventoryMetrics.totalUnits}
                 </div>
               </div>
-              <div className="p-3 bg-sf bd rounded-xl">
-                <div className="tx-mu">Productos</div>
-                <div className="text-lg font-bold mono tabular-nums mt-0.5">
+              <div className="p-4 border-l-0">
+                <div className="text-[var(--mu)]">Productos</div>
+                <div className="text-lg font-bold font-mono tabular-nums mt-0.5 text-[var(--tx)]">
                   {productos.data?.length ?? '—'}
                 </div>
               </div>
-              <div className="p-3 bg-sf bd rounded-xl">
-                <div className="tx-mu">Variantes</div>
-                <div className="text-lg font-bold mono tabular-nums mt-0.5">
+              <div className="p-4">
+                <div className="text-[var(--mu)]">Variantes</div>
+                <div className="text-lg font-bold font-mono tabular-nums mt-0.5 text-[var(--tx)]">
                   {variantes.data?.length ?? '—'}
                 </div>
               </div>
@@ -1220,7 +1204,7 @@ export function HoyPage() {
         </div>
       </div>
 
-      {/* MODAL NUEVO PEDIDO DIRECTO DESDE HOY */}
+      {/* Modal nuevo pedido directo desde Hoy */}
       {showOrderModal && (
         <PedidoModal
           onClose={() => setShowOrderModal(false)}

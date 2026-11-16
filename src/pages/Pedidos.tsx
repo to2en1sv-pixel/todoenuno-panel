@@ -913,16 +913,16 @@ export function PedidosPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[var(--cd)] text-[var(--tx)] p-4 md:p-6 flex flex-col relative pb-28">
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-24 relative">
       {/* Toast flotante de Inventario & Pedidos */}
       {inventoryToast && (
         <div
-          className={`fixed top-5 right-5 z-[70] max-w-md px-4 py-3 rounded-2xl shadow-2xl border flex items-center gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-top-3 ${
+          className={`fixed top-5 right-5 z-[70] max-w-md px-4 py-3 rounded-xl shadow-lg border flex items-center gap-2.5 text-xs font-medium bg-cd ${
             inventoryToast.type === 'ok'
-              ? 'bg-emerald-950/95 border-emerald-500/50 text-emerald-200'
+              ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
               : inventoryToast.type === 'warn'
-              ? 'bg-amber-950/95 border-amber-500/50 text-amber-200'
-              : 'bg-rose-950/95 border-rose-500/50 text-rose-200'
+              ? 'border-amber-500/40 text-amber-700 dark:text-amber-300'
+              : 'border-rose-500/40 text-rose-700 dark:text-rose-300'
           }`}
         >
           <Package size={15} className="shrink-0" />
@@ -932,171 +932,212 @@ export function PedidosPage() {
           </button>
         </div>
       )}
-      {/* Encabezado Principal Reestructurado */}
-      <header className="flex flex-col gap-3 mb-5">
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
-          <div className="shrink-0 min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-black tracking-tight whitespace-normal sm:whitespace-nowrap">
-                Centro de Pedidos & Logística
-              </h1>
-              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 shrink-0">
-                COD Engine
-              </span>
-            </div>
-            <p className="text-xs opacity-60 mt-0.5">
-              Despachos, guías con foto por WhatsApp, rutas y cuadre de efectivo contra entrega.
-            </p>
-          </div>
 
-          {/* Acciones Compactas */}
-          <div className="flex items-center gap-2 flex-wrap xl:justify-end">
-            <Link
-              to="/repartidor"
-              className="px-3 py-2 border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors whitespace-nowrap"
-              title="Abrir Portal Repartidor (/repartidor)"
-            >
-              <Truck size={14} /> <span className="hidden sm:inline">Portal Repartidor</span>
-            </Link>
-
-            <button
-              onClick={exportarCSV}
-              className="px-3 py-2 border border-[var(--bd)] hover:bg-sf rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
-              title="Exportar a Excel / CSV"
-            >
-              <Download size={14} /> <span className="hidden sm:inline">CSV</span>
-            </button>
-
-            <button
-              onClick={() => cargarPedidos(true)}
-              disabled={refrescando}
-              className="p-2 rounded-xl border border-[var(--bd)] bg-cd hover:bg-sf transition-colors shrink-0"
-              title="Recargar pedidos"
-            >
-              <RefreshCw className={`w-4 h-4 ${refrescando ? "animate-spin" : ""}`} />
-            </button>
-
-            <button
-              onClick={() => setMostrarHistorial(!mostrarHistorial)}
-              className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors whitespace-nowrap ${
-                mostrarHistorial
-                  ? "border-indigo-500 bg-indigo-500/10 text-indigo-500"
-                  : "border-[var(--bd)] bg-cd text-[var(--tx)] hover:bg-sf"
-              }`}
-              title="Mostrar/ocultar pedidos entregados y cancelados antiguos"
-            >
-              {mostrarHistorial ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              <span>{mostrarHistorial ? "Ocultar Historial" : "Historial"}</span>
-            </button>
-
-            <button
-              onClick={() => setModalNuevo(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-3.5 py-2 text-xs font-bold text-white shadow-md transition-colors whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4" /> Nuevo Pedido
-            </button>
-          </div>
+      {/* Encabezado Principal */}
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--tx)]">
+            Centro de Pedidos &amp; Logística
+          </h1>
+          <p className="text-xs tx-mu mt-1">
+            COD Engine · Despachos, guías con foto por WhatsApp, rutas y liquidación contra entrega
+          </p>
         </div>
 
-        {/* Barra de Navegación de Vistas y Submódulos (en su propia fila limpia) */}
-        <div className="flex items-center gap-1.5 bg-sf p-1.5 rounded-2xl border border-[var(--bd)] text-xs font-bold overflow-x-auto">
-          <button
-            onClick={() => setVista('kanban')}
-            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              vista === 'kanban' ? 'bg-cd shadow text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
-            }`}
+        {/* Acciones Compactas */}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <Link
+            to="/repartidor"
+            className="px-3 py-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap"
+            title="Abrir Portal Repartidor (/repartidor)"
           >
-            <LayoutGrid size={14} /> Kanban
+            <Truck size={14} className="tx-mu" /> <span className="hidden sm:inline">Portal Repartidor</span>
+          </Link>
+
+          <button
+            onClick={exportarCSV}
+            className="px-3 py-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap"
+            title="Exportar a Excel / CSV"
+          >
+            <Download size={14} className="tx-mu" /> <span className="hidden sm:inline">CSV</span>
           </button>
 
           <button
-            onClick={() => setVista('tabla')}
-            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              vista === 'tabla' ? 'bg-cd shadow text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
-            }`}
+            onClick={() => cargarPedidos(true)}
+            disabled={refrescando}
+            className="p-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf transition-colors shrink-0"
+            title="Recargar pedidos"
           >
-            <TableIcon size={14} /> Tabla ({pedidosFiltrados.length})
-          </button>
-
-          <div className="h-4 w-px bg-[var(--bd)] mx-1 shrink-0" />
-
-          <button
-            onClick={() => setVista('despacho')}
-            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              vista === 'despacho'
-                ? 'bg-emerald-600 text-white font-black shadow'
-                : 'tx-mu hover:text-emerald-600 hover:bg-emerald-500/10'
-            }`}
-            title="Subir foto de paquete con guía y enviar aviso en lote por Evolution API"
-          >
-            <Camera size={14} />
-            <span>Despacho & Guías</span>
-            {porEstado.por_empacar.length > 0 && (
-              <span
-                className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
-                  vista === 'despacho' ? 'bg-white/25 text-white' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
-                }`}
-              >
-                {porEstado.por_empacar.length}
-              </span>
-            )}
+            <RefreshCw className={`w-4 h-4 ${refrescando ? "animate-spin" : ""}`} />
           </button>
 
           <button
-            onClick={() => setVista('eficiencia')}
-            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              vista === 'eficiencia'
-                ? 'bg-amber-500 text-white font-black shadow'
-                : delayedPendingCount > 0
-                ? 'text-rose-600 dark:text-rose-400 hover:bg-rose-500/10'
-                : 'tx-mu hover:text-[var(--tx)]'
+            onClick={() => setMostrarHistorial(!mostrarHistorial)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors whitespace-nowrap ${
+              mostrarHistorial
+                ? "border-[var(--tx)] bg-sf text-[var(--tx)] font-semibold"
+                : "border-[var(--bd)] bg-cd text-[var(--tx)] hover:bg-sf"
             }`}
-            title="Eficiencia Operativa, Reloj de Despacho y Avisos de Retraso por WhatsApp"
+            title="Mostrar/ocultar pedidos entregados y cancelados antiguos"
           >
-            <Clock size={14} />
-            <span>Eficiencia &amp; Retrasos</span>
-            {delayedPendingCount > 0 && (
-              <span
-                className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
-                  vista === 'eficiencia'
-                    ? 'bg-white/25 text-white'
-                    : 'bg-rose-600 text-white animate-pulse'
-                }`}
-              >
-                {delayedPendingCount}
-              </span>
-            )}
+            {mostrarHistorial ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            <span>{mostrarHistorial ? "Ocultar Historial" : "Historial"}</span>
           </button>
 
           <button
-            onClick={() => setVista('lista_negra')}
-            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              vista === 'lista_negra' ? 'bg-rose-600 text-white font-black shadow' : 'text-rose-500 hover:bg-rose-500/10'
-            }`}
-            title="Directorio Anti-Fraude & DICOM Interno"
+            onClick={() => setModalNuevo(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 px-3.5 py-2 text-xs font-semibold transition-opacity whitespace-nowrap"
           >
-            <ShieldAlert size={14} /> Lista Negra & DICOM
+            <Plus className="w-4 h-4" /> Nuevo Pedido
           </button>
         </div>
       </header>
 
-      {/* Barra de Filtros y 5 KPIs solo visibles en Kanban / Tabla para evitar saturación en submódulos */}
+      {/* Navegación Underline de Vistas y Submódulos */}
+      <nav className="flex items-center gap-6 border-b border-[var(--bd)] overflow-x-auto">
+        <button
+          onClick={() => setVista('kanban')}
+          className={`pb-3 text-xs font-medium border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer -mb-px ${
+            vista === 'kanban'
+              ? 'border-[var(--tx)] text-[var(--tx)] font-semibold'
+              : 'border-transparent tx-mu hover:text-[var(--tx)]'
+          }`}
+        >
+          <LayoutGrid size={13} /> Kanban
+        </button>
+
+        <button
+          onClick={() => setVista('tabla')}
+          className={`pb-3 text-xs font-medium border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer -mb-px ${
+            vista === 'tabla'
+              ? 'border-[var(--tx)] text-[var(--tx)] font-semibold'
+              : 'border-transparent tx-mu hover:text-[var(--tx)]'
+          }`}
+        >
+          <TableIcon size={13} /> Tabla <span className="font-mono tabular-nums tx-mu">({pedidosFiltrados.length})</span>
+        </button>
+
+        <button
+          onClick={() => setVista('despacho')}
+          className={`pb-3 text-xs font-medium border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer -mb-px ${
+            vista === 'despacho'
+              ? 'border-[var(--tx)] text-[var(--tx)] font-semibold'
+              : 'border-transparent tx-mu hover:text-[var(--tx)]'
+          }`}
+          title="Subir foto de paquete con guía y enviar aviso en lote por Evolution API"
+        >
+          <Camera size={13} />
+          <span>Despacho &amp; Guías</span>
+          {porEstado.por_empacar.length > 0 && (
+            <span className="font-mono tabular-nums text-[11px] text-amber-600 dark:text-amber-400 font-semibold">
+              ({porEstado.por_empacar.length})
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setVista('eficiencia')}
+          className={`pb-3 text-xs font-medium border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer -mb-px ${
+            vista === 'eficiencia'
+              ? 'border-[var(--tx)] text-[var(--tx)] font-semibold'
+              : delayedPendingCount > 0
+              ? 'border-transparent text-rose-600 dark:text-rose-400'
+              : 'border-transparent tx-mu hover:text-[var(--tx)]'
+          }`}
+          title="Eficiencia Operativa, Reloj de Despacho y Avisos de Retraso por WhatsApp"
+        >
+          <Clock size={13} />
+          <span>Eficiencia &amp; Retrasos</span>
+          {delayedPendingCount > 0 && (
+            <span className="font-mono tabular-nums text-[11px] text-rose-600 dark:text-rose-400 font-semibold">
+              ({delayedPendingCount})
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setVista('lista_negra')}
+          className={`pb-3 text-xs font-medium border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer -mb-px ${
+            vista === 'lista_negra'
+              ? 'border-[var(--tx)] text-[var(--tx)] font-semibold'
+              : 'border-transparent tx-mu hover:text-[var(--tx)]'
+          }`}
+          title="Directorio Anti-Fraude & DICOM Interno"
+        >
+          <ShieldAlert size={13} /> Lista Negra &amp; DICOM
+        </button>
+      </nav>
+
+      {/* Barra de Filtros y 5 KPIs solo visibles en Kanban / Tabla */}
       {(vista === 'kanban' || vista === 'tabla') && (
         <>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-cd p-3 rounded-2xl border border-[var(--bd)] mb-5">
+          {/* Franja unificada de KPIs */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
+            <div className="p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wider tx-mu">Ventas Hoy</p>
+              <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-emerald-600 dark:text-emerald-400 truncate">
+                {dinero(kpis.ventasHoy)}
+              </p>
+            </div>
+
+            <div className="p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wider tx-mu">Por Despachar</p>
+              <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-[var(--tx)] truncate">
+                {kpis.porDespachar} <span className="text-xs font-sans font-normal tx-mu">hoy</span>
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setPestañaEtapa('programado')}
+              className={`p-4 text-left transition-colors hover:bg-sf/60 ${
+                pestañaEtapa === 'programado' ? 'bg-sf/80' : ''
+              }`}
+              title="Ver pedidos programados para quincena / fin de mes"
+            >
+              <div className="flex items-center justify-between gap-1">
+                <p className="text-[11px] font-medium uppercase tracking-wider tx-mu">Encargos</p>
+                {kpis.encargosUrgentes > 0 && (
+                  <span className="text-[10px] font-mono font-semibold text-rose-600 dark:text-rose-400">
+                    {kpis.encargosUrgentes} hoy
+                  </span>
+                )}
+              </div>
+              <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-[var(--tx)] truncate">
+                {kpis.totalEncargos}{' '}
+                <span className="text-xs font-normal tx-mu">({dinero(kpis.montoEncargos)})</span>
+              </p>
+            </button>
+
+            <div className="p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wider tx-mu">Cobros en Calle</p>
+              <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-amber-600 dark:text-amber-400 truncate">
+                {dinero(kpis.pendientesLiquidacion)}
+              </p>
+            </div>
+
+            <div className="p-4 col-span-2 md:col-span-1">
+              <p className="text-[11px] font-medium uppercase tracking-wider tx-mu">Ticket Promedio</p>
+              <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-[var(--tx)] truncate">
+                {dinero(kpis.ticketPromedio)}
+              </p>
+            </div>
+          </section>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
             <div className="relative flex-1">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-50" />
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 tx-mu" />
               <input
                 type="text"
                 value={busqueda}
                 onChange={(e) => setBusqueda(e.target.value)}
                 placeholder="Buscar por cliente, SKU, teléfono, dirección o anuncio..."
-                className="w-full rounded-xl border border-[var(--bd)] bg-sf pl-9 pr-8 py-2 text-xs outline-none focus:border-indigo-500"
+                className="w-full rounded-lg border border-[var(--bd)] bg-cd pl-9 pr-8 py-2 text-xs outline-none focus:border-[var(--tx)]"
               />
               {busqueda && (
                 <button
                   onClick={() => setBusqueda("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-black/10 opacity-60"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-sf tx-mu"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -1104,105 +1145,28 @@ export function PedidosPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Selector Courier */}
               <select
                 value={filtroCourier}
                 onChange={e => setFiltroCourier(e.target.value)}
-                className="p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs font-semibold outline-none focus:border-indigo-500"
+                className="px-3 py-2 rounded-lg border border-[var(--bd)] bg-cd text-xs font-medium outline-none focus:border-[var(--tx)]"
               >
                 {courierFilterOptions.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
 
-              {/* Selector Departamento */}
               <select
                 value={filtroDepto}
                 onChange={e => setFiltroDepto(e.target.value)}
-                className="p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs font-semibold outline-none focus:border-indigo-500"
+                className="px-3 py-2 rounded-lg border border-[var(--bd)] bg-cd text-xs font-medium outline-none focus:border-[var(--tx)]"
               >
                 {DEPARTAMENTOS.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
-            </div>
-          </div>
-
-          {/* Tarjetas KPI Operativas */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5 mb-5">
-            <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
-                <TrendingUp className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Ventas Hoy</p>
-                <p className="text-lg font-black truncate">{dinero(kpis.ventasHoy)}</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-500">
-                <Clock className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Por Despachar</p>
-                <p className="text-lg font-black truncate">{kpis.porDespachar} <span className="text-xs font-normal opacity-60">hoy</span></p>
-              </div>
-            </div>
-
-            {/* KPI 3: Bóveda de Encargos Programados */}
-            <button
-              type="button"
-              onClick={() => setPestañaEtapa('programado')}
-              className={`flex items-center gap-3 rounded-2xl border p-3.5 shadow-sm text-left transition-all ${
-                pestañaEtapa === 'programado'
-                  ? 'border-indigo-500 bg-indigo-500/10 ring-2 ring-indigo-500/20'
-                  : 'border-[var(--bd)] bg-cd hover:border-indigo-500/40'
-              }`}
-              title="Ver pedidos programados para quincena / fin de mes"
-            >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500 relative">
-                <CalendarClock className="h-5 w-5" />
-                {kpis.encargosUrgentes > 0 && (
-                  <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-rose-500 animate-ping" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-1">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Encargos</p>
-                  {kpis.encargosUrgentes > 0 && (
-                    <span className="text-[9px] font-black px-1 rounded bg-rose-500 text-white animate-pulse">
-                      {kpis.encargosUrgentes} HOY
-                    </span>
-                  )}
-                </div>
-                <p className="text-lg font-black truncate text-indigo-700 dark:text-indigo-300">
-                  {kpis.totalEncargos} <span className="text-xs font-normal opacity-70">({dinero(kpis.montoEncargos)})</span>
-                </p>
-              </div>
-            </button>
-
-            <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500">
-                <DollarSign className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Cobros en Calle</p>
-                <p className="text-lg font-black text-purple-600 dark:text-purple-400 truncate">{dinero(kpis.pendientesLiquidacion)}</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 rounded-2xl border border-[var(--bd)] bg-cd p-3.5 shadow-sm">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-500/10 text-zinc-500">
-                <BarChart3 className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Ticket Promedio</p>
-                <p className="text-lg font-black truncate">{dinero(kpis.ticketPromedio)}</p>
-              </div>
             </div>
           </div>
         </>
       )}
 
       {error && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-500">
+        <div className="flex items-start gap-2 rounded-xl border border-rose-500/40 bg-cd px-4 py-3 text-xs text-rose-600 dark:text-rose-400">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <span className="flex-1">{error}</span>
           <button onClick={() => setError(null)} className="opacity-70 hover:opacity-100">
@@ -1211,150 +1175,62 @@ export function PedidosPage() {
         </div>
       )}
 
-      {/* Pestañas de Etapas del Flujo Operativo (Pipeline Tabs) */}
+      {/* Pestañas de Etapas del Flujo Operativo */}
       {(vista === 'kanban' || vista === 'tabla') && (
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-4 scrollbar-none">
-        <button
-          onClick={() => setPestañaEtapa('todas')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
-            pestañaEtapa === 'todas'
-              ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow'
-              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
-          }`}
-        >
-          <span>📋 Todos</span>
-          <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-black/10 dark:bg-white/20 font-black">
-            {pedidosFiltrados.length}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setPestañaEtapa('nuevo')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
-            pestañaEtapa === 'nuevo'
-              ? 'bg-sky-600 text-white border-transparent shadow'
-              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
-          }`}
-        >
-          <span>📥 Nuevos Hoy</span>
-          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
-            pestañaEtapa === 'nuevo' ? 'bg-white/20 text-white' : 'bg-sky-500/15 text-sky-600'
-          }`}>
-            {porEstado.nuevo.length}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setPestañaEtapa('programado')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
-            pestañaEtapa === 'programado'
-              ? 'bg-indigo-600 text-white border-transparent shadow'
-              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
-          }`}
-        >
-          <span>📅 Encargos / Futuros</span>
-          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
-            pestañaEtapa === 'programado' ? 'bg-white/20 text-white' : 'bg-indigo-500/15 text-indigo-600'
-          }`}>
-            {porEstado.programado.length}
-          </span>
-          {kpis.encargosUrgentes > 0 && (
-            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-rose-500 text-white animate-pulse">
-              {kpis.encargosUrgentes} URGENTE
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setPestañaEtapa('por_empacar')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
-            pestañaEtapa === 'por_empacar'
-              ? 'bg-amber-600 text-white border-transparent shadow'
-              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
-          }`}
-        >
-          <span>📦 Por Empacar</span>
-          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
-            pestañaEtapa === 'por_empacar' ? 'bg-white/20 text-white' : 'bg-amber-500/15 text-amber-600'
-          }`}>
-            {porEstado.por_empacar.length}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setPestañaEtapa('en_camino')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
-            pestañaEtapa === 'en_camino'
-              ? 'bg-violet-600 text-white border-transparent shadow'
-              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
-          }`}
-        >
-          <span>🛵 En Camino</span>
-          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
-            pestañaEtapa === 'en_camino' ? 'bg-white/20 text-white' : 'bg-violet-500/15 text-violet-600'
-          }`}>
-            {porEstado.en_camino.length}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setPestañaEtapa('entregado')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
-            pestañaEtapa === 'entregado'
-              ? 'bg-emerald-600 text-white border-transparent shadow'
-              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
-          }`}
-        >
-          <span>✅ Entregados</span>
-          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
-            pestañaEtapa === 'entregado' ? 'bg-white/20 text-white' : 'bg-emerald-500/15 text-emerald-600'
-          }`}>
-            {porEstado.entregado.length}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setPestañaEtapa('cancelado')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 border ${
-            pestañaEtapa === 'cancelado'
-              ? 'bg-rose-600 text-white border-transparent shadow'
-              : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf opacity-80 hover:opacity-100'
-          }`}
-        >
-          <span>❌ Cancelados</span>
-          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
-            pestañaEtapa === 'cancelado' ? 'bg-white/20 text-white' : 'bg-rose-500/15 text-rose-600'
-          }`}>
-            {porEstado.cancelado.length}
-          </span>
-        </button>
-      </div>
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          {[
+            { id: 'todas' as const, label: 'Todos', count: pedidosFiltrados.length },
+            { id: 'nuevo' as const, label: 'Nuevos Hoy', count: porEstado.nuevo.length },
+            { id: 'programado' as const, label: 'Encargos / Futuros', count: porEstado.programado.length, urgent: kpis.encargosUrgentes },
+            { id: 'por_empacar' as const, label: 'Por Empacar', count: porEstado.por_empacar.length },
+            { id: 'en_camino' as const, label: 'En Camino', count: porEstado.en_camino.length },
+            { id: 'entregado' as const, label: 'Entregados', count: porEstado.entregado.length },
+            { id: 'cancelado' as const, label: 'Cancelados', count: porEstado.cancelado.length },
+          ].map((stage) => (
+            <button
+              key={stage.id}
+              onClick={() => setPestañaEtapa(stage.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 border ${
+                pestañaEtapa === stage.id
+                  ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)] font-semibold'
+                  : 'bg-cd border-[var(--bd)] text-[var(--tx)] hover:bg-sf'
+              }`}
+            >
+              <span>{stage.label}</span>
+              <span className={`font-mono tabular-nums text-[11px] ${pestañaEtapa === stage.id ? 'opacity-80' : 'tx-mu'}`}>
+                {stage.count}
+              </span>
+              {stage.urgent && stage.urgent > 0 ? (
+                <span className="text-[10px] font-mono font-semibold text-rose-500">
+                  · {stage.urgent} hoy
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
       )}
 
       {/* Banner Especial de Encargos / Pedidos Programados */}
       {pestañaEtapa === 'programado' && (
-        <div className="bg-gradient-to-r from-indigo-500/15 via-purple-500/10 to-transparent border border-indigo-500/30 rounded-2xl p-4 mb-5 shadow-sm">
+        <div className="bg-cd border border-[var(--bd)] rounded-xl p-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-indigo-500" />
-                <h2 className="text-base font-black text-[var(--tx)]">Bóveda de Encargos & Pedidos Programados</h2>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
-                  Aislados del despacho diario
-                </span>
+                <Calendar className="w-4 h-4 tx-mu" />
+                <h2 className="text-sm font-bold text-[var(--tx)]">Encargos &amp; Pedidos Programados</h2>
+                <span className="text-[11px] tx-mu">· Aislados del despacho diario</span>
               </div>
               <p className="text-xs tx-mu mt-1 max-w-2xl">
-                Pedidos agendados para quincena (15 o 30), fin de semana o en 15 días. Se mantienen aislados para no saturar la cola de bodega hasta que llegue su fecha de entrega.
+                Pedidos agendados para quincena, fin de semana o fechas futuras hasta que llegue su día de despacho.
               </p>
             </div>
 
-            {/* Sub-filtros temporales de encargos */}
-            <div className="flex flex-wrap items-center gap-1.5 bg-cd p-1 rounded-xl border border-[var(--bd)] text-xs font-bold self-start md:self-auto">
+            <div className="flex flex-wrap items-center gap-1 bg-sf p-1 rounded-lg border border-[var(--bd)] text-xs font-medium self-start md:self-auto">
               <button
                 type="button"
                 onClick={() => setFiltroEncargos('todos')}
-                className={`px-3 py-1.5 rounded-lg transition-colors ${
-                  filtroEncargos === 'todos' ? 'bg-indigo-600 text-white' : 'tx-mu hover:text-[var(--tx)]'
+                className={`px-2.5 py-1 rounded-md transition-colors ${
+                  filtroEncargos === 'todos' ? 'bg-cd text-[var(--tx)] font-semibold' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
                 Todos ({porEstado.programado.length})
@@ -1362,34 +1238,32 @@ export function PedidosPage() {
               <button
                 type="button"
                 onClick={() => setFiltroEncargos('urgentes')}
-                className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                  filtroEncargos === 'urgentes' ? 'bg-rose-600 text-white' : 'tx-mu hover:text-[var(--tx)]'
+                className={`px-2.5 py-1 rounded-md transition-colors flex items-center gap-1 ${
+                  filtroEncargos === 'urgentes' ? 'bg-rose-600 text-white font-semibold' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
-                <span>🔥 Despachar Hoy/Mañana</span>
+                <span>Hoy/Mañana</span>
                 {kpis.encargosUrgentes > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 font-black">
-                    {kpis.encargosUrgentes}
-                  </span>
+                  <span className="font-mono tabular-nums text-[10px]">({kpis.encargosUrgentes})</span>
                 )}
               </button>
               <button
                 type="button"
                 onClick={() => setFiltroEncargos('semana')}
-                className={`px-3 py-1.5 rounded-lg transition-colors ${
-                  filtroEncargos === 'semana' ? 'bg-indigo-600 text-white' : 'tx-mu hover:text-[var(--tx)]'
+                className={`px-2.5 py-1 rounded-md transition-colors ${
+                  filtroEncargos === 'semana' ? 'bg-cd text-[var(--tx)] font-semibold' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
-                🗓️ Esta Semana (≤ 7d)
+                Esta Semana (≤7d)
               </button>
               <button
                 type="button"
                 onClick={() => setFiltroEncargos('quincena')}
-                className={`px-3 py-1.5 rounded-lg transition-colors ${
-                  filtroEncargos === 'quincena' ? 'bg-indigo-600 text-white' : 'tx-mu hover:text-[var(--tx)]'
+                className={`px-2.5 py-1 rounded-md transition-colors ${
+                  filtroEncargos === 'quincena' ? 'bg-cd text-[var(--tx)] font-semibold' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
-                📆 Quincena & Más (&gt; 7d)
+                Quincena (&gt;7d)
               </button>
             </div>
           </div>
@@ -1493,21 +1367,20 @@ export function PedidosPage() {
             {columnasVisibles.map((col) => (
               <section
                 key={col.key}
-                className={`flex flex-col shrink-0 min-w-[300px] w-[300px] xl:w-auto xl:flex-1 rounded-2xl border border-[var(--bd)] border-t-4 ${col.accent} bg-cd shadow-sm`}
+                className={`flex flex-col shrink-0 min-w-[300px] w-[300px] xl:w-auto xl:flex-1 rounded-xl border border-[var(--bd)] border-t-2 ${col.accent} bg-cd`}
               >
-                <header className="flex items-center justify-between px-4 py-3 border-b border-[var(--bd)] bg-sf/40">
-                  <h2 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[var(--tx)]">
-                    <span aria-hidden>{col.emoji}</span>
+                <header className="flex items-center justify-between px-4 py-3 border-b border-[var(--bd)]">
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--tx)]">
                     {col.titulo}
                   </h2>
-                  <span className="text-xs font-black px-2 py-0.5 rounded-full bg-cd border border-[var(--bd)]">
+                  <span className="text-xs font-mono tabular-nums font-semibold tx-mu">
                     {porEstado[col.key].length}
                   </span>
                 </header>
 
-                <div className="p-3 space-y-3 overflow-y-auto min-h-[160px] max-h-[calc(100vh-380px)]">
+                <div className="p-3 space-y-2.5 overflow-y-auto min-h-[160px] max-h-[calc(100vh-380px)]">
                   {porEstado[col.key].length === 0 ? (
-                    <p className="text-center text-xs opacity-40 py-8">Sin pedidos en esta fase</p>
+                    <p className="text-center text-xs tx-mu py-8">Sin pedidos en esta fase</p>
                   ) : (
                     porEstado[col.key].map((pedido) => (
                       <PedidoCard
@@ -1539,22 +1412,22 @@ export function PedidosPage() {
             ))}
           </div>
         ) : (
-          /* Vista Kanban Enfocada por Etapa (Grilla Limpia y Desahogada) */
+          /* Vista Kanban Enfocada por Etapa */
           <div className="flex-1 flex flex-col">
             <div className="flex items-center justify-between mb-3 px-1">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-black text-[var(--tx)]">
+                <span className="text-sm font-bold text-[var(--tx)]">
                   Fase: {ETIQUETA_ESTADO[pestañaEtapa]}
                 </span>
-                <span className="text-xs font-black px-2 py-0.5 rounded-full bg-cd border border-[var(--bd)]">
-                  {pedidosParaVista.length} pedidos
+                <span className="text-xs font-mono tabular-nums tx-mu">
+                  ({pedidosParaVista.length} pedidos)
                 </span>
               </div>
               {pedidosParaVista.length > 0 && (
                 <button
                   type="button"
                   onClick={seleccionarTodos}
-                  className="text-xs font-bold text-indigo-500 hover:underline"
+                  className="text-xs font-medium text-[var(--tx)] hover:underline"
                 >
                   {seleccionados.size === pedidosParaVista.length ? 'Deseleccionar todos' : 'Seleccionar todos en esta etapa'}
                 </button>
@@ -1562,13 +1435,13 @@ export function PedidosPage() {
             </div>
 
             {pedidosParaVista.length === 0 ? (
-              <div className="rounded-2xl border border-[var(--bd)] bg-cd p-16 text-center shadow-sm">
-                <Package className="w-12 h-12 mx-auto opacity-30 mb-3" />
-                <h3 className="text-sm font-bold">No hay pedidos en "{ETIQUETA_ESTADO[pestañaEtapa]}"</h3>
+              <div className="rounded-xl border border-[var(--bd)] bg-cd p-16 text-center">
+                <Package className="w-10 h-10 mx-auto tx-mu opacity-40 mb-3" />
+                <h3 className="text-sm font-semibold">No hay pedidos en "{ETIQUETA_ESTADO[pestañaEtapa]}"</h3>
                 <p className="text-xs tx-mu mt-1">Los pedidos asignados a esta etapa aparecerán aquí organizados.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
                 {pedidosParaVista.map((pedido) => (
                   <PedidoCard
                     key={pedido.id}
@@ -1599,10 +1472,10 @@ export function PedidosPage() {
         )
       ) : (
         /* CONTENIDO VISTA 2: TABLA DETALLADA CON FILTRO POR ETAPA */
-        <div className="bg-cd border border-[var(--bd)] rounded-2xl overflow-hidden shadow-sm">
+        <div className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
-              <thead className="bg-sf border-b border-[var(--bd)] text-[10px] tx-mu uppercase font-bold">
+              <thead className="bg-sf border-b border-[var(--bd)] text-[11px] tx-mu uppercase font-medium">
                 <tr>
                   <th className="p-3 text-center w-10">
                     <input
@@ -1774,20 +1647,20 @@ export function PedidosPage() {
                         <td className="p-3 text-center">
                           {p.liquidado ? (
                             p.cuenta_liquidacion === 'corte_legacy' ? (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-sf text-[var(--mu)] border border-[var(--bd)]">
+                              <span className="text-[11px] font-medium tx-mu">
                                 Archivado
                               </span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                                ✓ En Caja
+                              <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                En Caja
                               </span>
                             )
                           ) : (
                             <button
                               onClick={() => setPedidoALiquidar(p)}
-                              className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 transition-colors"
+                              className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
                             >
-                              $ Liquidar
+                              Liquidar
                             </button>
                           )}
                         </td>
@@ -1844,58 +1717,58 @@ export function PedidosPage() {
 
       {/* BARRA FLOTANTE DE ACCIONES EN LOTE */}
       {seleccionados.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-zinc-950 text-white px-5 py-3 rounded-2xl shadow-2xl border border-zinc-800 flex items-center gap-4 animate-in slide-in-from-bottom duration-200">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-cd text-[var(--tx)] px-4 py-2.5 rounded-xl shadow-2xl border border-[var(--bd)] flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-[11px] font-bold">
+            <span className="px-2 py-0.5 rounded-md bg-[var(--tx)] text-[var(--cd)] font-mono tabular-nums text-[11px] font-semibold">
               {seleccionados.size}
             </span>
-            <span className="text-xs font-semibold">seleccionados</span>
+            <span className="text-xs font-medium tx-mu">seleccionados</span>
           </div>
 
-          <div className="h-4 w-px bg-zinc-800" />
+          <div className="h-4 w-px bg-[var(--bd)]" />
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <button
               onClick={() => moverSeleccionados('por_empacar')}
-              className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-bold flex items-center gap-1 transition-colors"
+              className="px-2.5 py-1.5 rounded-lg bg-sf border border-[var(--bd)] hover:border-[var(--tx)] text-xs font-medium flex items-center gap-1 transition-colors"
             >
               <Package size={13} /> Empacar
             </button>
 
             <button
               onClick={() => moverSeleccionados('en_camino')}
-              className="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-xs font-bold flex items-center gap-1 transition-colors"
+              className="px-2.5 py-1.5 rounded-lg bg-sf border border-[var(--bd)] hover:border-[var(--tx)] text-xs font-medium flex items-center gap-1 transition-colors"
             >
               <Truck size={13} /> En Camino
             </button>
 
             <button
               onClick={() => moverSeleccionados('entregado')}
-              className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-xs font-bold flex items-center gap-1 transition-colors"
+              className="px-2.5 py-1.5 rounded-lg bg-sf border border-[var(--bd)] hover:border-emerald-500 text-emerald-600 dark:text-emerald-400 text-xs font-medium flex items-center gap-1 transition-colors"
             >
               <CheckCircle2 size={13} /> Entregado
             </button>
 
             <button
               onClick={imprimirGuiasSeleccionadas}
-              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold flex items-center gap-1 transition-colors"
+              className="px-2.5 py-1.5 rounded-lg bg-[var(--tx)] text-[var(--cd)] text-xs font-semibold flex items-center gap-1 hover:opacity-90"
             >
-              <Printer size={13} /> Guías en Lote
+              <Printer size={13} /> Guías
             </button>
 
             <button
               onClick={generarManifiestoSeleccionados}
-              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-bold flex items-center gap-1 transition-colors"
+              className="px-2.5 py-1.5 rounded-lg bg-sf border border-[var(--bd)] hover:border-[var(--tx)] text-xs font-medium flex items-center gap-1 transition-colors"
             >
-              <FileSpreadsheet size={13} /> Manifiesto Despacho
+              <FileSpreadsheet size={13} /> Manifiesto
             </button>
 
             <button
               onClick={() => setSeleccionados(new Set())}
-              className="p-1.5 text-zinc-400 hover:text-white rounded-lg"
+              className="p-1.5 tx-mu hover:text-[var(--tx)] rounded-lg"
               title="Cancelar Selección"
             >
-              <X size={16} />
+              <X size={15} />
             </button>
           </div>
         </div>
@@ -2537,12 +2410,12 @@ function PedidoCard({
     "flex items-center justify-center rounded-lg border border-[var(--bd)] bg-sf py-1.5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-cd";
 
   return (
-    <article className={`rounded-xl border bg-cd p-3 shadow-sm hover:shadow-md transition-shadow relative ${
+    <article className={`rounded-xl border bg-cd p-3.5 transition-colors relative ${
       seleccionado
-        ? 'ring-2 ring-indigo-500 bg-indigo-500/5 border-[var(--bd)]'
+        ? 'ring-2 ring-[var(--tx)] border-[var(--tx)]'
         : sla.severity === 'delayed' && !sla.yaNotificado
         ? 'border-rose-500/40'
-        : 'border-[var(--bd)]'
+        : 'border-[var(--bd)] hover:border-[var(--tx)]/35'
     }`}>
       {/* Cabecera de la tarjeta con Checkbox de selección */}
       <div className="flex items-start justify-between gap-2">
@@ -2553,12 +2426,12 @@ function PedidoCard({
             onChange={onToggleSelect}
             className="rounded"
           />
-          <h3 className="text-xs font-bold leading-tight text-[var(--tx)] truncate">
+          <h3 className="text-xs font-semibold leading-tight text-[var(--tx)] truncate">
             {pedido.nombre_cliente || "Sin nombre"}
           </h3>
           {risk.nivelRiesgo === 'verde' && (
-            <span className="text-[9px] bg-emerald-500/10 text-emerald-600 px-1 py-0.2 rounded font-bold border border-emerald-500/20" title={`${risk.entregados} entregas exitosas`}>
-              ✓ Confiable
+            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium" title={`${risk.entregados} entregas exitosas`}>
+              Confiable
             </span>
           )}
         </div>
@@ -2569,13 +2442,13 @@ function PedidoCard({
               type="button"
               onClick={() => onOpenDelayModal(pedido)}
               title={`${sla.reasonLabel} · Clic para avisar demora o reprogramar por WhatsApp`}
-              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-black border transition-colors ${
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-mono tabular-nums font-medium border transition-colors ${
                 sla.severity === 'delayed'
                   ? sla.yaNotificado
-                    ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
-                    : 'bg-rose-500/15 text-rose-600 border-rose-500/30 animate-pulse'
+                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                    : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
                   : sla.severity === 'warning'
-                  ? 'bg-amber-500/15 text-amber-600 border-amber-500/30'
+                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
                   : 'bg-sf tx-mu border-[var(--bd)] hover:border-[var(--tx)]'
               }`}
             >
@@ -2584,7 +2457,7 @@ function PedidoCard({
               {sla.yaNotificado && <span>✓</span>}
             </button>
           )}
-          <span className="shrink-0 text-[10px] font-mono opacity-50">
+          <span className="shrink-0 text-[10px] font-mono tabular-nums tx-mu">
             {fechaCorta(pedido.created_at)}
           </span>
         </div>
@@ -2592,35 +2465,35 @@ function PedidoCard({
 
       {/* Alerta de Lista Negra / DICOM Interno o Cancelador Recurrente */}
       {risk.nivelRiesgo === 'rojo' && (
-        <div className="mt-1.5 flex items-center justify-between gap-1 text-[9px] font-bold text-rose-600 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/30">
+        <div className="mt-1.5 flex items-center justify-between gap-1 text-[10px] font-medium text-rose-600 dark:text-rose-400 bg-rose-500/10 px-2 py-1 rounded-md border border-rose-500/25">
           <span className="flex items-center gap-1 min-w-0 truncate">
-            <ShieldAlert size={12} className="shrink-0 text-rose-600" />
+            <ShieldAlert size={11} className="shrink-0" />
             <span className="truncate">{risk.enListaNegra ? 'Boletinado en Lista Negra' : `${risk.cancelados} cancelaciones previas`}</span>
           </span>
-          <span className="text-[8px] font-mono font-black uppercase px-1 py-0.2 rounded bg-rose-600 text-white shrink-0">
-            {risk.enListaNegra ? 'DICOM' : 'ALTO RIESGO'}
+          <span className="text-[9px] font-mono font-semibold uppercase shrink-0">
+            {risk.enListaNegra ? 'DICOM' : 'RIESGO'}
           </span>
         </div>
       )}
 
       {/* Alerta de teléfono duplicado */}
       {esDuplicado && (
-        <div className="mt-1.5 flex items-center gap-1 text-[9px] font-bold text-amber-600 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+        <div className="mt-1.5 flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
           <AlertTriangle size={11} /> Mismo teléfono en otro pedido
         </div>
       )}
 
       {/* Producto, Stock Badge y Precio */}
-      <div className="mt-2 flex items-center justify-between gap-2">
+      <div className="mt-2.5 flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <span className="inline-flex items-center gap-1 text-xs opacity-80 truncate block">
-            <Package className="w-3.5 h-3.5 shrink-0 inline" />
+          <span className="inline-flex items-center gap-1 text-xs text-[var(--tx)] truncate block">
+            <Package className="w-3.5 h-3.5 shrink-0 tx-mu inline" />
             {pedido.sku || "—"}
           </span>
-          <div className="flex flex-wrap items-center gap-1 mt-0.5">
+          <div className="flex flex-wrap items-center gap-1 mt-1">
             {pedido.catalogo_sku && (
-              <span className="inline-flex items-center gap-1 text-[8px] font-mono px-1 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
-                🏷️ #{pedido.catalogo_sku}
+              <span className="inline-flex items-center text-[9px] font-mono px-1.5 py-0.2 rounded bg-sf tx-mu border border-[var(--bd)]">
+                #{pedido.catalogo_sku}
               </span>
             )}
             <OrderStockBadge
@@ -2631,57 +2504,47 @@ function PedidoCard({
             />
           </div>
         </div>
-        <span className="text-base font-black text-emerald-600 font-mono shrink-0">
+        <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums shrink-0">
           {dinero(pedido.total)}
         </span>
       </div>
 
-      {/* Badges de Zona y Courier */}
-      <div className="mt-2 flex flex-wrap items-center gap-1">
-        <span className="inline-flex items-center gap-0.5 rounded-md border border-[var(--bd)] bg-sf px-1.5 py-0.5 text-[9px] font-semibold">
-          <MapPin size={9} /> {pedido.departamento || "San Salvador"}
+      {/* Zona, Courier y Liquidación */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] tx-mu">
+        <span className="inline-flex items-center gap-1">
+          <MapPin size={10} /> {pedido.departamento || "San Salvador"}
         </span>
-
-        <span className="inline-flex items-center gap-0.5 rounded-md border border-[var(--bd)] bg-sf px-1.5 py-0.5 text-[9px] font-semibold text-neutral-600 dark:text-neutral-300">
-          <Truck size={9} /> {pedido.courier || "Motorista Central 1"}
+        <span className="inline-flex items-center gap-1">
+          <Truck size={10} /> {pedido.courier || "Motorista Central 1"}
         </span>
-
         {pedido.liquidado && (
-          pedido.cuenta_liquidacion === 'corte_legacy' ? (
-            <span className="inline-flex items-center gap-0.5 rounded-md border border-[var(--bd)] bg-sf px-1.5 py-0.5 text-[9px] font-medium tx-mu">
-              Archivado
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-0.5 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-600">
-              ✓ Liquidado
-            </span>
-          )
+          <span className={pedido.cuenta_liquidacion === 'corte_legacy' ? 'tx-mu' : 'text-emerald-600 dark:text-emerald-400 font-medium'}>
+            · {pedido.cuenta_liquidacion === 'corte_legacy' ? 'Archivado' : 'Liquidado'}
+          </span>
         )}
       </div>
 
-      {/* Badge de Encargo / Programación */}
+      {/* Encargo / Programación */}
       {encargoInfo && (
-        <div className={`mt-2 flex items-center justify-between gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold ${
+        <div className={`mt-2 flex items-center justify-between gap-1 px-2 py-1 rounded-md border text-[10px] font-medium ${
           encargoInfo.urgencia === 'hoy'
-            ? 'bg-rose-500/15 text-rose-600 border-rose-500/30 animate-pulse font-black'
+            ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 font-semibold'
             : encargoInfo.urgencia === 'manana'
-            ? 'bg-amber-500/15 text-amber-600 border-amber-500/30'
-            : encargoInfo.urgencia === 'vencido'
-            ? 'bg-red-500/15 text-red-600 border-red-500/30'
-            : 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20'
+            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+            : 'bg-sf tx-mu border-[var(--bd)]'
         }`}>
           <span className="flex items-center gap-1">
-            <CalendarClock size={12} />
-            <span>{pedido.fecha_programada ? `Para ${pedido.fecha_programada}` : 'Encargo programado'}</span>
+            <CalendarClock size={11} />
+            <span className="font-mono">{pedido.fecha_programada ? `Para ${pedido.fecha_programada}` : 'Encargo'}</span>
           </span>
-          <span className="uppercase text-[9px] font-black">{encargoInfo.texto}</span>
+          <span className="uppercase text-[9px] font-semibold">{encargoInfo.texto}</span>
         </div>
       )}
 
       {/* Notas del cliente */}
       {pedido.notas && (
-        <p className="mt-1.5 text-[10px] italic tx-mu truncate bg-sf px-2 py-0.5 rounded border border-[var(--bd)]">
-          💬 {pedido.notas}
+        <p className="mt-2 text-[11px] tx-mu truncate bg-sf px-2 py-1 rounded-md border border-[var(--bd)]">
+          {pedido.notas}
         </p>
       )}
 
@@ -2689,10 +2552,10 @@ function PedidoCard({
       {(estado === "programado" || (encargo && estado === "nuevo")) && onCambiarDirecto && (
         <button
           onClick={() => onCambiarDirecto(pedido, 'por_empacar')}
-          className="mt-2.5 w-full py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 rounded-lg text-[10px] font-black flex items-center justify-center gap-1.5 transition-colors border border-amber-500/30 shadow-sm"
+          className="mt-2.5 w-full py-1.5 bg-sf hover:border-[var(--tx)] text-[var(--tx)] rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors border border-[var(--bd)]"
           title="Mover inmediatamente a Por Empacar en Bodega"
         >
-          <Zap size={12} /> ⚡ Pasar a Empacar en Bodega
+          <Zap size={12} /> Pasar a Empacar en Bodega
         </button>
       )}
 
@@ -2708,7 +2571,7 @@ function PedidoCard({
 
         <button
           onClick={() => onOpenWhatsapp(pedido)}
-          className={`${btnBase} text-emerald-600 hover:bg-emerald-500/10`}
+          className={`${btnBase} text-emerald-600 dark:text-emerald-400`}
           title="Plantillas de WhatsApp"
         >
           <MessageCircle className="w-3.5 h-3.5" />
@@ -2724,7 +2587,7 @@ function PedidoCard({
 
         <button
           onClick={() => onEditar(pedido)}
-          className={`${btnBase} text-indigo-500 hover:bg-indigo-500/10`}
+          className={`${btnBase} text-[var(--tx)]`}
           title="Editar pedido"
         >
           <Edit className="w-3.5 h-3.5" />
@@ -2732,7 +2595,7 @@ function PedidoCard({
 
         <button
           onClick={() => onBorrar(pedido)}
-          className={`${btnBase} text-rose-500 hover:bg-rose-500/10`}
+          className={`${btnBase} text-rose-500`}
           title="Eliminar pedido"
         >
           <Trash2 className="w-3.5 h-3.5" />
@@ -2743,20 +2606,20 @@ function PedidoCard({
       {(estado === "en_camino" || estado === "entregado") && !pedido.liquidado && (
         <button
           onClick={() => onLiquidar(pedido)}
-          className="mt-2 w-full py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-colors border border-emerald-500/20"
+          className="mt-2 w-full py-1.5 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1 transition-opacity"
         >
-          <DollarSign size={12} /> Liquidar {dinero(pedido.total)} en Finanzas
+          <DollarSign size={12} /> Liquidar {dinero(pedido.total)}
         </button>
       )}
 
       {/* Selector directo de estado / etapa */}
       <div className="mt-2.5 pt-2 border-t border-[var(--bd)]">
         <div className="flex items-center justify-between gap-1 mb-1">
-          <label className="text-[9px] font-black uppercase tracking-wider tx-mu">
-            Estado / Fase:
+          <label className="text-[10px] font-medium uppercase tracking-wider tx-mu">
+            Fase
           </label>
           {moviendo && (
-            <span className="text-[9px] text-indigo-500 font-bold flex items-center gap-1">
+            <span className="text-[10px] tx-mu font-medium flex items-center gap-1">
               <Loader2 size={10} className="animate-spin" /> Guardando...
             </span>
           )}
@@ -2771,29 +2634,17 @@ function PedidoCard({
                 onCambiarDirecto(pedido, nuevo);
               }
             }}
-            className={`w-full py-1.5 pl-2.5 pr-8 rounded-xl text-xs font-bold border transition-all outline-none cursor-pointer appearance-none shadow-sm ${
-              estado === 'nuevo'
-                ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/30 hover:bg-sky-500/20'
-                : estado === 'programado'
-                ? 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/20'
-                : estado === 'por_empacar'
-                ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30 hover:bg-amber-500/20'
-                : estado === 'en_camino'
-                ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/30 hover:bg-violet-500/20'
-                : estado === 'entregado'
-                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20'
-                : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30 hover:bg-rose-500/20'
-            }`}
+            className="w-full py-1.5 pl-2.5 pr-8 rounded-lg text-xs font-medium bg-sf border border-[var(--bd)] text-[var(--tx)] transition-colors outline-none cursor-pointer appearance-none focus:border-[var(--tx)]"
           >
-            <option value="nuevo">📥 Nuevo (Despacho Hoy)</option>
-            <option value="programado">📅 Encargo / Programado</option>
-            <option value="por_empacar">📦 Por Empacar (Bodega)</option>
-            <option value="en_camino">🛵 En Camino (Ruta)</option>
-            <option value="entregado">✅ Entregado</option>
-            <option value="cancelado">❌ Cancelado / Novedad</option>
+            <option value="nuevo">Nuevo (Despacho Hoy)</option>
+            <option value="programado">Encargo / Programado</option>
+            <option value="por_empacar">Por Empacar (Bodega)</option>
+            <option value="en_camino">En Camino (Ruta)</option>
+            <option value="entregado">Entregado</option>
+            <option value="cancelado">Cancelado / Novedad</option>
           </select>
           <div className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 opacity-60">
-            <ChevronDown size={14} />
+            <ChevronDown size={13} />
           </div>
         </div>
       </div>

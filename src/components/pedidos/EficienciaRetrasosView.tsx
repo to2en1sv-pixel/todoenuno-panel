@@ -614,14 +614,14 @@ export function EficienciaRetrasosView({
   return (
     <div className="space-y-5">
       {/* 1. KPIs DE EFICIENCIA OPERATIVA + RELOJ CONFIGURABLE */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className="rounded-2xl border border-[var(--bd)] bg-cd p-4 shadow-sm">
+      <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 divide-y md:divide-y-0 xl:divide-x divide-[var(--bd)]">
+        <div className="p-4">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider tx-mu">
+            <span className="text-[11px] font-medium uppercase tracking-wider tx-mu">
               Cumplimiento Reloj (SLA)
             </span>
             <CheckCircle2
-              size={16}
+              size={15}
               className={
                 evaluated.slaCompliancePct >= 85
                   ? 'text-emerald-500'
@@ -631,23 +631,23 @@ export function EficienciaRetrasosView({
               }
             />
           </div>
-          <div className="mt-2 flex items-baseline gap-2">
+          <div className="mt-1.5 flex items-baseline gap-2">
             <span
-              className={`text-3xl font-black font-mono ${
+              className={`text-2xl font-bold font-mono tabular-nums ${
                 evaluated.slaCompliancePct >= 85
-                  ? 'text-emerald-600'
+                  ? 'text-emerald-600 dark:text-emerald-400'
                   : evaluated.slaCompliancePct >= 65
-                  ? 'text-amber-600'
-                  : 'text-rose-600'
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-rose-600 dark:text-rose-400'
               }`}
             >
               {evaluated.slaCompliancePct}%
             </span>
-            <span className="text-xs tx-mu">
-              ({evaluated.onTimeCount}/{evaluated.evaluablesCount} activos en tiempo)
+            <span className="text-xs tx-mu font-mono tabular-nums">
+              ({evaluated.onTimeCount}/{evaluated.evaluablesCount} en tiempo)
             </span>
           </div>
-          <div className="mt-2 h-1.5 rounded-full bg-sf overflow-hidden">
+          <div className="mt-2.5 h-1.5 rounded-full bg-sf overflow-hidden">
             <div
               className={`h-full rounded-full ${
                 evaluated.slaCompliancePct >= 85
@@ -661,82 +661,82 @@ export function EficienciaRetrasosView({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[var(--bd)] bg-cd p-4 shadow-sm">
+        <div className="p-4">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider tx-mu">
+            <span className="text-[11px] font-medium uppercase tracking-wider tx-mu">
               Tiempo Promedio Activo
             </span>
-            <Clock size={16} className="text-indigo-500" />
+            <Clock size={15} className="tx-mu" />
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <div className="p-2 rounded-xl bg-sf border border-[var(--bd)]">
-              <span className="text-[10px] tx-mu block">Bodega</span>
-              <span className="text-lg font-black font-mono">
+          <div className="mt-2 grid grid-cols-2 gap-3">
+            <div>
+              <span className="text-[11px] tx-mu block">Bodega</span>
+              <span className="text-lg font-bold font-mono tabular-nums">
                 {formatDurationCompact(evaluated.avgBodegaH)}
               </span>
             </div>
-            <div className="p-2 rounded-xl bg-sf border border-[var(--bd)]">
-              <span className="text-[10px] tx-mu block">En Ruta</span>
-              <span className="text-lg font-black font-mono">
+            <div>
+              <span className="text-[11px] tx-mu block">En Ruta</span>
+              <span className="text-lg font-bold font-mono tabular-nums">
                 {formatDurationCompact(evaluated.avgRutaH)}
               </span>
             </div>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4 shadow-sm">
+        <div className="p-4">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-rose-600">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-rose-600 dark:text-rose-400">
               Paquetes con Retraso
             </span>
-            <AlertTriangle size={16} className="text-rose-500" />
+            <AlertTriangle size={15} className="text-rose-500" />
           </div>
-          <div className="mt-2 flex items-baseline justify-between gap-2">
-            <span className="text-3xl font-black font-mono text-rose-600">
+          <div className="mt-1.5 flex items-baseline justify-between gap-2">
+            <span className="text-2xl font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400">
               {evaluated.delayedAll.length}
             </span>
-            <span className="text-sm font-black font-mono text-rose-600">
+            <span className="text-sm font-semibold font-mono tabular-nums text-rose-600 dark:text-rose-400">
               {money(evaluated.moneyAtRisk)} en riesgo
             </span>
           </div>
           <p className="mt-1.5 text-[11px] tx-mu">
-            <strong className="text-rose-600">{evaluated.pendingNotify.length} sin avisar</strong> ·{' '}
-            {evaluated.notifiedList.length} ya notificados/reprogramados
+            <strong className="text-rose-600 dark:text-rose-400">{evaluated.pendingNotify.length} sin avisar</strong> ·{' '}
+            {evaluated.notifiedList.length} notificados
           </p>
         </div>
 
         {/* Configuración rápida de Reloj SLA */}
-        <div className="rounded-2xl border border-[var(--bd)] bg-cd p-4 shadow-sm space-y-2.5">
+        <div className="p-4 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider tx-mu flex items-center gap-1">
-              <Settings2 size={13} className="text-amber-500" /> Reloj de Despacho (SLA)
+            <span className="text-[11px] font-medium uppercase tracking-wider tx-mu flex items-center gap-1">
+              <Settings2 size={12} /> Reloj SLA
             </span>
             {savedFeedback && (
-              <span className="text-[10px] font-bold text-emerald-600">✓ Guardado</span>
+              <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">Guardado</span>
             )}
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-[10px] tx-mu block">Límite Bodega (h)</label>
+              <label className="text-[10px] tx-mu block">Bodega (h)</label>
               <input
                 type="number"
                 min={4}
                 max={168}
                 value={bodegaInput}
                 onChange={(e) => setBodegaInput(Number(e.target.value) || 24)}
-                className="mt-0.5 w-full px-2.5 py-1.5 rounded-lg bg-sf border border-[var(--bd)] text-xs font-mono font-bold"
+                className="mt-0.5 w-full px-2 py-1 rounded-md bg-sf border border-[var(--bd)] text-xs font-mono font-semibold"
               />
             </div>
             <div>
-              <label className="text-[10px] tx-mu block">Límite Ruta (h)</label>
+              <label className="text-[10px] tx-mu block">Ruta (h)</label>
               <input
                 type="number"
                 min={6}
                 max={240}
                 value={rutaInput}
                 onChange={(e) => setRutaInput(Number(e.target.value) || 36)}
-                className="mt-0.5 w-full px-2.5 py-1.5 rounded-lg bg-sf border border-[var(--bd)] text-xs font-mono font-bold"
+                className="mt-0.5 w-full px-2 py-1 rounded-md bg-sf border border-[var(--bd)] text-xs font-mono font-semibold"
               />
             </div>
           </div>
@@ -745,104 +745,84 @@ export function EficienciaRetrasosView({
             type="button"
             onClick={handleSaveSla}
             disabled={savingSla}
-            className="w-full py-1.5 rounded-xl bg-sf hover:bg-amber-500 hover:text-white border border-[var(--bd)] text-[11px] font-bold transition-colors"
+            className="w-full py-1.5 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 text-[11px] font-semibold transition-opacity"
           >
             {savingSla ? 'Guardando...' : 'Aplicar tiempos'}
           </button>
         </div>
-      </div>
+      </section>
 
       {/* 2. CUELLOS DE BOTELLA POR COURIER */}
       {evaluated.couriers.length > 0 && (
-        <div className="rounded-2xl border border-[var(--bd)] bg-cd p-4 shadow-sm">
-          <h3 className="text-xs font-black uppercase tracking-wider tx-mu flex items-center gap-1.5 mb-3">
-            <Truck size={14} className="text-indigo-500" /> Eficiencia por Courier / Flota Activa
+        <section className="rounded-xl border border-[var(--bd)] bg-cd p-4">
+          <h3 className="text-[11px] font-medium uppercase tracking-wider tx-mu flex items-center gap-1.5 mb-3">
+            <Truck size={13} /> Eficiencia por Courier / Flota Activa
           </h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
             {evaluated.couriers.map((c) => (
               <div
                 key={c.courier}
-                className={`p-3 rounded-xl border ${
+                className={`p-3 rounded-lg border ${
                   c.retrasados > 0
                     ? 'bg-rose-500/5 border-rose-500/25'
                     : 'bg-sf border-[var(--bd)]'
                 }`}
               >
-                <div className="text-xs font-bold truncate">{c.courier}</div>
+                <div className="text-xs font-semibold truncate">{c.courier}</div>
                 <div className="mt-1 flex items-center justify-between text-[11px]">
-                  <span className="tx-mu">{c.activos} activos</span>
+                  <span className="tx-mu font-mono tabular-nums">{c.activos} act.</span>
                   <span
-                    className={`font-black font-mono ${
-                      c.retrasados > 0 ? 'text-rose-600' : 'text-emerald-600'
+                    className={`font-semibold font-mono tabular-nums ${
+                      c.retrasados > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
                     }`}
                   >
-                    {c.retrasados > 0 ? `${c.retrasados} atrasados` : 'Al día'}
+                    {c.retrasados > 0 ? `${c.retrasados} atras.` : 'Al día'}
                   </span>
                 </div>
                 {c.montoRiesgo > 0 && (
-                  <div className="mt-0.5 text-[10px] font-mono text-rose-500">
+                  <div className="mt-0.5 text-[10px] font-mono tabular-nums text-rose-500">
                     {money(c.montoRiesgo)} en demora
                   </div>
                 )}
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       {/* 3. BANDEJA ACCIONABLE DE RETRASOS Y REPROGRAMACIÓN */}
-      <div className="rounded-2xl border border-[var(--bd)] bg-cd shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-[var(--bd)] bg-sf flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <section className="rounded-xl border border-[var(--bd)] bg-cd overflow-hidden">
+        <div className="p-4 border-b border-[var(--bd)] flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-black flex items-center gap-2">
-              <Clock size={16} className="text-rose-500" />
-              Bandeja de Retrasos de Paquetes & Avisos por WhatsApp
+            <h3 className="text-sm font-bold flex items-center gap-2">
+              <Clock size={15} className="text-rose-500" />
+              Bandeja de Retrasos de Paquetes &amp; Avisos por WhatsApp
             </h3>
             <p className="text-xs tx-mu mt-0.5">
-              Los pedidos que superan el reloj prudencial aparecen aquí automáticamente para avisar demoras por Evolution API y reprogramar su entrega.
+              Pedidos fuera de SLA listos para avisar demoras por Evolution API y reprogramar entrega.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-1.5">
             {[
-              {
-                id: 'pendientes_avisar' as DelayFilter,
-                label: 'Pendientes de avisar',
-                count: evaluated.pendingNotify.length,
-                badgeCls: 'bg-rose-600 text-white',
-              },
-              {
-                id: 'todos_retrasados' as DelayFilter,
-                label: 'Todos los retrasados',
-                count: evaluated.delayedAll.length,
-                badgeCls: 'bg-rose-500/15 text-rose-600',
-              },
-              {
-                id: 'por_vencer' as DelayFilter,
-                label: 'Por vencer',
-                count: evaluated.warningList.length,
-                badgeCls: 'bg-amber-500/15 text-amber-600',
-              },
-              {
-                id: 'notificados' as DelayFilter,
-                label: 'Ya avisados / Reprog.',
-                count: evaluated.notifiedList.length,
-                badgeCls: 'bg-emerald-500/15 text-emerald-600',
-              },
+              { id: 'pendientes_avisar' as DelayFilter, label: 'Pendientes de avisar', count: evaluated.pendingNotify.length },
+              { id: 'todos_retrasados' as DelayFilter, label: 'Todos retrasados', count: evaluated.delayedAll.length },
+              { id: 'por_vencer' as DelayFilter, label: 'Por vencer', count: evaluated.warningList.length },
+              { id: 'notificados' as DelayFilter, label: 'Ya avisados', count: evaluated.notifiedList.length },
             ].map((tab) => (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => setFilterTab(tab.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-colors ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition-colors ${
                   filterTab === tab.id
-                    ? 'bg-cd border-[var(--tx)] text-[var(--tx)] shadow-sm'
-                    : 'bg-cd/40 border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
+                    ? 'bg-[var(--tx)] border-[var(--tx)] text-[var(--cd)] font-semibold'
+                    : 'bg-sf border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
                 }`}
               >
                 <span>{tab.label}</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${tab.badgeCls}`}>
-                  {tab.count}
+                <span className="font-mono tabular-nums text-[11px] opacity-80">
+                  ({tab.count})
                 </span>
               </button>
             ))}
@@ -851,13 +831,13 @@ export function EficienciaRetrasosView({
 
         {visibleRows.length === 0 ? (
           <div className="p-10 text-center space-y-2">
-            <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
-            <p className="text-sm font-bold">
+            <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+            <p className="text-sm font-semibold">
               {filterTab === 'pendientes_avisar'
                 ? 'No tienes paquetes retrasados pendientes de avisar al cliente'
                 : 'No hay paquetes en esta categoría'}
             </p>
-            <p className="text-xs tx-mu">
+            <p className="text-xs tx-mu font-mono">
               Reloj configurado: {slaSettings.bodegaHours}h máx. en bodega · {slaSettings.rutaHours}h máx. en ruta.
             </p>
           </div>
@@ -870,23 +850,23 @@ export function EficienciaRetrasosView({
               return (
                 <div
                   key={pedido.id}
-                  className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-sf/60 transition-colors"
+                  className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-sf/50 transition-colors"
                 >
-                  <div className="space-y-1.5 min-w-0 flex-1">
+                  <div className="space-y-1 min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-sf border border-[var(--bd)]">
+                      <span className="font-mono text-[11px] font-semibold px-2 py-0.5 rounded bg-sf border border-[var(--bd)]">
                         {codigo}
                       </span>
-                      <span className="font-black text-sm truncate">
+                      <span className="font-semibold text-sm truncate">
                         {pedido.nombre_cliente || 'Cliente sin nombre'}
                       </span>
                       <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black border ${
+                        className={`inline-flex items-center gap-1 text-[11px] font-mono tabular-nums font-semibold ${
                           sla.severity === 'delayed'
-                            ? 'bg-rose-500/15 text-rose-600 border-rose-500/30'
+                            ? 'text-rose-600 dark:text-rose-400'
                             : sla.severity === 'warning'
-                            ? 'bg-amber-500/15 text-amber-600 border-amber-500/30'
-                            : 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30'
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-emerald-600 dark:text-emerald-400'
                         }`}
                       >
                         <Clock size={11} />
@@ -894,9 +874,8 @@ export function EficienciaRetrasosView({
                       </span>
 
                       {sla.yaNotificado && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
-                          <CheckCircle2 size={11} />
-                          Avisado{sla.reprogramadoPara ? ` · Reprog. ${sla.reprogramadoPara}` : ''}
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                          · <CheckCircle2 size={11} /> Avisado{sla.reprogramadoPara ? ` (${sla.reprogramadoPara})` : ''}
                         </span>
                       )}
                     </div>
@@ -929,7 +908,7 @@ export function EficienciaRetrasosView({
                       <button
                         type="button"
                         onClick={() => onCambiarEstadoDirecto(pedido, 'en_camino')}
-                        className="px-3 py-2 rounded-xl border border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20 text-violet-600 dark:text-violet-300 text-xs font-bold inline-flex items-center gap-1.5"
+                        className="px-3 py-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20 text-violet-600 dark:text-violet-300 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
                       >
                         <Truck size={13} /> Pasar a Ruta
                       </button>
@@ -939,7 +918,7 @@ export function EficienciaRetrasosView({
                       <button
                         type="button"
                         onClick={() => onCambiarEstadoDirecto(pedido, 'entregado')}
-                        className="px-3 py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 text-xs font-bold inline-flex items-center gap-1.5"
+                        className="px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
                       >
                         <CheckCircle2 size={13} /> Marcar Entregado
                       </button>
@@ -948,14 +927,14 @@ export function EficienciaRetrasosView({
                     <button
                       type="button"
                       onClick={() => onOpenDelayModal(pedido)}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-black inline-flex items-center gap-1.5 shadow-sm transition-colors ${
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors ${
                         sla.yaNotificado
                           ? 'border border-[var(--bd)] bg-sf hover:bg-cd text-[var(--tx)]'
-                          : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                          : 'bg-[var(--tx)] hover:opacity-90 text-[var(--cd)]'
                       }`}
                     >
-                      <MessageCircle size={14} />
-                      {sla.yaNotificado ? 'Re-avisar / Cambiar fecha' : 'Reprogramar y Avisar (WhatsApp)'}
+                      <MessageCircle size={13} />
+                      {sla.yaNotificado ? 'Re-avisar / Cambiar fecha' : 'Reprogramar y Avisar'}
                     </button>
                   </div>
                 </div>
@@ -963,7 +942,7 @@ export function EficienciaRetrasosView({
             })}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

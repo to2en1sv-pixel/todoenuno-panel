@@ -545,56 +545,44 @@ export function DespachoGuiasView({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* KPIs enfocados de Despacho */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="bg-cd bd rounded-2xl p-3.5 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0">
-            <Package size={18} />
-          </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider tx-mu">Por Empacar</p>
-            <p className="text-lg font-black">{counts.porEmpacar}</p>
-          </div>
+      <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
+        <div className="p-4">
+          <p className="text-[11px] font-medium uppercase tracking-wider tx-mu">Por Empacar</p>
+          <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-amber-600 dark:text-amber-400">
+            {counts.porEmpacar}
+          </p>
         </div>
 
-        <div className="bg-cd bd rounded-2xl p-3.5 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/15 text-indigo-500 flex items-center justify-center shrink-0">
-            <Truck size={18} />
-          </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider tx-mu">En Ruta</p>
-            <p className="text-lg font-black">{counts.enCamino}</p>
-          </div>
+        <div className="p-4">
+          <p className="text-[11px] font-medium uppercase tracking-wider tx-mu">En Ruta</p>
+          <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-[var(--tx)]">
+            {counts.enCamino}
+          </p>
         </div>
 
-        <div className="bg-cd bd rounded-2xl p-3.5 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0">
-            <Camera size={18} />
-          </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider tx-mu">Fotos Adjuntas</p>
-            <p className="text-lg font-black">{counts.withPhoto}</p>
-          </div>
+        <div className="p-4">
+          <p className="text-[11px] font-medium uppercase tracking-wider tx-mu">Fotos Adjuntas</p>
+          <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-emerald-600 dark:text-emerald-400">
+            {counts.withPhoto}
+          </p>
         </div>
 
-        <div className="bg-cd bd rounded-2xl p-3.5 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-sky-500/15 text-sky-500 flex items-center justify-center shrink-0">
-            <Send size={18} />
-          </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider tx-mu">Listos en Lote</p>
-            <p className="text-lg font-black">{readySelectedOrders.length}</p>
-          </div>
+        <div className="p-4">
+          <p className="text-[11px] font-medium uppercase tracking-wider tx-mu">Listos en Lote</p>
+          <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-[var(--tx)]">
+            {readySelectedOrders.length}
+          </p>
         </div>
-      </div>
+      </section>
 
       {/* Compositor compartido de mensaje + envío en lote */}
-      <section className="bg-cd bd rounded-2xl p-4 space-y-3">
+      <section className="bg-cd bd rounded-xl p-5 space-y-3">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2 pb-3 border-b border-[var(--bd)]">
           <div>
             <h2 className="text-sm font-bold flex items-center gap-2">
-              <Camera size={16} className="text-emerald-500" />
+              <Camera size={15} className="tx-mu" />
               Envío de Foto de Paquete + Guía por Evolution API
             </h2>
             <p className="text-[11px] tx-mu mt-0.5">
@@ -603,7 +591,7 @@ export function DespachoGuiasView({
           </div>
           <Link
             to="/sistema?tab=plantillas"
-            className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-sf bd hover:border-indigo-500 self-start"
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-sf bd hover:border-[var(--tx)] self-start"
           >
             <Settings2 size={12} /> Editar plantilla en Sistema
           </Link>
@@ -724,7 +712,7 @@ export function DespachoGuiasView({
       </section>
 
       {/* Filtros de cola de despacho */}
-      <div className="bg-cd bd rounded-2xl p-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1.5">
           {[
             { id: 'por_empacar' as StageFilter, label: `Por Empacar (${counts.porEmpacar})` },
@@ -735,10 +723,10 @@ export function DespachoGuiasView({
               key={tab.id}
               type="button"
               onClick={() => setStageFilter(tab.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
                 stageFilter === tab.id
-                  ? 'bg-emerald-600 text-white shadow'
-                  : 'bg-sf bd tx-mu hover:text-[var(--tx)]'
+                  ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)] font-semibold'
+                  : 'bg-cd border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
               }`}
             >
               {tab.label}
@@ -748,10 +736,10 @@ export function DespachoGuiasView({
           <button
             type="button"
             onClick={toggleSelectAllWithPhoto}
-            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-sf bd hover:border-emerald-500 flex items-center gap-1.5 cursor-pointer"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-cd bd hover:border-[var(--tx)] flex items-center gap-1.5 cursor-pointer"
             title="Marcar/desmarcar todos los pedidos visibles que ya tienen foto"
           >
-            <CheckSquare size={13} className="text-emerald-500" />
+            <CheckSquare size={13} className="text-emerald-600 dark:text-emerald-400" />
             Seleccionar con foto
           </button>
         </div>
@@ -764,14 +752,14 @@ export function DespachoGuiasView({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar cliente, teléfono, código o SKU..."
-              className="w-full bg-sf bd rounded-xl pl-8 pr-3 py-1.5 text-xs outline-none focus:border-emerald-500"
+              className="w-full bg-cd bd rounded-lg pl-8 pr-3 py-1.5 text-xs outline-none focus:border-[var(--tx)]"
             />
           </div>
 
           <select
             value={courierFilter}
             onChange={(e) => setCourierFilter(e.target.value)}
-            className="bg-sf bd rounded-xl px-2.5 py-1.5 text-xs font-semibold outline-none focus:border-emerald-500"
+            className="bg-cd bd rounded-lg px-2.5 py-1.5 text-xs font-medium outline-none focus:border-[var(--tx)]"
           >
             <option value="Todos">Todos los Couriers</option>
             {couriers.map((c) => (
@@ -785,7 +773,7 @@ export function DespachoGuiasView({
             <button
               type="button"
               onClick={onRefresh}
-              className="p-2 rounded-xl bg-sf bd hover:border-indigo-500 cursor-pointer"
+              className="p-2 rounded-lg bg-cd bd hover:border-[var(--tx)] cursor-pointer"
               title="Recargar pedidos"
             >
               <RefreshCw size={14} />
@@ -796,15 +784,15 @@ export function DespachoGuiasView({
 
       {/* Lista de tarjetas de despacho con foto */}
       {visibleOrders.length === 0 ? (
-        <div className="bg-cd bd rounded-2xl py-12 px-4 text-center space-y-2">
-          <Package size={28} className="mx-auto opacity-30" />
-          <p className="text-sm font-bold">No hay paquetes en esta vista de despacho</p>
+        <div className="bg-cd bd rounded-xl py-12 px-4 text-center space-y-2">
+          <Package size={24} className="mx-auto tx-mu opacity-40" />
+          <p className="text-sm font-semibold">No hay paquetes en esta vista de despacho</p>
           <p className="text-xs tx-mu">
             Cuando confirmes pedidos a <strong>Por Empacar</strong>, aparecerán aquí listos para tomarles foto con su guía y enviarlos por WhatsApp.
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3.5">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {visibleOrders.map((order) => {
             const localPhoto = photosByOrder[order.id];
             const savedEv = evidenceMap[order.id];
@@ -824,11 +812,11 @@ export function DespachoGuiasView({
                 key={order.id}
                 onPaste={(e) => handlePasteOnOrder(order.id, e)}
                 tabIndex={0}
-                className={`bg-cd rounded-2xl border p-4 flex flex-col gap-3 transition-all outline-none focus-within:ring-2 focus-within:ring-emerald-500/30 ${
+                className={`bg-cd rounded-xl border p-4 flex flex-col gap-3 transition-colors outline-none ${
                   isSelected
-                    ? 'border-emerald-500 shadow-sm'
+                    ? 'border-[var(--tx)] ring-1 ring-[var(--tx)]'
                     : dragOverOrderId === order.id
-                    ? 'border-indigo-500 bg-indigo-500/5'
+                    ? 'border-emerald-500 bg-sf/50'
                     : 'border-[var(--bd)]'
                 }`}
               >
@@ -840,32 +828,32 @@ export function DespachoGuiasView({
                       onClick={() =>
                         setSelectedIds((prev) => ({ ...prev, [order.id]: !prev[order.id] }))
                       }
-                      className="mt-0.5 text-emerald-600 cursor-pointer shrink-0"
+                      className="mt-0.5 text-[var(--tx)] cursor-pointer shrink-0"
                       title="Seleccionar para envío en lote"
                     >
-                      {isSelected ? <CheckSquare size={18} /> : <Square size={18} className="tx-mu" />}
+                      {isSelected ? <CheckSquare size={17} /> : <Square size={17} className="tx-mu" />}
                     </button>
 
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-sm font-black truncate">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-bold truncate">
                           {order.nombre_cliente || 'Cliente sin nombre'}
                         </span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sf bd tx-mu">
-                          {orderCode}
+                        <span className="text-[11px] font-mono tx-mu">
+                          #{orderCode}
                         </span>
                         <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          className={`text-[11px] font-medium ${
                             isPorEmpacar
-                              ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                              : 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-[var(--tx)]'
                           }`}
                         >
-                          {isPorEmpacar ? 'Por Empacar' : 'En Ruta'}
+                          · {isPorEmpacar ? 'Por Empacar' : 'En Ruta'}
                         </span>
                         {alreadySent && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
-                            <CheckCircle2 size={10} /> Foto enviada
+                          <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                            · <CheckCircle2 size={11} /> Foto enviada
                           </span>
                         )}
                       </div>

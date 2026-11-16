@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { emitOsEvent } from '@/lib/osEvents'
-import { KpiCard } from '@/components/KpiCard'
 import { BovedaProductosRoas } from '@/components/BovedaProductosRoas'
 import { MetaAdsLiveView } from '@/components/rentabilidad/MetaAdsLiveView'
-import { Sparkles, BarChart3, Zap, RefreshCw } from 'lucide-react'
+import { RefreshCw, Trash2, X } from 'lucide-react'
 import {
   construirRoas,
   etiquetaMes,
@@ -36,14 +35,13 @@ export function RentabilidadPage() {
   const [cargando, setCargando] = useState<boolean>(true)
   const [guardando, setGuardando] = useState<boolean>(false)
   const [syncingMeta, setSyncingMeta] = useState<boolean>(false)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [eliminandoId, setEliminandoId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [exito, setExito] = useState<string | null>(null)
   const [form, setForm] = useState(FORM_INICIAL)
 
   const rango = useMemo(() => rangoMes(mes), [mes])
-
-  /* ------------------------------ Carga ------------------------------ */
 
   const cargarDatos = useCallback(async () => {
     setCargando(true)
@@ -118,8 +116,6 @@ export function RentabilidadPage() {
     }
   }
 
-  /* ----------------------------- Acciones ---------------------------- */
-
   const actualizarCampo = (campo: keyof typeof FORM_INICIAL, valor: string) => {
     setForm((prev) => ({ ...prev, [campo]: valor }))
   }
@@ -165,7 +161,6 @@ export function RentabilidadPage() {
       setExito(`Gasto de ${formatCurrency(monto)} registrado para ${codigo}.`)
       setForm({ ...FORM_INICIAL, fecha: form.fecha })
 
-      // Emitir evento al OS Event Store para Money Engine & trazabilidad
       try {
         await emitOsEvent({
           type: 'marketing.ad.expense',
@@ -192,11 +187,6 @@ export function RentabilidadPage() {
   }
 
   const handleEliminar = async (gasto: GastoPublicidad) => {
-    const confirmado = window.confirm(
-      `¿Eliminar el gasto de ${formatCurrency(Number(gasto.monto))} (${gasto.codigo_anuncio})?`,
-    )
-    if (!confirmado) return
-
     setEliminandoId(gasto.id)
     setError(null)
     setExito(null)
@@ -210,12 +200,11 @@ export function RentabilidadPage() {
       setError(deleteError.message)
     } else {
       setGastos((prev) => prev.filter((item) => item.id !== gasto.id))
+      setConfirmDeleteId(null)
     }
 
     setEliminandoId(null)
   }
-
-  /* ---------------------------- Derivados ---------------------------- */
 
   const filasRoas = useMemo(
     () => construirRoas(ordenes, gastos),
@@ -235,352 +224,371 @@ export function RentabilidadPage() {
     }
   }, [filasRoas])
 
-  /* ------------------------------- UI -------------------------------- */
-
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white dark:bg-[var(--cd)] p-5 rounded-2xl border border-slate-200 dark:border-[var(--bd)] shadow-sm">
-        <div className="min-w-0 shrink-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <BarChart3 className="text-indigo-600 shrink-0" size={24} />
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-[var(--tx)] tracking-tight whitespace-normal sm:whitespace-nowrap">
-              Rentabilidad, ROAS & Ciclos de Pauta
-            </h1>
-          </div>
-          <p className="mt-1 text-xs text-slate-500 dark:text-[var(--mu)] max-w-xl">
-            Cruce de inversión publicitaria con ventas de WhatsApp y memoria histórica de rendimiento por producto.
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-16">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--tx)]">
+            Rentabilidad
+          </h1>
+          <p className="text-xs text-[var(--mu)] mt-1">
+            Cruce de inversión publicitaria, ventas de WhatsApp y ciclos de pauta · {etiquetaMes(mes)}
           </p>
         </div>
 
-        {/* Selector de Pestañas */}
-        <div className="flex bg-slate-100 dark:bg-[var(--sf)] p-1 rounded-xl text-xs font-bold border border-slate-200 dark:border-[var(--bd)] w-full lg:w-auto overflow-x-auto">
-          <button
-            onClick={() => setVistaActiva('mensual')}
-            className={`flex-1 lg:flex-none px-3.5 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap ${
-              vistaActiva === 'mensual'
-                ? 'bg-white dark:bg-[var(--cd)] shadow-sm text-slate-900 dark:text-[var(--tx)]'
-                : 'text-slate-500 dark:text-[var(--mu)] hover:text-slate-900 dark:hover:text-[var(--tx)]'
-            }`}
-          >
-            <BarChart3 size={14} /> ROAS Mensual
-          </button>
-          <button
-            onClick={() => setVistaActiva('meta_ads')}
-            className={`flex-1 lg:flex-none px-3.5 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap ${
-              vistaActiva === 'meta_ads'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-indigo-700 dark:text-indigo-400 hover:bg-indigo-100/60'
-            }`}
-          >
-            <Zap size={14} /> Meta Ads Live
-          </button>
-          <button
-            onClick={() => setVistaActiva('boveda')}
-            className={`flex-1 lg:flex-none px-3.5 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap ${
-              vistaActiva === 'boveda'
-                ? 'bg-amber-500 text-white shadow-sm'
-                : 'text-amber-700 dark:text-amber-400 hover:bg-amber-100/50'
-            }`}
-          >
-            <Sparkles size={14} /> Bóveda de Productos & Ciclos
-          </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {vistaActiva === 'mensual' && (
+            <>
+              <input
+                type="month"
+                value={mes}
+                onChange={(e) => setMes(e.target.value || mesActual())}
+                className="rounded-lg border border-[var(--bd)] bg-cd px-3 py-1.5 text-xs font-medium text-[var(--tx)] outline-none focus:border-[var(--tx)]"
+              />
+              <button
+                type="button"
+                onClick={() => void handleQuickMetaSync()}
+                disabled={syncingMeta}
+                className="px-3.5 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-opacity disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={syncingMeta ? 'animate-spin' : ''} />
+                {syncingMeta ? 'Sincronizando...' : 'Sincronizar Meta Ads'}
+              </button>
+            </>
+          )}
         </div>
       </header>
 
-      {/* RENDER CONDICIONAL DE VISTAS */}
+      {/* Navegación por pestañas con línea inferior limpia */}
+      <nav className="flex items-center gap-6 border-b border-[var(--bd)] overflow-x-auto">
+        {[
+          { id: 'mensual', label: 'ROAS mensual' },
+          { id: 'meta_ads', label: 'Meta Ads Live' },
+          { id: 'boveda', label: 'Bóveda de productos y ciclos' },
+        ].map(tab => {
+          const active = vistaActiva === tab.id
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setVistaActiva(tab.id as any)}
+              className={`pb-3 text-xs font-semibold whitespace-nowrap shrink-0 border-b-2 transition-colors ${
+                active
+                  ? 'border-[var(--tx)] text-[var(--tx)]'
+                  : 'border-transparent text-[var(--mu)] hover:text-[var(--tx)]'
+              }`}
+            >
+              {tab.label}
+            </button>
+          )
+        })}
+      </nav>
+
       {vistaActiva === 'boveda' ? (
         <BovedaProductosRoas />
       ) : vistaActiva === 'meta_ads' ? (
         <MetaAdsLiveView onSynced={cargarDatos} />
       ) : (
-        <>
-          {error ? (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {error}
+        <div className="flex flex-col gap-6">
+          {error && (
+            <div className="px-4 py-2.5 rounded-lg border border-rose-500/30 bg-rose-500/10 text-xs text-rose-600 dark:text-rose-400 flex items-center justify-between gap-3">
+              <span>{error}</span>
+              <button type="button" onClick={() => setError(null)} className="opacity-70 hover:opacity-100">
+                <X size={14} />
+              </button>
             </div>
-          ) : null}
+          )}
 
-          {exito ? (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              {exito}
+          {exito && (
+            <div className="px-4 py-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-700 dark:text-emerald-300 flex items-center justify-between gap-3">
+              <span>{exito}</span>
+              <button type="button" onClick={() => setExito(null)} className="opacity-70 hover:opacity-100">
+                <X size={14} />
+              </button>
             </div>
-          ) : null}
+          )}
 
-          {/* Barra rápida de Meta Ads Sync */}
-          <section className="rounded-xl border border-indigo-200 bg-indigo-50/60 px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <Zap size={18} className="text-indigo-600 shrink-0" />
-              <div className="min-w-0">
-                <div className="text-xs font-bold text-slate-900">
-                  Importación automática de gastos desde Meta Ads
-                </div>
-                <p className="text-[11px] text-slate-600">
-                  Sincroniza el gasto real de ayer y hoy directamente en <code className="font-mono">gastos_publicidad</code> sin cargar a mano.
-                </p>
+          {/* Franja unificada de 4 KPIs ROAS */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
+            <div className="p-5">
+              <div className="text-xs font-medium text-[var(--mu)]">Ventas del período</div>
+              <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
+                {formatCurrency(totales.ventas)}
               </div>
+              <div className="text-xs text-[var(--mu)] mt-1">{etiquetaMes(mes)}</div>
             </div>
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => void handleQuickMetaSync()}
-                disabled={syncingMeta}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60"
-              >
-                <RefreshCw size={13} className={syncingMeta ? 'animate-spin' : ''} />
-                {syncingMeta ? 'Sincronizando…' : 'Sincronizar Meta Ads (Hoy/Ayer)'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setVistaActiva('meta_ads')}
-                className="inline-flex items-center gap-1 rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50"
-              >
-                Abrir Meta Ads Live →
-              </button>
+            <div className="p-5">
+              <div className="text-xs font-medium text-[var(--mu)]">Gasto en Ads</div>
+              <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
+                {formatCurrency(totales.gasto)}
+              </div>
+              <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">{gastos.length} registros</div>
+            </div>
+            <div className="p-5">
+              <div className="text-xs font-medium text-[var(--mu)]">Pedidos atribuidos</div>
+              <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
+                {formatNumber(totales.pedidos)}
+              </div>
+              <div className="text-xs text-[var(--mu)] mt-1">Con código de anuncio</div>
+            </div>
+            <div className="p-5">
+              <div className="text-xs font-medium text-[var(--mu)]">ROAS global</div>
+              <div className={`text-2xl font-bold font-mono tabular-nums mt-1.5 ${roasColorClass(totales.roasGlobal)}`}>
+                {formatRoas(totales.roasGlobal)}
+              </div>
+              <div className="text-xs text-[var(--mu)] mt-1">Retorno sobre pauta</div>
             </div>
           </section>
 
-      {/* A. Formulario de gasto manual */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">
-          Registrar gasto manual
-        </h2>
+          {/* Tabla de ROAS por anuncio */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-[var(--tx)]">ROAS por anuncio</h2>
+                <p className="text-xs text-[var(--mu)] mt-0.5">
+                  Ventas de WhatsApp ÷ inversión publicitaria · {etiquetaMes(mes)}
+                </p>
+              </div>
+              <span className="text-xs text-[var(--mu)] tabular-nums">{filasRoas.length} campañas</span>
+            </div>
 
-        <form onSubmit={handleSubmit} className="mt-4 grid gap-4 md:grid-cols-6">
-          <div className="md:col-span-1">
-            <label className="block text-xs font-medium text-slate-600" htmlFor="fecha">
-              Fecha
-            </label>
-            <input
-              id="fecha"
-              type="date"
-              value={form.fecha}
-              onChange={(e) => actualizarCampo('fecha', e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            />
-          </div>
+            {cargando ? (
+              <p className="px-5 py-10 text-center text-xs text-[var(--mu)]">Cargando...</p>
+            ) : filasRoas.length === 0 ? (
+              <p className="px-5 py-10 text-center text-xs text-[var(--mu)]">
+                Sin datos en este período. Registra un gasto o verifica que las órdenes tengan{' '}
+                <code className="font-mono">codigo_anuncio</code>.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-[var(--bd)] text-xs">
+                  <thead className="bg-sf/50 text-[var(--mu)]">
+                    <tr>
+                      <th className="px-5 py-3 text-left font-medium">Anuncio</th>
+                      <th className="px-5 py-3 text-right font-medium">Pedidos</th>
+                      <th className="px-5 py-3 text-right font-medium">Ventas</th>
+                      <th className="px-5 py-3 text-right font-medium">Gasto</th>
+                      <th className="px-5 py-3 text-right font-medium">ROAS</th>
+                      <th className="px-5 py-3 text-right font-medium">CPA</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--bd)]">
+                    {filasRoas.map((fila) => (
+                      <tr key={fila.codigo_anuncio} className="hover:bg-sf/40 transition-colors">
+                        <td className="whitespace-nowrap px-5 py-3 font-medium text-[var(--tx)]">
+                          <span className="font-mono">{fila.codigo_anuncio}</span>
+                          {fila.producto_catalogo && (
+                            <span className="block text-[11px] font-mono text-[var(--mu)] mt-0.5">
+                              Catálogo #{fila.producto_catalogo}
+                            </span>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-3 text-right font-mono tabular-nums text-[var(--mu)]">
+                          {formatNumber(fila.pedidos)}
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-3 text-right font-mono tabular-nums font-medium text-[var(--tx)]">
+                          {formatCurrency(fila.ventas)}
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-3 text-right font-mono tabular-nums text-[var(--mu)]">
+                          {formatCurrency(fila.gasto)}
+                        </td>
+                        <td
+                          className={`whitespace-nowrap px-5 py-3 text-right font-mono tabular-nums font-bold ${roasColorClass(fila.roas)}`}
+                        >
+                          {formatRoas(fila.roas)}
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-3 text-right font-mono tabular-nums text-[var(--mu)]">
+                          {fila.cpa === null ? '—' : formatCurrency(fila.cpa)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
 
-          <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-slate-600" htmlFor="codigo">
-              Código de anuncio
-            </label>
-            <input
-              id="codigo"
-              type="text"
-              placeholder="PROMO1"
-              value={form.codigo_anuncio}
-              onChange={(e) => actualizarCampo('codigo_anuncio', e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm uppercase placeholder:normal-case focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            />
-          </div>
+          {/* Registro de gasto manual + Gastos registrados */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <section className="lg:col-span-5 rounded-xl border border-[var(--bd)] bg-cd overflow-hidden">
+              <div className="px-5 py-4 border-b border-[var(--bd)]">
+                <h2 className="text-sm font-semibold text-[var(--tx)]">Registrar gasto manual</h2>
+                <p className="text-xs text-[var(--mu)] mt-0.5">Para plataformas sin sincronización automática</p>
+              </div>
 
-          <div className="md:col-span-1">
-            <label className="block text-xs font-medium text-slate-600" htmlFor="plataforma">
-              Plataforma
-            </label>
-            <select
-              id="plataforma"
-              value={form.plataforma}
-              onChange={(e) => actualizarCampo('plataforma', e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            >
-              {PLATAFORMAS.map((plataforma) => (
-                <option key={plataforma} value={plataforma}>
-                  {plataforma}
-                </option>
-              ))}
-            </select>
-          </div>
+              <form onSubmit={handleSubmit} className="p-5 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1" htmlFor="fecha">
+                    Fecha
+                  </label>
+                  <input
+                    id="fecha"
+                    type="date"
+                    value={form.fecha}
+                    onChange={(e) => actualizarCampo('fecha', e.target.value)}
+                    className="w-full rounded-lg border border-[var(--bd)] bg-sf px-3 py-2 text-xs text-[var(--tx)] outline-none focus:border-[var(--tx)]"
+                  />
+                </div>
 
-          <div className="md:col-span-1">
-            <label className="block text-xs font-medium text-slate-600" htmlFor="monto">
-              Monto
-            </label>
-            <input
-              id="monto"
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              value={form.monto}
-              onChange={(e) => actualizarCampo('monto', e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            />
-          </div>
+                <div>
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1" htmlFor="plataforma">
+                    Plataforma
+                  </label>
+                  <select
+                    id="plataforma"
+                    value={form.plataforma}
+                    onChange={(e) => actualizarCampo('plataforma', e.target.value)}
+                    className="w-full rounded-lg border border-[var(--bd)] bg-sf px-3 py-2 text-xs text-[var(--tx)] outline-none focus:border-[var(--tx)]"
+                  >
+                    {PLATAFORMAS.map((plataforma) => (
+                      <option key={plataforma} value={plataforma}>
+                        {plataforma}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-          <div className="md:col-span-1">
-            <label className="block text-xs font-medium text-slate-600" htmlFor="notas">
-              Notas
-            </label>
-            <input
-              id="notas"
-              type="text"
-              placeholder="Opcional"
-              value={form.notas}
-              onChange={(e) => actualizarCampo('notas', e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            />
-          </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1" htmlFor="codigo">
+                    Código de anuncio
+                  </label>
+                  <input
+                    id="codigo"
+                    type="text"
+                    placeholder="PROMO1"
+                    value={form.codigo_anuncio}
+                    onChange={(e) => actualizarCampo('codigo_anuncio', e.target.value)}
+                    className="w-full rounded-lg border border-[var(--bd)] bg-sf px-3 py-2 text-xs font-mono uppercase text-[var(--tx)] placeholder:normal-case placeholder:text-[var(--mu)] outline-none focus:border-[var(--tx)]"
+                  />
+                </div>
 
-          <div className="md:col-span-6">
-            <button
-              type="submit"
-              disabled={guardando}
-              className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {guardando ? 'Guardando…' : 'Guardar gasto'}
-            </button>
-          </div>
-        </form>
-      </section>
+                <div>
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1" htmlFor="monto">
+                    Monto (USD)
+                  </label>
+                  <input
+                    id="monto"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={form.monto}
+                    onChange={(e) => actualizarCampo('monto', e.target.value)}
+                    className="w-full rounded-lg border border-[var(--bd)] bg-sf px-3 py-2 text-xs font-mono tabular-nums text-[var(--tx)] outline-none focus:border-[var(--tx)]"
+                  />
+                </div>
 
-      {/* B. Tabla de gastos registrados */}
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">
-              Gastos registrados
-            </h2>
-            <p className="text-xs text-slate-500">{etiquetaMes(mes)}</p>
+                <div>
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1" htmlFor="notas">
+                    Notas
+                  </label>
+                  <input
+                    id="notas"
+                    type="text"
+                    placeholder="Opcional"
+                    value={form.notas}
+                    onChange={(e) => actualizarCampo('notas', e.target.value)}
+                    className="w-full rounded-lg border border-[var(--bd)] bg-sf px-3 py-2 text-xs text-[var(--tx)] outline-none focus:border-[var(--tx)]"
+                  />
+                </div>
+
+                <div className="sm:col-span-2 pt-1">
+                  <button
+                    type="submit"
+                    disabled={guardando}
+                    className="w-full inline-flex items-center justify-center rounded-lg bg-[var(--tx)] px-4 py-2 text-xs font-semibold text-[var(--cd)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {guardando ? 'Guardando...' : 'Guardar gasto'}
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section className="lg:col-span-7 rounded-xl border border-[var(--bd)] bg-cd overflow-hidden">
+              <div className="flex items-center justify-between border-b border-[var(--bd)] px-5 py-4">
+                <div>
+                  <h2 className="text-sm font-semibold text-[var(--tx)]">Gastos registrados</h2>
+                  <p className="text-xs text-[var(--mu)] mt-0.5">{etiquetaMes(mes)}</p>
+                </div>
+                <span className="text-xs text-[var(--mu)] font-mono tabular-nums">{gastos.length}</span>
+              </div>
+
+              {cargando ? (
+                <p className="px-5 py-10 text-center text-xs text-[var(--mu)]">Cargando...</p>
+              ) : gastos.length === 0 ? (
+                <p className="px-5 py-10 text-center text-xs text-[var(--mu)]">
+                  Todavía no hay gastos cargados en este mes.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-[var(--bd)] text-xs">
+                    <thead className="bg-sf/50 text-[var(--mu)]">
+                      <tr>
+                        <th className="px-5 py-3 text-left font-medium">Fecha</th>
+                        <th className="px-5 py-3 text-left font-medium">Anuncio</th>
+                        <th className="px-5 py-3 text-left font-medium">Plataforma</th>
+                        <th className="px-5 py-3 text-right font-medium">Monto</th>
+                        <th className="px-5 py-3 text-right font-medium"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--bd)]">
+                      {gastos.map((gasto) => {
+                        const isConfirming = confirmDeleteId === gasto.id
+                        return (
+                          <tr key={gasto.id} className="hover:bg-sf/40 transition-colors">
+                            <td className="whitespace-nowrap px-5 py-3 font-mono tabular-nums text-[var(--mu)]">
+                              {new Date(`${gasto.fecha}T00:00:00`).toLocaleDateString('es-SV')}
+                            </td>
+                            <td className="whitespace-nowrap px-5 py-3 font-mono font-medium text-[var(--tx)]">
+                              {gasto.codigo_anuncio}
+                            </td>
+                            <td className="whitespace-nowrap px-5 py-3 text-[var(--mu)]">
+                              {gasto.plataforma}
+                            </td>
+                            <td className="whitespace-nowrap px-5 py-3 text-right font-mono tabular-nums font-semibold text-[var(--tx)]">
+                              {formatCurrency(Number(gasto.monto))}
+                            </td>
+                            <td className="whitespace-nowrap px-5 py-3 text-right">
+                              {isConfirming ? (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    disabled={eliminandoId === gasto.id}
+                                    onClick={() => void handleEliminar(gasto)}
+                                    className="px-2 py-0.5 rounded bg-rose-600 text-white text-[11px] font-semibold"
+                                  >
+                                    {eliminandoId === gasto.id ? '...' : 'Eliminar'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteId(null)}
+                                    className="text-[11px] text-[var(--mu)] hover:text-[var(--tx)]"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteId(gasto.id)}
+                                  className="p-1 text-[var(--mu)] hover:text-rose-500 transition-colors"
+                                  title="Eliminar gasto"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
           </div>
-          <input
-            type="month"
-            value={mes}
-            onChange={(e) => setMes(e.target.value || mesActual())}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          />
         </div>
-
-        {cargando ? (
-          <p className="px-6 py-10 text-center text-sm text-slate-500">Cargando…</p>
-        ) : gastos.length === 0 ? (
-          <p className="px-6 py-10 text-center text-sm text-slate-500">
-            Todavía no hay gastos cargados en este mes.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-6 py-3 text-left font-medium">Fecha</th>
-                  <th className="px-6 py-3 text-left font-medium">Anuncio</th>
-                  <th className="px-6 py-3 text-left font-medium">Plataforma</th>
-                  <th className="px-6 py-3 text-right font-medium">Monto</th>
-                  <th className="px-6 py-3 text-right font-medium">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {gastos.map((gasto) => (
-                  <tr key={gasto.id} className="hover:bg-slate-50">
-                    <td className="whitespace-nowrap px-6 py-3 text-slate-700">
-                      {new Date(`${gasto.fecha}T00:00:00`).toLocaleDateString('es-AR')}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-3 font-medium text-slate-900">
-                      {gasto.codigo_anuncio}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-3 text-slate-600">
-                      {gasto.plataforma}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-3 text-right font-semibold text-slate-900">
-                      {formatCurrency(Number(gasto.monto))}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => void handleEliminar(gasto)}
-                        disabled={eliminandoId === gasto.id}
-                        className="rounded-md px-2 py-1 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-50"
-                      >
-                        {eliminandoId === gasto.id ? 'Eliminando…' : 'Eliminar'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* C. Dashboard de ROAS */}
-      <section className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">ROAS por anuncio</h2>
-          <p className="text-xs text-slate-500">
-            Ventas de WhatsApp ÷ inversión publicitaria · {etiquetaMes(mes)}
-          </p>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard label="Ventas" value={formatCurrency(totales.ventas)} />
-          <KpiCard label="Gasto en Ads" value={formatCurrency(totales.gasto)} />
-          <KpiCard label="Pedidos" value={formatNumber(totales.pedidos)} />
-          <KpiCard
-            label="ROAS global"
-            value={formatRoas(totales.roasGlobal)}
-            valueClassName={roasColorClass(totales.roasGlobal)}
-          />
-        </div>
-
-        {cargando ? (
-          <p className="rounded-xl border border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-500">
-            Cargando…
-          </p>
-        ) : filasRoas.length === 0 ? (
-          <p className="rounded-xl border border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-500">
-            Sin datos todavía. Cargá un gasto y asegurate de que las órdenes tengan
-            <span className="mx-1 font-mono text-xs">codigo_anuncio</span>.
-          </p>
-        ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-6 py-3 text-left font-medium">Anuncio</th>
-                  <th className="px-6 py-3 text-right font-medium">Pedidos</th>
-                  <th className="px-6 py-3 text-right font-medium">Ventas</th>
-                  <th className="px-6 py-3 text-right font-medium">Gasto</th>
-                  <th className="px-6 py-3 text-right font-medium">ROAS</th>
-                  <th className="px-6 py-3 text-right font-medium">CPA</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filasRoas.map((fila) => (
-                  <tr key={fila.codigo_anuncio} className="hover:bg-slate-50">
-                    <td className="whitespace-nowrap px-6 py-3 font-medium text-slate-900">
-                      <span>{fila.codigo_anuncio}</span>
-                      {fila.producto_catalogo && (
-                        <span className="block text-[10px] font-mono font-bold text-indigo-600 mt-0.5">
-                          🏷️ Catálogo: #{fila.producto_catalogo}
-                        </span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-3 text-right text-slate-700">
-                      {formatNumber(fila.pedidos)}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-3 text-right text-slate-900">
-                      {formatCurrency(fila.ventas)}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-3 text-right text-slate-700">
-                      {formatCurrency(fila.gasto)}
-                    </td>
-                    <td
-                      className={`whitespace-nowrap px-6 py-3 text-right font-semibold ${roasColorClass(fila.roas)}`}
-                    >
-                      {formatRoas(fila.roas)}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-3 text-right text-slate-700">
-                      {fila.cpa === null ? '—' : formatCurrency(fila.cpa)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-        </>
       )}
     </div>
   )
 }
-

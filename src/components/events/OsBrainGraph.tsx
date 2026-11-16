@@ -354,7 +354,7 @@ export function OsBrainGraph({ recentEvents = [] }: OsBrainGraphProps) {
   }, [selectedNode, recentEvents]);
 
   return (
-    <div className="relative w-full rounded-2xl border border-[var(--bd)] overflow-hidden bg-[#070b14] text-slate-100 shadow-2xl flex flex-col select-none">
+    <div className="relative w-full rounded-xl border border-[var(--bd)] overflow-hidden bg-[#070b14] text-slate-100 flex flex-col select-none">
       
       {/* 1. Header Bar: Digital Twin Title & Telemetry */}
       <div className="px-5 py-3.5 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-md flex flex-wrap items-center justify-between gap-3 z-10">

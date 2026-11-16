@@ -136,14 +136,14 @@ export function AnaliticaLogisticaCod({ pedidosData }: Props) {
   }, [pedidosData]);
 
   return (
-    <div className="bg-cd rounded-2xl border border-[var(--bd)] p-5 space-y-6 shadow-sm">
+    <div className="bg-cd rounded-xl border border-[var(--bd)] p-5 space-y-5">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div className="flex items-center gap-2">
-          <span className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500">
-            <Truck size={20} />
+        <div className="flex items-center gap-2.5">
+          <span className="p-2 rounded-lg bg-sf border border-[var(--bd)] tx-mu">
+            <Truck size={18} />
           </span>
           <div>
-            <h3 className="text-base font-bold text-[var(--tx)]">
+            <h3 className="text-base font-bold tracking-tight text-[var(--tx)]">
               Operativa Logística COD & Cobro en Calle
             </h3>
             <p className="text-xs tx-mu">
@@ -153,65 +153,65 @@ export function AnaliticaLogisticaCod({ pedidosData }: Props) {
         </div>
 
         {/* Badge Tasa de Entrega COD */}
-        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 font-bold text-xs">
-          <CheckCircle2 size={15} />
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold font-mono tabular-nums text-xs">
+          <CheckCircle2 size={14} />
           <span>Efectividad Nacional COD: {tasaEntregaGlobal.toFixed(1)}%</span>
         </div>
       </div>
 
       {/* Métricas Rápidas de Operativa */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="p-3.5 rounded-xl bg-sf border border-[var(--bd)]">
-          <span className="text-[10px] uppercase font-bold tx-mu block">Entregados & Cobrados</span>
-          <div className="text-xl font-black font-mono text-emerald-600 mt-1">
-            {totales.entregados} <span className="text-xs font-normal tx-mu">pedidos</span>
+      <div className="bg-sf rounded-xl border border-[var(--bd)] grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-[var(--bd)]">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu font-medium block">Entregados & Cobrados</span>
+          <div className="text-xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1">
+            {totales.entregados} <span className="text-xs font-normal tx-mu">ped.</span>
           </div>
-          <span className="text-[10px] tx-mu block mt-0.5">
+          <span className="text-[11px] tx-mu font-mono tabular-nums block mt-0.5">
             Monto: <strong>{formatCurrency(totales.montoEntregado)}</strong>
           </span>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-sf border border-[var(--bd)]">
-          <span className="text-[10px] uppercase font-bold tx-mu block">En Ruta (Efectivo en Calle)</span>
-          <div className="text-xl font-black font-mono text-indigo-500 mt-1">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu font-medium block">En Ruta (Calle)</span>
+          <div className="text-xl font-bold font-mono tabular-nums text-indigo-600 dark:text-indigo-400 mt-1">
             {totales.enCamino} <span className="text-xs font-normal tx-mu">guías</span>
           </div>
-          <span className="text-[10px] tx-mu block mt-0.5">
-            Por cobrar: <strong className="text-indigo-600">{formatCurrency(montoEnCalle)}</strong>
+          <span className="text-[11px] tx-mu font-mono tabular-nums block mt-0.5">
+            Por cobrar: <strong className="text-indigo-600 dark:text-indigo-400">{formatCurrency(montoEnCalle)}</strong>
           </span>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-sf border border-[var(--bd)]">
-          <span className="text-[10px] uppercase font-bold tx-mu block">Por Empacar / Bodega</span>
-          <div className="text-xl font-black font-mono text-amber-500 mt-1">
-            {totales.porEmpacar + totales.nuevos} <span className="text-xs font-normal tx-mu">pendientes</span>
+        <div className="p-4">
+          <span className="text-[11px] tx-mu font-medium block">Por Empacar / Bodega</span>
+          <div className="text-xl font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400 mt-1">
+            {totales.porEmpacar + totales.nuevos} <span className="text-xs font-normal tx-mu">pend.</span>
           </div>
-          <span className="text-[10px] tx-mu block mt-0.5">
+          <span className="text-[11px] tx-mu font-mono tabular-nums block mt-0.5">
             {totales.nuevos} nuevos · {totales.porEmpacar} en bodega
           </span>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-sf border border-[var(--bd)]">
-          <span className="text-[10px] uppercase font-bold tx-mu block">Cancelados / Rechazados</span>
-          <div className="text-xl font-black font-mono text-rose-500 mt-1">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu font-medium block">Cancelados / Rechazos</span>
+          <div className="text-xl font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400 mt-1">
             {totales.cancelados} <span className="text-xs font-normal tx-mu">fallidos</span>
           </div>
-          <span className="text-[10px] tx-mu block mt-0.5">
-            Pérdida flete: {formatCurrency(totales.montoCancelado)}
+          <span className="text-[11px] tx-mu font-mono tabular-nums block mt-0.5">
+            Flete perdido: {formatCurrency(totales.montoCancelado)}
           </span>
         </div>
       </div>
 
       {/* TABLA DE RENDIMIENTO POR COURIER / MOTORISTAS */}
       <div className="space-y-3">
-        <h4 className="text-xs font-bold uppercase tx-mu flex items-center gap-1.5">
-          <UserCheck size={14} className="text-indigo-500" /> Comparativa de Rendimiento por Courier / Transportista
+        <h4 className="text-xs font-semibold uppercase tracking-wider tx-mu flex items-center gap-1.5">
+          <UserCheck size={13} className="tx-mu" /> Rendimiento por Courier / Transportista
         </h4>
 
-        <div className="bg-sf rounded-2xl border border-[var(--bd)] overflow-hidden">
+        <div className="bg-cd rounded-xl border border-[var(--bd)] overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
-              <thead className="bg-cd border-b border-[var(--bd)] text-[10px] tx-mu uppercase font-bold">
+              <thead className="bg-sf border-b border-[var(--bd)] text-[10px] tx-mu uppercase font-semibold">
                 <tr>
                   <th className="p-3">Courier / Flota</th>
                   <th className="p-3 text-center">Total Asignados</th>
@@ -224,33 +224,33 @@ export function AnaliticaLogisticaCod({ pedidosData }: Props) {
               </thead>
               <tbody className="divide-y divide-[var(--bd)]">
                 {statsCouriers.map(c => (
-                  <tr key={c.nombre} className="hover:bg-cd/50 transition-colors">
-                    <td className="p-3 font-bold text-[var(--tx)] flex items-center gap-2">
-                      <Truck size={14} className="text-indigo-500" />
+                  <tr key={c.nombre} className="hover:bg-sf/50 transition-colors">
+                    <td className="p-3 font-semibold text-[var(--tx)] flex items-center gap-2">
+                      <Truck size={13} className="tx-mu" />
                       {c.nombre}
                     </td>
-                    <td className="p-3 text-center font-mono font-semibold">
+                    <td className="p-3 text-center font-mono tabular-nums font-medium">
                       {c.pedidos}
                     </td>
-                    <td className="p-3 text-center font-mono font-bold text-emerald-600">
+                    <td className="p-3 text-center font-mono tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">
                       {c.entregados}
                     </td>
-                    <td className="p-3 text-center font-mono text-indigo-500">
+                    <td className="p-3 text-center font-mono tabular-nums text-indigo-600 dark:text-indigo-400">
                       {c.enCamino}
                     </td>
-                    <td className="p-3 text-center font-mono text-rose-500">
+                    <td className="p-3 text-center font-mono tabular-nums text-rose-600 dark:text-rose-400">
                       {c.cancelados}
                     </td>
                     <td className="p-3 text-right">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                        c.efectividad >= 80 ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20' :
-                        c.efectividad >= 65 ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20' :
-                        'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono tabular-nums font-semibold ${
+                        c.efectividad >= 80 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' :
+                        c.efectividad >= 65 ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20' :
+                        'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
                       }`}>
                         {c.efectividad > 0 ? `${c.efectividad.toFixed(1)}%` : '—'}
                       </span>
                     </td>
-                    <td className="p-3 text-right font-mono font-black text-emerald-600">
+                    <td className="p-3 text-right font-mono tabular-nums font-bold text-emerald-600 dark:text-emerald-400">
                       {formatCurrency(c.montoRecaudado)}
                     </td>
                   </tr>

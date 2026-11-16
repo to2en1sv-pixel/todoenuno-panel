@@ -482,142 +482,132 @@ export function ProveedoresPage() {
   }, [proveedores, ofertas]);
 
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-5 pb-14 min-h-screen">
-      {/* HEADER PRINCIPAL */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
-        <div className="min-w-0 shrink-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <Building2 className="text-orange-500 shrink-0" size={24} />
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight whitespace-normal sm:whitespace-nowrap">
-              Centro de Proveedores & Subasta Inversa
-            </h1>
-            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-600 border border-orange-500/30 shrink-0">
-              n8n + Evolution API
-            </span>
-          </div>
-          <p className="text-xs text-[var(--mu)] mt-1 max-w-xl">
-            Licitación masiva a almacenes por WhatsApp, comparador de precios en vivo y registro de adjudicaciones.
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-16 min-h-screen">
+      {/* Encabezado */}
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--tx)]">
+            Proveedores
+          </h1>
+          <p className="text-xs text-[var(--mu)] mt-1">
+            Red de almacenes por WhatsApp, subasta inversa y comparador de cotizaciones
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
+            type="button"
             onClick={handleOpenNewProvider}
-            className="flex-1 sm:flex-none px-3.5 py-2 border border-[var(--bd)] bg-sf hover:bg-cd rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+            className="px-3.5 py-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-semibold text-[var(--tx)] flex items-center gap-1.5 transition-colors"
           >
-            <Plus size={15} /> + Proveedor
+            <Plus size={13} /> Nuevo proveedor
           </button>
 
           <button
+            type="button"
             onClick={() => setIsModalOpen(true)}
-            className="flex-1 sm:flex-none px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow transition-colors"
+            className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-opacity"
           >
-            <Send size={14} /> Lanzar Licitación ({selectedIds.size})
+            <Send size={13} /> Lanzar licitación ({selectedIds.size})
           </button>
         </div>
-      </div>
+      </header>
 
       {message && (
-        <div className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between border ${
-          message.type === 'ok' 
-            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' 
-            : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+        <div className={`px-4 py-2.5 rounded-lg text-xs flex items-center justify-between border ${
+          message.type === 'ok'
+            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+            : 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
         }`}>
           <span>{message.text}</span>
-          <button onClick={() => setMessage(null)} className="p-1 hover:opacity-70"><X size={14} /></button>
+          <button type="button" onClick={() => setMessage(null)} className="opacity-70 hover:opacity-100"><X size={14} /></button>
         </div>
       )}
 
-      {/* TARJETAS KPI DE COMPRAS */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Almacenes Registrados</span>
-          <div className="text-2xl font-black mt-1 text-[var(--tx)]">
-            {proveedores.length} <span className="text-xs font-normal tx-mu">contactos</span>
+      {/* Franja unificada de 4 KPIs */}
+      <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
+        <div className="p-5">
+          <div className="text-xs font-medium text-[var(--mu)]">Almacenes registrados</div>
+          <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
+            {proveedores.length}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Conexión directa por WhatsApp</span>
+          <div className="text-xs text-[var(--mu)] mt-1">Conexión WhatsApp directa</div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Licitaciones Activas</span>
-          <div className="text-2xl font-black mt-1 text-orange-500">
-            {kpisLicitaciones.activas} <span className="text-xs font-normal tx-mu">en curso</span>
+        <div className="p-5">
+          <div className="text-xs font-medium text-[var(--mu)]">Licitaciones activas</div>
+          <div className="text-2xl font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400 mt-1.5">
+            {kpisLicitaciones.activas}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Esperando pujas de almacenes</span>
+          <div className="text-xs text-[var(--mu)] mt-1">Esperando cotizaciones</div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Compras Adjudicadas</span>
-          <div className="text-2xl font-black mt-1 text-emerald-500">
-            {kpisLicitaciones.completadas} <span className="text-xs font-normal tx-mu">cerradas</span>
+        <div className="p-5">
+          <div className="text-xs font-medium text-[var(--mu)]">Compras adjudicadas</div>
+          <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
+            {kpisLicitaciones.completadas}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Subastas ganadas con éxito</span>
+          <div className="text-xs text-[var(--mu)] mt-1">Subastas cerradas</div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Ahorro Generado por Subasta</span>
-          <div className="text-2xl font-black mt-1 text-emerald-600 font-mono">
-            ${kpisLicitaciones.ahorroTotal.toFixed(2)} <span className="text-xs font-normal tx-mu">USD</span>
+        <div className="p-5">
+          <div className="text-xs font-medium text-[var(--mu)]">Ahorro en subastas</div>
+          <div className="text-2xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1.5">
+            ${kpisLicitaciones.ahorroTotal.toFixed(2)}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Presupuesto máx vs Precio real</span>
+          <div className="text-xs text-[var(--mu)] mt-1">Presupuesto máx. vs real</div>
         </div>
-      </div>
+      </section>
 
-      {/* SELECTOR DE PESTAÑAS */}
-      <div className="flex bg-cd p-2 rounded-2xl border border-[var(--bd)] gap-1 text-xs font-bold overflow-x-auto">
-        <button
-          onClick={() => setTab('proveedores')}
-          className={`px-4 py-2 rounded-xl transition-colors flex items-center gap-1.5 whitespace-nowrap ${
-            tab === 'proveedores' ? 'bg-sf shadow text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
-          }`}
-        >
-          <Building2 size={14} /> Red de Almacenes ({proveedores.length})
-        </button>
+      {/* Navegación por pestañas */}
+      <nav className="flex items-center gap-6 border-b border-[var(--bd)] overflow-x-auto">
+        {[
+          { id: 'proveedores', label: `Red de almacenes (${proveedores.length})` },
+          { id: 'licitaciones', label: `Licitaciones (${licitaciones.length})` },
+          { id: 'scorecard', label: `Scorecard (${scorecardProveedores.length})` },
+        ].map(t => {
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id as any)}
+              className={`pb-3 text-xs font-semibold whitespace-nowrap shrink-0 border-b-2 transition-colors ${
+                active
+                  ? 'border-[var(--tx)] text-[var(--tx)]'
+                  : 'border-transparent text-[var(--mu)] hover:text-[var(--tx)]'
+              }`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </nav>
 
-        <button
-          onClick={() => setTab('licitaciones')}
-          className={`px-4 py-2 rounded-xl transition-colors flex items-center gap-1.5 whitespace-nowrap ${
-            tab === 'licitaciones' ? 'bg-orange-500 text-white shadow' : 'text-orange-600 hover:bg-orange-500/10'
-          }`}
-        >
-          <Send size={14} /> Licitaciones & Comparador de Ofertas ({licitaciones.length})
-        </button>
-
-        <button
-          onClick={() => setTab('scorecard')}
-          className={`px-4 py-2 rounded-xl transition-colors flex items-center gap-1.5 whitespace-nowrap ${
-            tab === 'scorecard' ? 'bg-sf shadow text-[var(--tx)]' : 'tx-mu hover:text-[var(--tx)]'
-          }`}
-        >
-          <BarChart3 size={14} /> Scorecard & Inteligencia ({scorecardProveedores.length})
-        </button>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* PESTAÑA 1: RED DE PROVEEDORES Y SEGMENTACIÓN POR NICHOS                   */}
-      {/* ========================================================================= */}
+      {/* PESTAÑA 1: RED DE PROVEEDORES */}
       {tab === 'proveedores' && (
-        <div className="space-y-4">
-          {/* Barra de Filtros y Segmentación Rápida por Nicho */}
-          <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-cd p-3 rounded-2xl border border-[var(--bd)]">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
             <div className="relative flex-1 sm:max-w-xs">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 tx-mu" />
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mu)]" />
               <input
                 type="text"
                 placeholder="Buscar por almacén o teléfono..."
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 bg-sf border border-[var(--bd)] rounded-xl text-xs outline-none focus:border-orange-500"
+                className="w-full pl-9 pr-3 py-2 bg-cd border border-[var(--bd)] rounded-lg text-xs text-[var(--tx)] outline-none focus:border-[var(--tx)]"
               />
             </div>
 
-            {/* Chips de Etiquetas Rápidas */}
-            <div className="flex items-center gap-1.5 overflow-x-auto text-xs py-1">
-              <span className="text-[10px] font-bold uppercase tx-mu shrink-0">Nicho:</span>
+            <div className="flex items-center gap-1.5 overflow-x-auto text-xs py-0.5">
+              <span className="text-xs text-[var(--mu)] shrink-0 mr-1">Nicho:</span>
               <button
+                type="button"
                 onClick={() => setTagFiltro('todos')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                  tagFiltro === 'todos' ? 'bg-slate-900 text-white' : 'bg-sf border border-[var(--bd)] tx-mu'
+                className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
+                  tagFiltro === 'todos'
+                    ? 'bg-[var(--tx)] text-[var(--cd)] font-semibold'
+                    : 'bg-cd border border-[var(--bd)] text-[var(--mu)] hover:text-[var(--tx)]'
                 }`}
               >
                 Todos
@@ -625,16 +615,17 @@ export function ProveedoresPage() {
               {todasLasEtiquetas.map(t => (
                 <button
                   key={t}
+                  type="button"
                   onClick={() => {
                     setTagFiltro(t);
                     seleccionarPorEtiqueta(t);
                   }}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                    tagFiltro === t 
-                      ? 'bg-orange-500 text-white shadow-sm' 
-                      : 'bg-sf border border-[var(--bd)] text-orange-600 hover:bg-orange-500/10'
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
+                    tagFiltro === t
+                      ? 'bg-[var(--tx)] text-[var(--cd)] font-semibold'
+                      : 'bg-cd border border-[var(--bd)] text-[var(--mu)] hover:text-[var(--tx)]'
                   }`}
-                  title={`Haz clic para filtrar y preseleccionar almacenes con #${t}`}
+                  title={`Filtrar y preseleccionar #${t}`}
                 >
                   #{t}
                 </button>
@@ -642,13 +633,12 @@ export function ProveedoresPage() {
             </div>
           </div>
 
-          {/* Tabla de Proveedores */}
-          <div className="bg-cd border border-[var(--bd)] rounded-2xl overflow-hidden shadow-sm">
+          <div className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
-                <thead className="bg-sf border-b border-[var(--bd)] text-[10px] tx-mu uppercase font-bold">
+                <thead className="bg-sf/50 border-b border-[var(--bd)] text-[var(--mu)]">
                   <tr>
-                    <th className="p-3 w-10 text-center">
+                    <th className="px-4 py-3 w-10 text-center">
                       <input
                         type="checkbox"
                         checked={selectedIds.size > 0 && selectedIds.size === filteredProveedores.length}
@@ -656,26 +646,31 @@ export function ProveedoresPage() {
                         className="rounded"
                       />
                     </th>
-                    <th className="p-3">Almacén / Proveedor</th>
-                    <th className="p-3">Teléfono WhatsApp</th>
-                    <th className="p-3">Especialidad / Etiquetas</th>
-                    <th className="p-3 text-right">Acciones</th>
+                    <th className="px-4 py-3 font-medium">Almacén / Proveedor</th>
+                    <th className="px-4 py-3 font-medium">Teléfono WhatsApp</th>
+                    <th className="px-4 py-3 font-medium">Especialidad</th>
+                    <th className="px-4 py-3 text-right font-medium">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--bd)]">
-                  {filteredProveedores.length === 0 ? (
+                  {loading && filteredProveedores.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-12 text-center tx-mu">
+                      <td colSpan={5} className="py-12 text-center text-[var(--mu)]">
+                        Cargando almacenes...
+                      </td>
+                    </tr>
+                  ) : filteredProveedores.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-12 text-center text-[var(--mu)]">
                         No se encontraron almacenes con estos filtros.
                       </td>
                     </tr>
                   ) : (
                     filteredProveedores.map(p => {
                       const isSelected = selectedIds.has(p.id);
-
                       return (
-                        <tr key={p.id} className={`hover:bg-sf/50 transition-colors ${isSelected ? 'bg-orange-500/5' : ''}`}>
-                          <td className="p-3 text-center">
+                        <tr key={p.id} className={`hover:bg-sf/40 transition-colors ${isSelected ? 'bg-sf/60' : ''}`}>
+                          <td className="px-4 py-3 text-center">
                             <input
                               type="checkbox"
                               checked={isSelected}
@@ -683,35 +678,39 @@ export function ProveedoresPage() {
                               className="rounded"
                             />
                           </td>
-                          <td className="p-3 font-bold text-[var(--tx)]">
+                          <td className="px-4 py-3 font-semibold text-[var(--tx)]">
                             {p.nombre}
                           </td>
-                          <td className="p-3 font-mono tx-mu">
+                          <td className="px-4 py-3 font-mono tabular-nums text-[var(--mu)]">
                             {p.telefono || '—'}
                           </td>
-                          <td className="p-3">
-                            <div className="flex flex-wrap gap-1">
-                              {(p.etiquetas || []).map(t => (
-                                <span key={t} className="px-2 py-0.5 rounded-md bg-sf border border-[var(--bd)] text-[10px] font-semibold text-slate-600 dark:text-slate-300">
-                                  #{t}
-                                </span>
-                              ))}
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-1.5 text-[11px] text-[var(--mu)]">
+                              {(p.etiquetas || []).length > 0
+                                ? (p.etiquetas || []).map(t => (
+                                    <span key={t} className="px-2 py-0.5 rounded bg-sf border border-[var(--bd)] font-medium">
+                                      #{t}
+                                    </span>
+                                  ))
+                                : '—'}
                             </div>
                           </td>
-                          <td className="p-3 text-right whitespace-nowrap">
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
                             <button
+                              type="button"
                               onClick={() => handleOpenEditProvider(p)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors mr-1"
+                              className="p-1.5 rounded-lg text-[var(--mu)] hover:text-[var(--tx)] transition-colors mr-1"
                               title="Editar"
                             >
-                              <Edit size={14} />
+                              <Edit size={13} />
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleDeleteProvider(p.id)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
+                              className="p-1.5 rounded-lg text-[var(--mu)] hover:text-rose-500 transition-colors"
                               title="Eliminar"
                             >
-                              <Trash2 size={14} />
+                              <Trash2 size={13} />
                             </button>
                           </td>
                         </tr>
@@ -725,265 +724,249 @@ export function ProveedoresPage() {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* PESTAÑA 2: SUBASTAS EN VIVO & COMPARADOR DE OFERTAS                       */}
-      {/* ========================================================================= */}
+      {/* PESTAÑA 2: SUBASTAS EN VIVO */}
       {tab === 'licitaciones' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {licitaciones.length === 0 ? (
-              <div className="col-span-full py-16 text-center tx-mu bg-cd rounded-2xl border border-[var(--bd)]">
-                No hay licitaciones registradas aún. Presiona "+ Lanzar Licitación" para empezar.
-              </div>
-            ) : (
-              licitaciones.map(lic => {
-                const ofertasDeEsta = ofertas.filter(o => o.licitacion_id === lic.id);
-                const ofertasRespondidas = ofertasDeEsta.filter(o => o.precio_ofertado && o.precio_ofertado > 0);
-                const mejorOferta = ofertasRespondidas.sort((a, b) => Number(a.precio_ofertado) - Number(b.precio_ofertado))[0];
-                const provGanador = lic.ganador_proveedor_id ? proveedores.find(p => p.id === lic.ganador_proveedor_id) : null;
-                const esCompletada = lic.estado === 'completed';
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {licitaciones.length === 0 ? (
+            <div className="col-span-full py-14 text-center text-xs text-[var(--mu)] bg-cd rounded-xl border border-[var(--bd)]">
+              No hay licitaciones registradas aún. Presiona "Lanzar licitación" para empezar.
+            </div>
+          ) : (
+            licitaciones.map(lic => {
+              const ofertasDeEsta = ofertas.filter(o => o.licitacion_id === lic.id);
+              const ofertasRespondidas = ofertasDeEsta.filter(o => o.precio_ofertado && o.precio_ofertado > 0);
+              const mejorOferta = ofertasRespondidas.sort((a, b) => Number(a.precio_ofertado) - Number(b.precio_ofertado))[0];
+              const provGanador = lic.ganador_proveedor_id ? proveedores.find(p => p.id === lic.ganador_proveedor_id) : null;
+              const esCompletada = lic.estado === 'completed';
 
-                return (
-                  <div
-                    key={lic.id}
-                    onClick={() => setLicitacionDetalle(lic)}
-                    className="bg-cd border border-[var(--bd)] rounded-2xl p-4 flex flex-col justify-between hover:border-orange-500 hover:shadow-md transition-all cursor-pointer group"
-                  >
-                    <div>
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="text-[10px] font-mono tx-mu uppercase">
-                          {new Date(lic.created_at).toLocaleDateString('es-SV', { month: 'short', day: 'numeric' })}
-                        </span>
+              return (
+                <div
+                  key={lic.id}
+                  onClick={() => setLicitacionDetalle(lic)}
+                  className="bg-cd border border-[var(--bd)] rounded-xl p-5 flex flex-col justify-between hover:border-[var(--tx)] transition-colors cursor-pointer group"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="font-mono tabular-nums text-[var(--mu)]">
+                        {new Date(lic.created_at).toLocaleDateString('es-SV', { month: 'short', day: 'numeric' })}
+                      </span>
+                      <span
+                        className={`text-[11px] font-semibold ${
+                          esCompletada
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-amber-600 dark:text-amber-400'
+                        }`}
+                      >
+                        {esCompletada ? 'Adjudicada' : 'Subasta activa'}
+                      </span>
+                    </div>
 
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                          esCompletada 
-                            ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20' 
-                            : 'bg-orange-500/10 text-orange-600 border border-orange-500/20 animate-pulse'
-                        }`}>
-                          {esCompletada ? '✓ Adjudicada' : 'Subasta Activa'}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-3 mt-3">
-                        <div className="w-12 h-12 rounded-xl bg-sf border border-[var(--bd)] overflow-hidden shrink-0 flex items-center justify-center">
-                          {lic.imagen_url ? (
-                            <img src={lic.imagen_url} alt="" className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="text-xl">📦</span>
-                          )}
-                        </div>
-
-                        <div className="min-w-0">
-                          <h3 className="font-bold text-sm text-[var(--tx)] truncate">{lic.sku}</h3>
-                          <span className="text-xs font-semibold tx-mu block">
-                            Buscando: {lic.cantidad} unidades
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Rango de Precios Objetivo */}
-                      <div className="mt-3 p-2 bg-sf rounded-xl border border-[var(--bd)] flex items-center justify-between text-xs">
-                        <div>
-                          <span className="text-[9px] uppercase font-bold tx-mu block">P. Objetivo</span>
-                          <span className="font-mono font-bold text-slate-700 dark:text-slate-200">
-                            ${lic.precio_referencia ? Number(lic.precio_referencia).toFixed(2) : '—'}
-                          </span>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-[9px] uppercase font-bold tx-mu block">P. Máximo</span>
-                          <span className="font-mono font-bold text-rose-600">
-                            ${lic.precio_maximo ? Number(lic.precio_maximo).toFixed(2) : '—'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Estado de Respuestas de n8n / Evolution API */}
-                      <div className="mt-3 text-xs">
-                        <div className="flex justify-between items-center text-[11px] mb-1">
-                          <span className="tx-mu">Almacenes contactados:</span>
-                          <span className="font-bold font-mono text-[var(--tx)]">{ofertasDeEsta.length}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-[11px]">
-                          <span className="tx-mu">Cotizaciones recibidas:</span>
-                          <span className="font-bold font-mono text-emerald-600">{ofertasRespondidas.length}</span>
-                        </div>
-                      </div>
-
-                      {/* Ganador o Mejor Oferta Actual */}
-                      <div className="mt-3 pt-2.5 border-t border-[var(--bd)]">
-                        {esCompletada && provGanador ? (
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-[11px] text-emerald-600 font-bold flex items-center gap-1">
-                              <Award size={13} /> Ganador: {provGanador.nombre}
-                            </span>
-                            <span className="font-mono font-black text-emerald-600">
-                              ${Number(lic.precio_adjudicado || 0).toFixed(2)}
-                            </span>
-                          </div>
-                        ) : mejorOferta ? (
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-[11px] text-orange-600 font-bold flex items-center gap-1">
-                              🔥 Mejor oferta actual:
-                            </span>
-                            <span className="font-mono font-black text-emerald-600">
-                              ${Number(mejorOferta.precio_ofertado).toFixed(2)}
-                            </span>
-                          </div>
+                    <div className="flex items-center gap-3 mt-3">
+                      <div className="w-11 h-11 rounded-lg bg-sf border border-[var(--bd)] overflow-hidden shrink-0 flex items-center justify-center">
+                        {lic.imagen_url ? (
+                          <img src={lic.imagen_url} alt="" className="w-full h-full object-cover" />
                         ) : (
-                          <span className="text-[10px] tx-mu italic">Esperando respuestas de Evolution API...</span>
+                          <Boxes size={16} className="text-[var(--mu)]" />
                         )}
                       </div>
+
+                      <div className="min-w-0">
+                        <h3 className="font-mono font-bold text-sm text-[var(--tx)] truncate">{lic.sku}</h3>
+                        <span className="text-xs text-[var(--mu)] block tabular-nums">
+                          {lic.cantidad} unidades
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="mt-3 pt-2 flex items-center justify-end text-xs font-bold text-orange-600 group-hover:underline">
-                      Comparar Ofertas →
+                    <div className="mt-4 pt-3 border-t border-[var(--bd)] grid grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <span className="text-[11px] text-[var(--mu)] block">P. Objetivo</span>
+                        <span className="font-mono tabular-nums font-semibold text-[var(--tx)]">
+                          ${lic.precio_referencia ? Number(lic.precio_referencia).toFixed(2) : '—'}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[11px] text-[var(--mu)] block">P. Máximo</span>
+                        <span className="font-mono tabular-nums font-semibold text-[var(--tx)]">
+                          ${lic.precio_maximo ? Number(lic.precio_maximo).toFixed(2) : '—'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 pt-3 border-t border-[var(--bd)] space-y-1 text-xs">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[var(--mu)]">Contactados</span>
+                        <span className="font-mono tabular-nums font-medium text-[var(--tx)]">{ofertasDeEsta.length}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-[var(--mu)]">Cotizaciones</span>
+                        <span className="font-mono tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">
+                          {ofertasRespondidas.length}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                );
-              })
-            )}
-          </div>
+
+                  <div className="mt-4 pt-3 border-t border-[var(--bd)] flex items-center justify-between text-xs">
+                    {esCompletada && provGanador ? (
+                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold truncate">
+                        {provGanador.nombre} · ${Number(lic.precio_adjudicado || 0).toFixed(2)}
+                      </span>
+                    ) : mejorOferta ? (
+                      <span className="text-[var(--tx)] font-semibold font-mono tabular-nums">
+                        Mejor: ${Number(mejorOferta.precio_ofertado).toFixed(2)}
+                      </span>
+                    ) : (
+                      <span className="text-[var(--mu)]">Sin cotizaciones</span>
+                    )}
+                    <span className="font-medium text-[var(--mu)] group-hover:text-[var(--tx)] shrink-0">
+                      Comparar →
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* PESTAÑA 3: SCORECARD & INTELIGENCIA DE COMPRAS                            */}
-      {/* ========================================================================= */}
+      {/* PESTAÑA 3: SCORECARD */}
       {tab === 'scorecard' && (
-        <div className="space-y-4">
-          <div className="p-4 bg-cd rounded-2xl border border-[var(--bd)]">
-            <h3 className="font-black text-sm text-[var(--tx)]">Scorecard de Confiabilidad de Almacenes</h3>
-            <p className="text-xs tx-mu mt-0.5">
-              Mide la rapidez y efectividad con la que cada almacén responde tus licitaciones de WhatsApp y quién te ofrece los precios más competitivos.
+        <div className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--bd)]">
+            <h3 className="font-semibold text-sm text-[var(--tx)]">Confiabilidad de almacenes</h3>
+            <p className="text-xs text-[var(--mu)] mt-0.5">
+              Tasa de respuesta a licitaciones y mejores precios históricos adjudicados.
             </p>
           </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-sf/50 border-b border-[var(--bd)] text-[var(--mu)]">
+                <tr>
+                  <th className="px-5 py-3 font-medium">Almacén</th>
+                  <th className="px-4 py-3 text-center font-medium">Invitaciones</th>
+                  <th className="px-4 py-3 text-center font-medium">Respuestas</th>
+                  <th className="px-4 py-3 text-center font-medium">Tasa</th>
+                  <th className="px-4 py-3 text-center font-medium">Ganadas</th>
+                  <th className="px-5 py-3 text-right font-medium">Mejor precio</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--bd)]">
+                {scorecardProveedores.map((sc, idx) => {
+                  const tasa = sc.totalInvitaciones > 0 ? (sc.totalRespuestas / sc.totalInvitaciones) * 100 : 0;
+                  const esTop = sc.adjudicacionesGanadas > 0 && idx === 0;
 
-          <div className="bg-cd border border-[var(--bd)] rounded-2xl overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-sf border-b border-[var(--bd)] text-[10px] tx-mu uppercase font-bold">
-                  <tr>
-                    <th className="p-3">Almacén</th>
-                    <th className="p-3 text-center">Licitaciones Recibidas</th>
-                    <th className="p-3 text-center">Respuestas Enviadas</th>
-                    <th className="p-3 text-center">Tasa de Respuesta</th>
-                    <th className="p-3 text-center">Compras Ganadas</th>
-                    <th className="p-3 text-right">Mejor Precio Histórico</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--bd)]">
-                  {scorecardProveedores.map((sc, idx) => {
-                    const tasa = sc.totalInvitaciones > 0 ? (sc.totalRespuestas / sc.totalInvitaciones) * 100 : 0;
-                    const esTop = sc.adjudicacionesGanadas > 0 && idx === 0;
-
-                    return (
-                      <tr key={sc.proveedor.id} className="hover:bg-sf/50 transition-colors">
-                        <td className="p-3">
-                          <div className="font-bold text-[var(--tx)] flex items-center gap-1.5">
-                            {sc.proveedor.nombre}
-                            {esTop && (
-                              <span className="px-1.5 py-0.2 bg-amber-500/10 text-amber-600 text-[9px] font-bold rounded border border-amber-500/20">
-                                🏆 Top Proveedor
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[10px] tx-mu font-mono">{sc.proveedor.telefono || '—'}</span>
-                        </td>
-                        <td className="p-3 text-center font-mono font-semibold">
-                          {sc.totalInvitaciones}
-                        </td>
-                        <td className="p-3 text-center font-mono font-semibold">
-                          {sc.totalRespuestas}
-                        </td>
-                        <td className="p-3 text-center font-mono font-bold">
-                          <span className={`px-2 py-0.5 rounded-full ${
-                            tasa >= 75 ? 'bg-emerald-500/10 text-emerald-600' : tasa >= 40 ? 'bg-amber-500/10 text-amber-600' : 'bg-slate-500/10 tx-mu'
-                          }`}>
-                            {tasa.toFixed(0)}%
-                          </span>
-                        </td>
-                        <td className="p-3 text-center font-mono font-bold text-emerald-600">
-                          {sc.adjudicacionesGanadas}
-                        </td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
-                          {sc.mejorPrecioHistorico > 0 ? `$${sc.mejorPrecioHistorico.toFixed(2)}` : '—'}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                  return (
+                    <tr key={sc.proveedor.id} className="hover:bg-sf/40 transition-colors">
+                      <td className="px-5 py-3">
+                        <div className="font-semibold text-[var(--tx)] flex items-center gap-2">
+                          {sc.proveedor.nombre}
+                          {esTop && (
+                            <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                              · Top
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-[var(--mu)] font-mono">{sc.proveedor.telefono || '—'}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center font-mono tabular-nums text-[var(--tx)]">
+                        {sc.totalInvitaciones}
+                      </td>
+                      <td className="px-4 py-3 text-center font-mono tabular-nums text-[var(--tx)]">
+                        {sc.totalRespuestas}
+                      </td>
+                      <td className="px-4 py-3 text-center font-mono tabular-nums font-semibold">
+                        <span
+                          className={
+                            tasa >= 75
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : tasa >= 40
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : 'text-[var(--mu)]'
+                          }
+                        >
+                          {tasa.toFixed(0)}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center font-mono tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">
+                        {sc.adjudicacionesGanadas}
+                      </td>
+                      <td className="px-5 py-3 text-right font-mono tabular-nums font-semibold text-[var(--tx)]">
+                        {sc.mejorPrecioHistorico > 0 ? `$${sc.mejorPrecioHistorico.toFixed(2)}` : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL: COMPARADOR DE OFERTAS & ADJUDICACIÓN DE SUBASTA                   */}
-      {/* ========================================================================= */}
+      {/* MODAL: COMPARADOR DE OFERTAS */}
       {licitacionDetalle && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setLicitacionDetalle(null)}>
-          <div onClick={e => e.stopPropagation()} className="w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl flex flex-col">
-            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl flex flex-col">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-cd border border-[var(--bd)] overflow-hidden shrink-0 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-lg bg-sf border border-[var(--bd)] overflow-hidden shrink-0 flex items-center justify-center">
                   {licitacionDetalle.imagen_url ? (
                     <img src={licitacionDetalle.imagen_url} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    <span className="text-xl">📦</span>
+                    <Boxes size={16} className="text-[var(--mu)]" />
                   )}
                 </div>
                 <div>
-                  <span className="text-[10px] font-mono tx-mu uppercase">Subasta Inversa #{licitacionDetalle.sku}</span>
-                  <h3 className="font-bold text-sm text-[var(--tx)]">Requerimiento: {licitacionDetalle.cantidad} unidades</h3>
+                  <span className="text-[11px] font-mono text-[var(--mu)]">#{licitacionDetalle.sku}</span>
+                  <h3 className="font-semibold text-sm text-[var(--tx)]">
+                    Requerimiento: {licitacionDetalle.cantidad} unidades
+                  </h3>
                 </div>
               </div>
 
-              <button onClick={() => setLicitacionDetalle(null)} className="p-1.5 hover:bg-black/10 rounded-lg">
-                <X size={18} />
+              <button type="button" onClick={() => setLicitacionDetalle(null)} className="p-1.5 text-[var(--mu)] hover:text-[var(--tx)] rounded-lg">
+                <X size={16} />
               </button>
             </div>
 
-            {/* Contenido Comparador */}
-            <div className="p-5 overflow-y-auto space-y-4 flex-1">
-              {/* Resumen de Presupuesto */}
-              <div className="grid grid-cols-3 gap-3 p-3 bg-sf rounded-xl border border-[var(--bd)] text-center text-xs">
-                <div>
-                  <span className="text-[10px] tx-mu uppercase font-bold block">Precio Ref. Objetivo</span>
-                  <span className="font-mono font-bold text-sm text-[var(--tx)]">
+            <div className="p-5 overflow-y-auto space-y-5 flex-1">
+              <div className="grid grid-cols-3 divide-x divide-[var(--bd)] bg-sf rounded-lg border border-[var(--bd)] text-center text-xs">
+                <div className="p-3">
+                  <span className="text-[11px] text-[var(--mu)] block">P. Objetivo</span>
+                  <span className="font-mono tabular-nums font-bold text-sm text-[var(--tx)]">
                     ${licitacionDetalle.precio_referencia ? Number(licitacionDetalle.precio_referencia).toFixed(2) : '—'}
                   </span>
                 </div>
-                <div>
-                  <span className="text-[10px] tx-mu uppercase font-bold block">Precio Máximo Límite</span>
-                  <span className="font-mono font-bold text-sm text-rose-600">
+                <div className="p-3">
+                  <span className="text-[11px] text-[var(--mu)] block">P. Máximo</span>
+                  <span className="font-mono tabular-nums font-bold text-sm text-rose-600 dark:text-rose-400">
                     ${licitacionDetalle.precio_maximo ? Number(licitacionDetalle.precio_maximo).toFixed(2) : '—'}
                   </span>
                 </div>
-                <div>
-                  <span className="text-[10px] tx-mu uppercase font-bold block">Presupuesto Máximo</span>
-                  <span className="font-mono font-black text-sm text-[var(--tx)]">
+                <div className="p-3">
+                  <span className="text-[11px] text-[var(--mu)] block">Presupuesto máx.</span>
+                  <span className="font-mono tabular-nums font-bold text-sm text-[var(--tx)]">
                     ${((licitacionDetalle.cantidad || 1) * Number(licitacionDetalle.precio_maximo || 0)).toFixed(2)}
                   </span>
                 </div>
               </div>
 
-              {/* Lista de Pujas / Ofertas de Almacenes */}
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-xs font-bold uppercase tx-mu flex items-center gap-1.5">
-                    <TrendingDown size={14} className="text-emerald-500" /> Comparador de Pujas Recibidas (Ordenadas por menor precio)
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-xs font-semibold text-[var(--tx)]">
+                    Pujas recibidas (menor a mayor)
                   </h4>
 
                   <button
+                    type="button"
                     onClick={() => setModalNuevaOferta(true)}
-                    className="px-2.5 py-1 bg-sf border border-[var(--bd)] hover:bg-cd rounded-lg text-[11px] font-bold text-orange-600 flex items-center gap-1"
+                    className="px-3 py-1.5 bg-cd border border-[var(--bd)] hover:bg-sf rounded-lg text-xs font-semibold text-[var(--tx)]"
                   >
-                    + Registrar Puja Manual
+                    + Registrar puja manual
                   </button>
                 </div>
 
-                <div className="space-y-2">
+                <div className="divide-y divide-[var(--bd)] border border-[var(--bd)] rounded-xl overflow-hidden">
                   {ofertas
                     .filter(o => o.licitacion_id === licitacionDetalle.id)
                     .sort((a, b) => Number(a.precio_ofertado || 9999) - Number(b.precio_ofertado || 9999))
@@ -996,54 +979,50 @@ export function ProveedoresPage() {
                       return (
                         <div
                           key={of.id}
-                          className={`p-3.5 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-all ${
-                            esGanador 
-                              ? 'bg-emerald-500/10 border-emerald-500/40 ring-2 ring-emerald-500/30' 
-                              : index === 0 && tienePrecio && licitacionDetalle.estado !== 'completed'
-                              ? 'bg-orange-500/5 border-orange-500/40' 
-                              : 'bg-sf border-[var(--bd)]'
+                          className={`p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+                            esGanador ? 'bg-emerald-500/10' : 'bg-cd'
                           }`}
                         >
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                              <span className="font-bold text-xs text-[var(--tx)]">{prov?.nombre || 'Almacén'}</span>
+                              <span className="font-semibold text-xs text-[var(--tx)]">{prov?.nombre || 'Almacén'}</span>
                               {index === 0 && tienePrecio && (
-                                <span className="px-1.5 py-0.2 bg-emerald-500 text-white rounded text-[9px] font-black uppercase">
-                                  Mejor Precio
+                                <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                                  · Mejor precio
                                 </span>
                               )}
                               {esGanador && (
-                                <span className="px-1.5 py-0.2 bg-emerald-600 text-white rounded text-[9px] font-black uppercase flex items-center gap-0.5">
-                                  <Award size={10} /> Adjudicado
+                                <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                  · <Award size={11} /> Adjudicado
                                 </span>
                               )}
                             </div>
 
-                            <div className="text-[11px] tx-mu mt-0.5 flex flex-wrap items-center gap-2">
+                            <div className="text-[11px] text-[var(--mu)] mt-0.5 flex flex-wrap items-center gap-2">
                               <span>Tel: {prov?.telefono || '—'}</span>
-                              {of.tiempo_entrega && <span>• Entrega: {of.tiempo_entrega}</span>}
-                              {of.cantidad_disponible && <span>• Disp: {of.cantidad_disponible} u</span>}
+                              {of.tiempo_entrega && <span>· Entrega: {of.tiempo_entrega}</span>}
+                              {of.cantidad_disponible && <span>· Disp: {of.cantidad_disponible} u</span>}
                             </div>
-                            {of.notas && <p className="text-[10px] tx-mu italic mt-1">"{of.notas}"</p>}
+                            {of.notas && <p className="text-[11px] text-[var(--mu)] italic mt-1">"{of.notas}"</p>}
                           </div>
 
                           <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
                             <div className="text-right">
-                              <span className="text-[9px] uppercase font-bold tx-mu block">Precio Ofertado</span>
-                              <span className="font-mono font-black text-base text-[var(--tx)]">
+                              <span className="font-mono tabular-nums font-bold text-sm text-[var(--tx)] block">
                                 {tienePrecio ? `$${Number(of.precio_ofertado).toFixed(2)}` : 'Sin respuesta'}
                               </span>
                               {ahorroUni > 0 && (
-                                <span className="text-[10px] text-emerald-600 font-bold block">
-                                  Ahorro: -${ahorroUni.toFixed(2)}/u
+                                <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium block font-mono tabular-nums">
+                                  Ahorro -${ahorroUni.toFixed(2)}/u
                                 </span>
                               )}
                             </div>
 
                             {tienePrecio && licitacionDetalle.estado !== 'completed' && (
                               <button
+                                type="button"
                                 onClick={() => handleAdjudicarOferta(licitacionDetalle, of)}
-                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-sm transition-colors"
+                                className="px-3 py-1.5 bg-[var(--tx)] text-[var(--cd)] rounded-lg text-xs font-semibold hover:opacity-90"
                               >
                                 Adjudicar
                               </button>
@@ -1056,10 +1035,11 @@ export function ProveedoresPage() {
               </div>
             </div>
 
-            <div className="p-4 border-t border-[var(--bd)] bg-sf flex justify-end">
+            <div className="px-5 py-3.5 border-t border-[var(--bd)] bg-sf/40 flex justify-end">
               <button
+                type="button"
                 onClick={() => setLicitacionDetalle(null)}
-                className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] rounded-xl text-xs font-bold"
+                className="px-4 py-1.5 border border-[var(--bd)] bg-cd rounded-lg text-xs font-medium text-[var(--tx)]"
               >
                 Cerrar
               </button>
@@ -1068,60 +1048,55 @@ export function ProveedoresPage() {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 1: NUEVA LICITACIÓN CON VISTA PREVIA DE WHATSAPP                   */}
-      {/* ========================================================================= */}
+      {/* MODAL 1: NUEVA LICITACIÓN */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setIsModalOpen(false)}>
-          <div onClick={e => e.stopPropagation()} className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl p-5 md:p-6 space-y-4">
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-[var(--bd)] pb-3">
-              <div className="flex items-center gap-2">
-                <Send className="text-orange-500" size={18} />
-                <h2 className="text-base font-black">Lanzar Licitación Masiva</h2>
-              </div>
-              <button onClick={() => setIsModalOpen(false)} className="p-1 rounded-lg hover:bg-black/10"><X size={16} /></button>
+              <h2 className="text-sm font-semibold">Lanzar licitación masiva</h2>
+              <button type="button" onClick={() => setIsModalOpen(false)} className="p-1 text-[var(--mu)] hover:text-[var(--tx)] rounded-lg"><X size={16} /></button>
             </div>
 
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] uppercase font-bold tx-mu block mb-1">SKU o Producto *</label>
+                  <label className="text-xs font-medium text-[var(--mu)] block mb-1">SKU o producto *</label>
                   <input
                     value={sku}
                     onChange={e => setSku(e.target.value.toUpperCase())}
-                    placeholder="Ej: MINI-EMS-01"
-                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs uppercase font-mono font-bold outline-none focus:border-orange-500"
+                    placeholder="MINI-EMS-01"
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs uppercase font-mono font-semibold outline-none focus:border-[var(--tx)]"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="text-[10px] uppercase font-bold tx-mu block mb-1">Cantidad Requerida *</label>
+                  <label className="text-xs font-medium text-[var(--mu)] block mb-1">Cantidad requerida *</label>
                   <input
                     type="number"
                     min="1"
                     value={cantidad}
                     onChange={e => setCantidad(e.target.value)}
                     placeholder="50"
-                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs font-bold outline-none focus:border-orange-500"
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono tabular-nums font-semibold outline-none focus:border-[var(--tx)]"
                     required
                   />
                 </div>
               </div>
 
               <div>
-                <label className="text-[10px] uppercase font-bold tx-mu block mb-1">URL Foto del Producto (Opcional)</label>
+                <label className="text-xs font-medium text-[var(--mu)] block mb-1">URL foto del producto (opcional)</label>
                 <input
                   value={imagenUrl}
                   onChange={e => setImagenUrl(e.target.value)}
                   placeholder="https://..."
-                  className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-orange-500"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--tx)]"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] uppercase font-bold tx-mu block mb-1">Precio Referencia ($ Objetivo)</label>
+                  <label className="text-xs font-medium text-[var(--mu)] block mb-1">Precio objetivo ($)</label>
                   <input
                     type="number"
                     min="0"
@@ -1129,12 +1104,12 @@ export function ProveedoresPage() {
                     value={precioRef}
                     onChange={e => setPrecioRef(e.target.value)}
                     placeholder="3.00"
-                    className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs font-bold outline-none focus:border-orange-500"
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono tabular-nums font-semibold outline-none focus:border-[var(--tx)]"
                   />
                 </div>
 
                 <div>
-                  <label className="text-[10px] uppercase font-bold tx-mu block mb-1">Precio Máximo ($ Límite)</label>
+                  <label className="text-xs font-medium text-[var(--mu)] block mb-1">Precio máximo ($)</label>
                   <input
                     type="number"
                     min="0"
@@ -1142,44 +1117,42 @@ export function ProveedoresPage() {
                     value={precioMax}
                     onChange={e => setPrecioMax(e.target.value)}
                     placeholder="4.50"
-                    className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs font-bold outline-none focus:border-orange-500"
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono tabular-nums font-semibold outline-none focus:border-[var(--tx)]"
                   />
                 </div>
               </div>
 
-              {/* VISTA PREVIA DEL MENSAJE DE WHATSAPP (EVOLUTION API) */}
-              <div className="p-3.5 bg-emerald-950/10 dark:bg-emerald-900/20 border border-emerald-500/20 rounded-2xl space-y-1.5">
-                <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 block flex items-center gap-1">
-                  <MessageSquare size={12} /> Vista Previa: Mensaje de WhatsApp (Evolution API)
+              <div className="p-3.5 bg-sf border border-[var(--bd)] rounded-lg space-y-1.5">
+                <span className="text-[11px] font-semibold text-[var(--mu)] block">
+                  Vista previa de WhatsApp (Evolution API)
                 </span>
-                <div className="p-3 bg-cd rounded-xl border border-[var(--bd)] text-xs font-sans leading-relaxed text-[var(--tx)]">
-                  <p>¡Hola! 👋 Tenemos orden de compra para <strong>{cantidad} unidades</strong> del producto <strong>{sku || '[SKU]'}</strong>.</p>
-                  <p className="mt-1">💰 Rango objetivo de compra: <strong>${precioRef || '0.00'} - ${precioMax || '0.00'} USD</strong>.</p>
+                <div className="text-xs leading-relaxed text-[var(--tx)]">
+                  <p>¡Hola! Tenemos orden de compra para <strong>{cantidad} unidades</strong> del producto <strong>{sku || '[SKU]'}</strong>.</p>
+                  <p className="mt-1">Rango objetivo de compra: <strong>${precioRef || '0.00'} - ${precioMax || '0.00'} USD</strong>.</p>
                   <p className="mt-1">¿Cuentan con disponibilidad para entrega inmediata? Por favor responde con tu mejor cotización y disponibilidad.</p>
                 </div>
               </div>
 
-              {/* Checkbox Modo Prueba */}
-              <div className="flex items-center gap-2 p-3 bg-sf rounded-xl border border-[var(--bd)]">
+              <div className="flex items-center gap-2.5 p-3 bg-sf rounded-lg border border-[var(--bd)]">
                 <input
                   type="checkbox"
                   id="modoPrueba"
                   checked={modoPrueba}
                   onChange={e => setModoPrueba(e.target.checked)}
-                  className="rounded text-orange-600 focus:ring-0"
+                  className="rounded focus:ring-0"
                 />
                 <label htmlFor="modoPrueba" className="text-xs cursor-pointer">
-                  <span className="font-bold text-[var(--tx)] block">Modo Prueba (Simulación)</span>
-                  <span className="text-[10px] tx-mu block">Envía la licitación únicamente a almacenes con etiqueta "TEST".</span>
+                  <span className="font-semibold text-[var(--tx)] block">Modo prueba (simulación)</span>
+                  <span className="text-[11px] text-[var(--mu)] block">Envía únicamente a almacenes con etiqueta TEST.</span>
                 </label>
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end gap-2 border-t border-[var(--bd)]">
+            <div className="pt-3 flex justify-end gap-2 border-t border-[var(--bd)]">
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold"
+                className="px-4 py-2 border border-[var(--bd)] rounded-lg text-xs font-medium text-[var(--tx)] hover:bg-sf"
               >
                 Cancelar
               </button>
@@ -1187,67 +1160,64 @@ export function ProveedoresPage() {
                 type="button"
                 onClick={handleGuardarLicitacion}
                 disabled={saving}
-                className="px-5 py-2 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow"
+                className="px-5 py-2 bg-[var(--tx)] text-[var(--cd)] font-semibold rounded-lg text-xs hover:opacity-90 disabled:opacity-50"
               >
-                {saving ? 'Encolando...' : `Disparar Licitación (${selectedIds.size} almacenes)`}
+                {saving ? 'Encolando...' : `Disparar licitación (${selectedIds.size})`}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 2: CREAR / EDITAR PROVEEDOR                                        */}
-      {/* ========================================================================= */}
+      {/* MODAL 2: CREAR / EDITAR PROVEEDOR */}
       {isProviderModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setIsProviderModalOpen(false)}>
-          <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl p-5 space-y-4">
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-[var(--bd)] pb-3">
-              <h2 className="text-base font-black">
-                {editingProviderId ? 'Editar Proveedor' : 'Nuevo Proveedor'}
+              <h2 className="text-sm font-semibold">
+                {editingProviderId ? 'Editar proveedor' : 'Nuevo proveedor'}
               </h2>
-              <button onClick={() => setIsProviderModalOpen(false)} className="p-1 rounded-lg"><X size={16} /></button>
+              <button type="button" onClick={() => setIsProviderModalOpen(false)} className="p-1 text-[var(--mu)] hover:text-[var(--tx)] rounded-lg"><X size={16} /></button>
             </div>
 
             <div className="space-y-3">
               <div>
-                <label className="text-[10px] uppercase font-bold tx-mu block mb-1">Nombre del Almacén *</label>
+                <label className="text-xs font-medium text-[var(--mu)] block mb-1">Nombre del almacén *</label>
                 <input
                   value={provNombre}
                   onChange={e => setProvNombre(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-orange-500"
-                  placeholder="Ej: Importadora El Ángel"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--tx)]"
+                  placeholder="Importadora El Ángel"
                   required
                 />
               </div>
 
               <div>
-                <label className="text-[10px] uppercase font-bold tx-mu block mb-1">Teléfono WhatsApp</label>
+                <label className="text-xs font-medium text-[var(--mu)] block mb-1">Teléfono WhatsApp</label>
                 <input
                   value={provTelefono}
                   onChange={e => setProvTelefono(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs font-mono outline-none focus:border-orange-500"
-                  placeholder="Ej: +503 7777 8888"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono outline-none focus:border-[var(--tx)]"
+                  placeholder="+503 7777 8888"
                 />
               </div>
 
               <div>
-                <label className="text-[10px] uppercase font-bold tx-mu block mb-1">Etiquetas (separadas por coma)</label>
+                <label className="text-xs font-medium text-[var(--mu)] block mb-1">Etiquetas (separadas por coma)</label>
                 <input
                   value={provEtiquetas}
                   onChange={e => setProvEtiquetas(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none focus:border-orange-500"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--tx)]"
                   placeholder="tecnologia, mayorista, san_salvador"
                 />
-                <span className="text-[10px] tx-mu block mt-1">Úsalas para segmentar y licitar por nicho con 1 clic.</span>
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end gap-2 border-t border-[var(--bd)]">
+            <div className="pt-3 flex justify-end gap-2 border-t border-[var(--bd)]">
               <button
                 type="button"
                 onClick={() => setIsProviderModalOpen(false)}
-                className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold"
+                className="px-4 py-2 border border-[var(--bd)] rounded-lg text-xs font-medium text-[var(--tx)] hover:bg-sf"
               >
                 Cancelar
               </button>
@@ -1255,33 +1225,31 @@ export function ProveedoresPage() {
                 type="button"
                 onClick={handleSaveProvider}
                 disabled={saving}
-                className="px-5 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs"
+                className="px-5 py-2 bg-[var(--tx)] text-[var(--cd)] font-semibold rounded-lg text-xs hover:opacity-90 disabled:opacity-50"
               >
-                {saving ? 'Guardando...' : 'Guardar Proveedor'}
+                {saving ? 'Guardando...' : 'Guardar proveedor'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 3: REGISTRAR PUJA MANUAL                                           */}
-      {/* ========================================================================= */}
+      {/* MODAL 3: REGISTRAR PUJA MANUAL */}
       {modalNuevaOferta && licitacionDetalle && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setModalNuevaOferta(false)}>
-          <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl p-5 space-y-4">
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-[var(--bd)] pb-3">
-              <h3 className="font-bold text-sm">Registrar Oferta de Almacén</h3>
-              <button onClick={() => setModalNuevaOferta(false)} className="p-1 rounded-lg"><X size={16} /></button>
+              <h3 className="font-semibold text-sm">Registrar oferta de almacén</h3>
+              <button type="button" onClick={() => setModalNuevaOferta(false)} className="p-1 text-[var(--mu)] hover:text-[var(--tx)] rounded-lg"><X size={16} /></button>
             </div>
 
             <div className="space-y-3">
               <div>
-                <label className="text-[10px] uppercase font-bold tx-mu block mb-1">Almacén que Cotizó *</label>
+                <label className="text-xs font-medium text-[var(--mu)] block mb-1">Almacén que cotizó *</label>
                 <select
                   value={ofertaProveedorId}
                   onChange={e => setOfertaProveedorId(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--tx)]"
                   required
                 >
                   <option value="">Selecciona el almacén...</option>
@@ -1293,7 +1261,7 @@ export function ProveedoresPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] uppercase font-bold tx-mu block mb-1">Precio Ofertado ($/u) *</label>
+                  <label className="text-xs font-medium text-[var(--mu)] block mb-1">Precio ofertado ($/u) *</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1301,61 +1269,61 @@ export function ProveedoresPage() {
                     value={ofertaPrecio}
                     onChange={e => setOfertaPrecio(e.target.value)}
                     placeholder="3.25"
-                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs font-bold outline-none"
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono tabular-nums font-semibold outline-none focus:border-[var(--tx)]"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="text-[10px] uppercase font-bold tx-mu block mb-1">Cantidad Disponible</label>
+                  <label className="text-xs font-medium text-[var(--mu)] block mb-1">Cantidad disponible</label>
                   <input
                     type="number"
                     min="1"
                     value={ofertaCantidad}
                     onChange={e => setOfertaCantidad(e.target.value)}
                     placeholder={String(licitacionDetalle.cantidad)}
-                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs font-bold outline-none"
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono tabular-nums font-semibold outline-none focus:border-[var(--tx)]"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="text-[10px] uppercase font-bold tx-mu block mb-1">Tiempo de Entrega</label>
+                <label className="text-xs font-medium text-[var(--mu)] block mb-1">Tiempo de entrega</label>
                 <input
                   type="text"
                   value={ofertaTiempo}
                   onChange={e => setOfertaTiempo(e.target.value)}
-                  placeholder="Ej. Hoy 3pm, 24 horas"
-                  className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                  placeholder="Hoy 3pm, 24 horas"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--tx)]"
                 />
               </div>
 
               <div>
-                <label className="text-[10px] uppercase font-bold tx-mu block mb-1">Notas / Condiciones</label>
+                <label className="text-xs font-medium text-[var(--mu)] block mb-1">Notas / Condiciones</label>
                 <input
                   type="text"
                   value={ofertaNotas}
                   onChange={e => setOfertaNotas(e.target.value)}
                   placeholder="Incluye flete, pago contra entrega..."
-                  className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none focus:border-[var(--tx)]"
                 />
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end gap-2 border-t border-[var(--bd)]">
+            <div className="pt-3 flex justify-end gap-2 border-t border-[var(--bd)]">
               <button
                 type="button"
                 onClick={() => setModalNuevaOferta(false)}
-                className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold"
+                className="px-4 py-2 border border-[var(--bd)] rounded-lg text-xs font-medium text-[var(--tx)] hover:bg-sf"
               >
                 Cancelar
               </button>
               <button
                 type="button"
                 onClick={handleGuardarPujaManual}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs"
+                className="px-5 py-2 bg-[var(--tx)] text-[var(--cd)] font-semibold rounded-lg text-xs hover:opacity-90"
               >
-                Guardar Puja
+                Guardar puja
               </button>
             </div>
           </div>

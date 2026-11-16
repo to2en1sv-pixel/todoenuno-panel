@@ -1084,7 +1084,7 @@ export function UniChatPage() {
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row flex-1 min-h-0 min-w-0 w-full bg-cd border-0 lg:border lg:border-[var(--bd)] rounded-none lg:rounded-2xl overflow-hidden shadow-sm">
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0 min-w-0 w-full bg-cd border-0 lg:border lg:border-[var(--bd)] rounded-none lg:rounded-xl overflow-hidden">
         {subView === 'stats' ? (
           <UniChatStats
             conversations={conversations}
@@ -1111,18 +1111,18 @@ export function UniChatPage() {
             selectedConv ? 'hidden lg:flex' : 'flex flex-1 lg:flex-none'
           }`}
         >
-          <div className="p-3 sm:p-3.5 border-b border-[var(--bd)] bg-sf space-y-2.5">
+          <div className="p-3 sm:p-3.5 border-b border-[var(--bd)] bg-cd space-y-2.5">
             <div className="flex items-center justify-between gap-1.5">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <MessageSquare size={16} className="text-emerald-500 shrink-0" />
-                <h2 className="font-black text-sm tracking-tight whitespace-nowrap">UniChat</h2>
+              <div className="flex items-center gap-2 min-w-0">
+                <MessageSquare size={15} className="tx-mu shrink-0" />
+                <h2 className="font-bold text-sm tracking-tight whitespace-nowrap">UniChat</h2>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                <div className="flex items-center p-0.5 rounded-lg bg-cd border border-[var(--bd)]">
+                <div className="flex items-center p-0.5 rounded-lg bg-sf border border-[var(--bd)]">
                   <button
                     type="button"
                     onClick={() => setSubView('chats')}
-                    className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[var(--tx)] text-[var(--cd)] whitespace-nowrap shrink-0"
+                    className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--tx)] text-[var(--cd)] whitespace-nowrap shrink-0"
                   >
                     Chats
                   </button>
@@ -1130,7 +1130,7 @@ export function UniChatPage() {
                     type="button"
                     onClick={() => setSubView('stats')}
                     title="Ver estadísticas de conversaciones y Bot Todd"
-                    className="px-2 py-0.5 rounded-md text-[10px] font-bold tx-mu hover:text-[var(--tx)] flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
+                    className="px-2 py-0.5 rounded-md text-[10px] font-medium tx-mu hover:text-[var(--tx)] flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
                   >
                     <BarChart3 size={11} />
                     <span>Stats</span>
@@ -1141,10 +1141,10 @@ export function UniChatPage() {
                     type="button"
                     onClick={() => setHideLegacy(!hideLegacy)}
                     title={hideLegacy ? `Mostrar ${legacyCount} chats antiguos de BuilderBot` : 'Ocultar chats antiguos de BuilderBot'}
-                    className={`p-1.5 rounded-lg border text-[10px] font-bold flex items-center gap-1 transition-colors ${
+                    className={`p-1.5 rounded-lg border text-[10px] font-semibold flex items-center gap-1 transition-colors ${
                       hideLegacy
-                        ? 'border-[var(--bd)] bg-cd tx-mu hover:text-[var(--tx)]'
-                        : 'border-indigo-500/40 bg-indigo-500/10 text-indigo-500'
+                        ? 'border-[var(--bd)] bg-sf tx-mu hover:text-[var(--tx)]'
+                        : 'border-[var(--tx)]/30 bg-sf text-[var(--tx)]'
                     }`}
                   >
                     {hideLegacy ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -1153,7 +1153,7 @@ export function UniChatPage() {
                 <button
                   onClick={() => loadConversations(true)}
                   title="Recargar conversaciones"
-                  className="p-1.5 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf transition-colors"
+                  className="p-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd transition-colors tx-mu hover:text-[var(--tx)]"
                 >
                   <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
                 </button>
@@ -1168,7 +1168,7 @@ export function UniChatPage() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Buscar cliente, teléfono o texto..."
-                className="w-full pl-8 pr-7 py-2 sm:py-1.5 rounded-xl bg-cd border border-[var(--bd)] text-sm sm:text-xs outline-none focus:border-[var(--ac)]"
+                className="w-full pl-8 pr-7 py-2 sm:py-1.5 rounded-lg bg-sf border border-[var(--bd)] text-sm sm:text-xs outline-none focus:border-[var(--tx)]"
               />
               {search && (
                 <button
@@ -1181,11 +1181,11 @@ export function UniChatPage() {
             </div>
 
             {/* Filtros */}
-            <div className="flex items-center gap-1 p-0.5 bg-cd rounded-xl border border-[var(--bd)] text-[10px] font-bold overflow-x-auto">
+            <div className="flex items-center gap-1 p-0.5 bg-sf rounded-lg border border-[var(--bd)] text-[10px] font-semibold overflow-x-auto font-mono tabular-nums">
               <button
                 type="button"
                 onClick={() => setModeFilter('all')}
-                className={`flex-1 py-1.5 sm:py-1 px-2 rounded-lg whitespace-nowrap transition-colors ${
+                className={`flex-1 py-1.5 sm:py-1 px-2 rounded-md whitespace-nowrap transition-colors ${
                   modeFilter === 'all' ? 'bg-[var(--tx)] text-[var(--cd)]' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
@@ -1194,8 +1194,8 @@ export function UniChatPage() {
               <button
                 type="button"
                 onClick={() => setModeFilter('unread')}
-                className={`flex-1 py-1.5 sm:py-1 px-2 rounded-lg whitespace-nowrap transition-colors ${
-                  modeFilter === 'unread' ? 'bg-emerald-600 text-white' : 'tx-mu hover:text-[var(--tx)]'
+                className={`flex-1 py-1.5 sm:py-1 px-2 rounded-md whitespace-nowrap transition-colors ${
+                  modeFilter === 'unread' ? 'bg-[var(--tx)] text-[var(--cd)]' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
                 Sin resp.{counts.unread > 0 ? ` (${counts.unread})` : ''}
@@ -1203,8 +1203,8 @@ export function UniChatPage() {
               <button
                 type="button"
                 onClick={() => setModeFilter('bot')}
-                className={`flex-1 py-1.5 sm:py-1 px-2 rounded-lg whitespace-nowrap transition-colors ${
-                  modeFilter === 'bot' ? 'bg-purple-600 text-white' : 'tx-mu hover:text-[var(--tx)]'
+                className={`flex-1 py-1.5 sm:py-1 px-2 rounded-md whitespace-nowrap transition-colors ${
+                  modeFilter === 'bot' ? 'bg-[var(--tx)] text-[var(--cd)]' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
                 Todd ({counts.bot})
@@ -1212,8 +1212,8 @@ export function UniChatPage() {
               <button
                 type="button"
                 onClick={() => setModeFilter('human')}
-                className={`flex-1 py-1.5 sm:py-1 px-2 rounded-lg whitespace-nowrap transition-colors ${
-                  modeFilter === 'human' ? 'bg-amber-500 text-zinc-950' : 'tx-mu hover:text-[var(--tx)]'
+                className={`flex-1 py-1.5 sm:py-1 px-2 rounded-md whitespace-nowrap transition-colors ${
+                  modeFilter === 'human' ? 'bg-[var(--tx)] text-[var(--cd)]' : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
                 Hum. ({counts.human})
@@ -1252,22 +1252,22 @@ export function UniChatPage() {
                     key={conv.id}
                     onClick={() => setSelectedConv(conv)}
                     className={`group p-3 border-b border-[var(--bd)] cursor-pointer hover:bg-sf/70 transition-colors ${
-                      selectedConv?.id === conv.id ? 'bg-sf border-l-4 border-l-[var(--ac)]' : ''
+                      selectedConv?.id === conv.id ? 'bg-sf border-l-2 border-l-[var(--tx)]' : ''
                     }`}
                   >
                     <div className="flex justify-between items-start gap-2 mb-1">
                       <div className="min-w-0 flex items-start gap-1.5">
                         {needsReply && (
                           <span
-                            className="w-2 h-2 rounded-full bg-emerald-500 mt-1.5 shrink-0 animate-pulse"
+                            className="w-2 h-2 rounded-full bg-emerald-500 mt-1.5 shrink-0"
                             title="Cliente esperando respuesta"
                           />
                         )}
                         <div className="min-w-0">
-                          <span className="font-bold text-xs block truncate text-[var(--tx)]">
+                          <span className="font-semibold text-xs block truncate text-[var(--tx)]">
                             {conv.contact_name || formatPhoneDisplay(conv)}
                           </span>
-                          <span className="text-[10px] font-mono tx-mu block truncate">
+                          <span className="text-[10px] font-mono tabular-nums tx-mu block truncate">
                             {formatPhoneDisplay(conv)}
                           </span>
                         </div>
@@ -1275,10 +1275,10 @@ export function UniChatPage() {
 
                       <div className="flex flex-col items-end gap-1 shrink-0">
                         <span
-                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                          className={`text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded border flex items-center gap-1 ${
                             isHuman
-                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                              : 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30'
+                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25'
+                              : 'bg-sf text-[var(--tx)] border-[var(--bd)]'
                           }`}
                         >
                           {isHuman ? <User size={9} /> : <Bot size={9} />}
@@ -1286,14 +1286,16 @@ export function UniChatPage() {
                         </span>
                         {ordInfo && (
                           <span
-                            className={`text-[9px] font-bold ${
-                              ordInfo.cancelados >= 2 ? 'text-rose-500' : 'text-emerald-600'
+                            className={`text-[9px] font-mono tabular-nums font-semibold ${
+                              ordInfo.cancelados >= 2
+                                ? 'text-rose-600 dark:text-rose-400'
+                                : 'text-emerald-600 dark:text-emerald-400'
                             }`}
                           >
                             {ordInfo.cancelados >= 2
-                              ? `⚠️ ${ordInfo.cancelados} canc.`
+                              ? `${ordInfo.cancelados} canc.`
                               : ordInfo.entregados > 0
-                              ? `✓ ${ordInfo.entregados} ped.`
+                              ? `${ordInfo.entregados} entr.`
                               : `${ordInfo.total} ped.`}
                           </span>
                         )}
@@ -1398,12 +1400,12 @@ export function UniChatPage() {
                           {selectedConv.instance_id || 'eee'}
                         </span>
                         {detectedAdTag && (
-                          <span className="hidden md:inline-flex text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 items-center gap-1 truncate max-w-[140px]">
+                          <span className="hidden md:inline-flex text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-sf tx-mu border border-[var(--bd)] items-center gap-1 truncate max-w-[140px]">
                             <Megaphone size={10} className="shrink-0" /> {detectedAdTag}
                           </span>
                         )}
                       </div>
-                      <p className="text-[10px] sm:text-[11px] font-mono tx-mu flex items-center gap-1 truncate">
+                      <p className="text-[10px] sm:text-[11px] font-mono tabular-nums tx-mu flex items-center gap-1 truncate">
                         <Phone size={10} className="shrink-0" />
                         <span className="truncate">{formatPhoneDisplay(selectedConv)}</span>
                       </p>
@@ -1415,7 +1417,7 @@ export function UniChatPage() {
                   <button
                     type="button"
                     onClick={() => setShowOrderModal(true)}
-                    className="px-2 sm:px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 transition-colors shadow-sm"
+                    className="px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 flex items-center gap-1.5 transition-opacity"
                     title="Crear Pedido"
                   >
                     <ShoppingBag size={13} />
@@ -1427,10 +1429,10 @@ export function UniChatPage() {
                     onClick={toggleStatus}
                     disabled={isUpdating}
                     title={selectedConv.status === 'human' ? 'Activar Bot Todd' : 'Pausar Bot Todd'}
-                    className={`px-2 sm:px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold flex items-center gap-1 transition-all ${
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold border flex items-center gap-1.5 transition-colors ${
                       selectedConv.status === 'human'
-                        ? 'bg-amber-500 text-zinc-950 hover:bg-amber-400 shadow-sm'
-                        : 'bg-purple-600 text-white hover:bg-purple-500 shadow-sm'
+                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/15'
+                        : 'bg-sf border-[var(--bd)] text-[var(--tx)] hover:bg-cd'
                     } ${isUpdating ? 'opacity-50 cursor-wait' : ''}`}
                   >
                     {isUpdating ? (
@@ -1438,13 +1440,13 @@ export function UniChatPage() {
                     ) : selectedConv.status === 'human' ? (
                       <>
                         <User size={13} />
-                        <span className="hidden sm:inline">Humano (Activar Todd)</span>
+                        <span className="hidden sm:inline">Humano · Activar Todd</span>
                         <span className="sm:hidden">Hum.</span>
                       </>
                     ) : (
                       <>
                         <Bot size={13} />
-                        <span className="hidden sm:inline">Todd Activo (Pausar)</span>
+                        <span className="hidden sm:inline">Todd Activo · Pausar</span>
                         <span className="sm:hidden">Todd</span>
                       </>
                     )}
@@ -1455,7 +1457,7 @@ export function UniChatPage() {
                     type="button"
                     onClick={() => setMobileShowContext(true)}
                     title="Ver ficha antifraude, estado Todd y pedidos"
-                    className="lg:hidden px-2 py-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd text-[11px] font-bold flex items-center gap-1"
+                    className="lg:hidden px-2 py-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd text-[11px] font-semibold flex items-center gap-1"
                   >
                     <span
                       className={`w-2 h-2 rounded-full ${
@@ -1496,15 +1498,16 @@ export function UniChatPage() {
               </div>
 
               {selectedConv.status !== 'human' && (
-                <div className="px-3 sm:px-4 py-1.5 bg-purple-500/10 border-b border-purple-500/20 text-[10px] sm:text-[11px] text-purple-600 dark:text-purple-300 flex items-center justify-between gap-2 shrink-0">
+                <div className="px-3 sm:px-4 py-1.5 bg-sf border-b border-[var(--bd)] text-[10px] sm:text-[11px] tx-mu flex items-center gap-2 shrink-0">
+                  <Bot size={12} className="shrink-0 text-[var(--tx)]" />
                   <span className="truncate">
-                    🤖 <strong>Bot Todd</strong> activo. Al responder abajo, Todd se pausará automáticamente.
+                    <strong className="text-[var(--tx)] font-semibold">Bot Todd</strong> activo. Al responder abajo, Todd se pausará automáticamente.
                   </span>
                 </div>
               )}
 
               {/* Mensajes */}
-              <div className="flex-1 overflow-y-auto p-3 sm:p-4 flex flex-col gap-2.5 bg-cd relative min-h-0">
+              <div className="flex-1 overflow-y-auto p-3 sm:p-4 flex flex-col gap-2.5 bg-sf/40 relative min-h-0">
                 {messages.length === 0 ? (
                   <div className="m-auto text-xs tx-mu">No hay mensajes registrados en esta conversación.</div>
                 ) : (
@@ -1516,10 +1519,10 @@ export function UniChatPage() {
                     return (
                       <div
                         key={msg.id}
-                        className={`max-w-[88%] sm:max-w-[74%] px-3 py-2 rounded-2xl text-xs leading-relaxed ${
+                        className={`max-w-[88%] sm:max-w-[74%] px-3.5 py-2.5 rounded-xl text-xs leading-relaxed ${
                           msg.from_me
                             ? 'self-end bg-[var(--tx)] text-[var(--cd)] rounded-br-sm'
-                            : 'self-start bg-sf border border-[var(--bd)] text-[var(--tx)] rounded-bl-sm'
+                            : 'self-start bg-cd border border-[var(--bd)] text-[var(--tx)] rounded-bl-sm'
                         }`}
                       >
                         {imgUrl && (
@@ -1677,7 +1680,7 @@ export function UniChatPage() {
                                 type="button"
                                 disabled={isSending}
                                 onClick={() => handleSendCatalogProduct(prod, true)}
-                                className="px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold"
+                                className="px-2 py-1 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 text-[10px] font-semibold"
                                 title={
                                   videoUrl
                                     ? 'Enviar foto + ficha (y video How-To automático)'
@@ -1855,21 +1858,21 @@ export function UniChatPage() {
               </button>
             </div>
             {/* Semáforo Antifraude */}
-            <div className="p-3 rounded-xl bg-sf border border-[var(--bd)] space-y-2">
+            <div className="p-3 rounded-xl bg-sf border border-[var(--bd)] space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider tx-mu">
+                <span className="text-[10px] font-semibold uppercase tracking-wider tx-mu">
                   Riesgo Antifraude
                 </span>
                 {selectedRisk && (
                   <span
-                    className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                    className={`text-[10px] font-mono tabular-nums font-semibold px-2 py-0.5 rounded border ${
                       selectedRisk.nivelRiesgo === 'rojo'
-                        ? 'bg-rose-600 text-white'
+                        ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
                         : selectedRisk.nivelRiesgo === 'amarillo'
-                        ? 'bg-amber-500 text-zinc-950'
+                        ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
                         : selectedRisk.nivelRiesgo === 'verde'
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-cd border border-[var(--bd)] tx-mu'
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                        : 'bg-cd border-[var(--bd)] tx-mu'
                     }`}
                   >
                     Score {selectedRisk.score}/100
@@ -1883,17 +1886,17 @@ export function UniChatPage() {
                 </p>
               ) : (
                 <>
-                  <div className="grid grid-cols-3 gap-1.5 text-center">
-                    <div className="p-1.5 rounded-lg bg-cd border border-[var(--bd)]">
-                      <div className="text-xs font-black">{selectedRisk.totalPedidos}</div>
+                  <div className="grid grid-cols-3 divide-x divide-[var(--bd)] text-center rounded-lg bg-cd border border-[var(--bd)]">
+                    <div className="p-1.5">
+                      <div className="text-xs font-bold font-mono tabular-nums">{selectedRisk.totalPedidos}</div>
                       <div className="text-[9px] tx-mu">Pedidos</div>
                     </div>
-                    <div className="p-1.5 rounded-lg bg-cd border border-[var(--bd)]">
-                      <div className="text-xs font-black text-emerald-500">{selectedRisk.entregados}</div>
+                    <div className="p-1.5">
+                      <div className="text-xs font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{selectedRisk.entregados}</div>
                       <div className="text-[9px] tx-mu">Entreg.</div>
                     </div>
-                    <div className="p-1.5 rounded-lg bg-cd border border-[var(--bd)]">
-                      <div className="text-xs font-black text-rose-500">{selectedRisk.cancelados}</div>
+                    <div className="p-1.5">
+                      <div className="text-xs font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400">{selectedRisk.cancelados}</div>
                       <div className="text-[9px] tx-mu">Canc.</div>
                     </div>
                   </div>
@@ -1918,10 +1921,10 @@ export function UniChatPage() {
                       }
                       setBlacklistTick(t => t + 1);
                     }}
-                    className={`w-full py-1.5 rounded-lg text-[10px] font-bold border flex items-center justify-center gap-1 transition-colors ${
+                    className={`w-full py-1.5 rounded-lg text-[10px] font-semibold border flex items-center justify-center gap-1 transition-colors ${
                       selectedRisk.enListaNegra
-                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600'
-                        : 'border-rose-500/30 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20'
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                        : 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/15'
                     }`}
                   >
                     <UserX size={11} />
@@ -2073,7 +2076,7 @@ export function UniChatPage() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-lg rounded-2xl bg-cd border border-[var(--bd)] p-5 space-y-4 max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-lg rounded-xl bg-cd border border-[var(--bd)] p-5 space-y-4 max-h-[85vh] overflow-y-auto"
           >
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-sm flex items-center gap-2">
@@ -2176,7 +2179,7 @@ export function UniChatPage() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-md rounded-2xl bg-cd border border-[var(--bd)] p-5 space-y-4 shadow-xl"
+            className="w-full max-w-md rounded-xl bg-cd border border-[var(--bd)] p-5 space-y-4"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2.5">

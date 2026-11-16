@@ -898,101 +898,93 @@ export function DocsPage() {
   const getStatusBadge = (status: string) => {
     if (status === 'Completado') {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
           <CheckCircle2 size={11} /> Completado
         </span>
       );
     }
     if (status === 'En Progreso') {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
           <Clock size={11} /> En Progreso
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sf tx-mu border border-[var(--bd)]">
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium tx-mu">
         <LayoutList size={11} /> Pendiente
       </span>
     );
   };
 
   return (
-    <div className="flex flex-col gap-3 h-[calc(100dvh-96px)] lg:h-[calc(100dvh-48px)] min-h-[540px] w-full min-w-0">
+    <div className="max-w-6xl mx-auto flex flex-col gap-5 h-[calc(100dvh-96px)] lg:h-[calc(100dvh-48px)] min-h-[540px] w-full min-w-0">
       {/* Header Superior + Navegación de Pestañas */}
-      <div className="bg-cd bd rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0 shadow-sm">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-500 shrink-0">
-            <FileText size={18} />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="font-black text-base tracking-tight">Docs & Roadmap OS</h1>
-              <span
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                  dbMode === 'supabase'
-                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
-                }`}
-              >
-                {dbMode === 'supabase' ? 'Supabase DB' : 'Respaldo Local'}
-              </span>
-            </div>
-            <p className="text-[11px] tx-mu truncate">
-              Playbooks operativos, guías de Bot Todd / Evolution 2.3.7, migraciones SQL y progreso por Sprint.
-            </p>
-          </div>
+      <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 shrink-0">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--tx)]">
+            Docs &amp; Roadmap OS
+          </h1>
+          <p className="text-xs tx-mu mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span>{dbMode === 'supabase' ? 'Supabase DB conectado' : 'Respaldo Local'}</span>
+            <span aria-hidden="true">·</span>
+            <span>Playbooks, Bot Todd, Evolution API y migraciones SQL</span>
+          </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex p-1 bg-sf rounded-xl border border-[var(--bd)] text-xs font-bold">
-            <button
-              type="button"
-              onClick={() => setActiveTab('docs')}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors ${
-                activeTab === 'docs' ? 'bg-[var(--tx)] text-[var(--cd)]' : 'tx-mu hover:text-[var(--tx)]'
-              }`}
-            >
-              <FileText size={13} /> Documentos ({docs.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('roadmap')}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors ${
-                activeTab === 'roadmap' ? 'bg-[var(--tx)] text-[var(--cd)]' : 'tx-mu hover:text-[var(--tx)]'
-              }`}
-            >
-              <Map size={13} /> Roadmap ({roadmapStats.pct}%)
-            </button>
-          </div>
-
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           <a
             href="/api/todd-bridge?action=workflow"
             download="todd-v2-workflow.json"
-            className="px-3 py-1.5 rounded-xl border border-[var(--bd)] bg-sf hover:border-indigo-500 text-xs font-bold flex items-center gap-1.5 transition-colors"
+            className="px-3 py-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
             title="Descargar workflow híbrido de Bot Todd v2 para n8n"
           >
-            <Bot size={14} className="text-purple-500" />
-            <span className="hidden sm:inline">Workflow Todd n8n</span>
-            <Download size={12} className="opacity-70" />
+            <Bot size={13} className="tx-mu" />
+            <span>Workflow Todd n8n</span>
+            <Download size={12} className="tx-mu" />
           </a>
         </div>
-      </div>
+      </header>
+
+      <nav className="flex items-center gap-5 border-b border-[var(--bd)] shrink-0">
+        <button
+          type="button"
+          onClick={() => setActiveTab('docs')}
+          className={`pb-2.5 text-xs font-medium border-b-2 transition-colors cursor-pointer ${
+            activeTab === 'docs'
+              ? 'border-[var(--tx)] text-[var(--tx)] font-semibold'
+              : 'border-transparent tx-mu hover:text-[var(--tx)]'
+          }`}
+        >
+          Documentos ({docs.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('roadmap')}
+          className={`pb-2.5 text-xs font-medium border-b-2 transition-colors cursor-pointer ${
+            activeTab === 'roadmap'
+              ? 'border-[var(--tx)] text-[var(--tx)] font-semibold'
+              : 'border-transparent tx-mu hover:text-[var(--tx)]'
+          }`}
+        >
+          Roadmap ({roadmapStats.pct}%)
+        </button>
+      </nav>
 
       {/* Banner de feedback */}
       {banner && (
         <div
-          className={`px-4 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 shrink-0 ${
+          className={`px-4 py-2.5 rounded-xl border text-xs font-medium flex items-center justify-between gap-2 shrink-0 ${
             banner.type === 'ok'
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
-              : 'bg-rose-500/10 border-rose-500/30 text-rose-500'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
           }`}
         >
           <span className="flex items-center gap-2">
             {banner.type === 'ok' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
             {banner.text}
           </span>
-          <button type="button" onClick={() => setBanner(null)} className="opacity-70 hover:opacity-100 text-[11px]">
+          <button type="button" onClick={() => setBanner(null)} className="opacity-70 hover:opacity-100 text-[11px] cursor-pointer">
             ✕
           </button>
         </div>
@@ -1000,10 +992,10 @@ export function DocsPage() {
 
       {/* ==================== TAB 1: DOCUMENTOS & EDITOR ==================== */}
       {activeTab === 'docs' ? (
-        <div className="flex-1 min-h-0 min-w-0 bg-cd bd rounded-2xl overflow-hidden flex flex-col lg:flex-row shadow-sm">
+        <div className="flex-1 min-h-0 min-w-0 bg-cd border border-[var(--bd)] rounded-xl overflow-hidden flex flex-col lg:flex-row">
           {/* Sidebar de Documentos */}
           <div
-            className={`w-full lg:w-[310px] xl:w-[330px] shrink-0 border-r border-[var(--bd)] flex-col bg-sf min-h-0 ${
+            className={`w-full lg:w-[300px] xl:w-[320px] shrink-0 border-r border-[var(--bd)] flex-col bg-sf min-h-0 ${
               mobileShowEditor ? 'hidden lg:flex' : 'flex flex-1 lg:flex-none'
             }`}
           >
@@ -1268,7 +1260,7 @@ export function DocsPage() {
                         type="button"
                         onClick={handleSave}
                         disabled={isSaving}
-                        className="bg-[var(--ac)] text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 hover:opacity-90 transition-opacity disabled:opacity-50"
+                        className="bg-[var(--tx)] text-[var(--cd)] px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
                       >
                         <Save size={13} />
                         <span>{isSaving ? 'Guardando...' : 'Guardar (Ctrl+S)'}</span>
@@ -1355,14 +1347,13 @@ export function DocsPage() {
         /* ==================== TAB 2: ROADMAP INTERACTIVO OS ==================== */
         <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-0.5">
           {/* Resumen de progreso + acciones */}
-          <div className="bg-cd bd rounded-2xl p-4 space-y-3 shadow-sm">
+          <div className="bg-cd border border-[var(--bd)] rounded-xl p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="font-black text-sm flex items-center gap-2">
-                  <Sparkles size={16} className="text-indigo-500" />
+                <h2 className="font-semibold text-sm text-[var(--tx)]">
                   Mapa de Evolución TODOENUNO OS
                 </h2>
-                <p className="text-xs tx-mu">
+                <p className="text-xs tx-mu mt-0.5">
                   Haz clic en el estado de cualquier hito para avanzarlo (Pendiente → En Progreso → Completado).
                 </p>
               </div>
@@ -1370,31 +1361,31 @@ export function DocsPage() {
                 <button
                   type="button"
                   onClick={handleResetRoadmap}
-                  className="px-2.5 py-1.5 rounded-xl border border-[var(--bd)] bg-sf text-xs font-bold flex items-center gap-1 tx-mu hover:text-[var(--tx)]"
+                  className="px-3 py-1.5 rounded-lg border border-[var(--bd)] bg-sf text-xs font-medium inline-flex items-center gap-1 tx-mu hover:text-[var(--tx)] cursor-pointer"
                 >
-                  <RotateCcw size={13} /> Sincronizar Fases
+                  <RotateCcw size={12} /> Sincronizar Fases
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowNewMilestone(!showNewMilestone)}
-                  className="px-3 py-1.5 rounded-xl bg-[var(--tx)] text-[var(--cd)] text-xs font-bold flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded-lg bg-[var(--tx)] text-[var(--cd)] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Plus size={14} /> Agregar Hito
+                  <Plus size={13} /> Agregar Hito
                 </button>
               </div>
             </div>
 
             {/* Barra de progreso */}
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs font-bold">
-                <span>
-                  Progreso Global: {roadmapStats.completed} de {roadmapStats.total} hitos completados
+              <div className="flex items-center justify-between text-xs font-medium">
+                <span className="tx-mu">
+                  Progreso global: <strong className="text-[var(--tx)] font-mono tabular-nums">{roadmapStats.completed} / {roadmapStats.total}</strong> hitos completados
                 </span>
-                <span className="text-emerald-500 font-mono">{roadmapStats.pct}%</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-mono tabular-nums font-semibold">{roadmapStats.pct}%</span>
               </div>
-              <div className="w-full h-2.5 rounded-full bg-sf border border-[var(--bd)] overflow-hidden">
+              <div className="w-full h-2 rounded-full bg-sf border border-[var(--bd)] overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-300"
+                  className="h-full bg-[var(--tx)] transition-all duration-300"
                   style={{ width: `${roadmapStats.pct}%` }}
                 />
               </div>
@@ -1416,9 +1407,9 @@ export function DocsPage() {
                     key={st}
                     type="button"
                     onClick={() => setRoadmapFilter(st)}
-                    className={`px-3 py-1 rounded-xl text-xs font-bold border transition-colors ${
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
                       roadmapFilter === st
-                        ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)]'
+                        ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)] font-semibold'
                         : 'bg-sf border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
                     }`}
                   >
@@ -1431,13 +1422,13 @@ export function DocsPage() {
 
           {/* Formulario nuevo hito */}
           {showNewMilestone && (
-            <form onSubmit={handleAddMilestone} className="bg-cd bd rounded-2xl p-4 space-y-3 shadow-sm">
+            <form onSubmit={handleAddMilestone} className="bg-cd border border-[var(--bd)] rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs uppercase tracking-wider">Nuevo Hito del Roadmap</span>
+                <span className="font-semibold text-xs text-[var(--tx)]">Nuevo hito del Roadmap</span>
                 <button
                   type="button"
                   onClick={() => setShowNewMilestone(false)}
-                  className="text-xs tx-mu hover:text-[var(--tx)]"
+                  className="text-xs tx-mu hover:text-[var(--tx)] cursor-pointer"
                 >
                   Cancelar
                 </button>
@@ -1448,20 +1439,20 @@ export function DocsPage() {
                   value={msFase}
                   onChange={e => setMsFase(e.target.value)}
                   placeholder="Fase (ej. Sprint 14)"
-                  className="px-3 py-2 rounded-xl bg-sf border border-[var(--bd)] text-xs outline-none focus:border-[var(--ac)]"
+                  className="px-3 py-2 rounded-lg bg-sf border border-[var(--bd)] text-xs outline-none focus:border-[var(--tx)]"
                 />
                 <input
                   type="text"
                   value={msTitulo}
                   onChange={e => setMsTitulo(e.target.value)}
                   placeholder="Título del hito (obligatorio)"
-                  className="px-3 py-2 rounded-xl bg-sf border border-[var(--bd)] text-xs outline-none focus:border-[var(--ac)] sm:col-span-1"
+                  className="px-3 py-2 rounded-lg bg-sf border border-[var(--bd)] text-xs outline-none focus:border-[var(--tx)] sm:col-span-1"
                   required
                 />
                 <select
                   value={msEstado}
                   onChange={e => setMsEstado(e.target.value as DocStatus)}
-                  className="px-3 py-2 rounded-xl bg-sf border border-[var(--bd)] text-xs outline-none"
+                  className="px-3 py-2 rounded-lg bg-sf border border-[var(--bd)] text-xs outline-none"
                 >
                   <option value="Pendiente">Pendiente</option>
                   <option value="En Progreso">En Progreso</option>
@@ -1473,34 +1464,34 @@ export function DocsPage() {
                 value={msDesc}
                 onChange={e => setMsDesc(e.target.value)}
                 placeholder="Descripción breve del objetivo..."
-                className="w-full px-3 py-2 rounded-xl bg-sf border border-[var(--bd)] text-xs outline-none focus:border-[var(--ac)]"
+                className="w-full px-3 py-2 rounded-lg bg-sf border border-[var(--bd)] text-xs outline-none focus:border-[var(--tx)]"
               />
               <textarea
                 rows={2}
                 value={msEntregables}
                 onChange={e => setMsEntregables(e.target.value)}
                 placeholder="Entregables (uno por línea, opcional)..."
-                className="w-full px-3 py-2 rounded-xl bg-sf border border-[var(--bd)] text-xs outline-none resize-none"
+                className="w-full px-3 py-2 rounded-lg bg-sf border border-[var(--bd)] text-xs outline-none resize-none"
               />
               <button
                 type="submit"
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold"
+                className="px-4 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 text-xs font-semibold cursor-pointer"
               >
-                + Guardar Hito en Roadmap
+                Guardar Hito en Roadmap
               </button>
             </form>
           )}
 
           {/* Grid de Tarjetas del Roadmap */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 pb-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5 pb-4">
             {filteredMilestones.map(ms => (
               <div
                 key={ms.id}
-                className="bg-cd bd rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-sm hover:border-[var(--ac)] transition-colors"
+                className="bg-cd border border-[var(--bd)] rounded-xl p-4 flex flex-col justify-between gap-3 hover:border-[var(--tx)]/30 transition-colors"
               >
                 <div className="space-y-2.5">
                   <div className="flex items-start justify-between gap-2">
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg bg-sf border border-[var(--bd)] text-indigo-500">
+                    <span className="text-[11px] font-mono font-medium tx-mu">
                       {ms.fase}
                     </span>
                     <div className="flex items-center gap-1.5">

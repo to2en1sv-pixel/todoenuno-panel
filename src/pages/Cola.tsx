@@ -516,104 +516,95 @@ export function ColaPage() {
     filtered.length > 0 && filtered.every((item) => selectedIds.has(item.id));
 
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-5 pb-12">
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-16">
       {/* ENCABEZADO OPERATIVO */}
-      <section className="bg-cd bd rounded-2xl p-5 sm:p-6 flex flex-col gap-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-xs tx-mu tabular-nums">
-              <span>Distribuidora Omnicanal · Fase 1</span>
-              <span aria-hidden="true">·</span>
-              <span>
-                Último post legado:{' '}
-                {metrics.lastPostedItem?.posted_at
-                  ? fmtAgo(metrics.lastPostedItem.posted_at)
-                  : 'Sin registros'}
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>{metrics.postedToday} hoy</span>
-            </div>
-            <h1
-              className="text-xl sm:text-2xl font-bold mt-1.5 tracking-tight"
-              style={{ textWrap: 'balance' }}
-            >
-              {colaView === 'bodega'
-                ? 'Bodega de Contenido & Distribuidora'
-                : 'Cola Clásica de Productos (post_queue)'}
-            </h1>
-            <p className="text-xs tx-mu mt-1">
-              {colaView === 'bodega'
-                ? 'Organiza contenido por página y nicho desde fb_pages, genera copies IA y publica automáticamente evitando SKUs agotados.'
-                : 'Vista clásica conectada a la tabla post_queue para compatibilidad con flujos anteriores.'}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => loadData(true)}
-              disabled={refreshing}
-              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-sf bd text-xs font-medium hover:opacity-85 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-              Actualizar
-            </button>
-
-            <Link
-              to="/social-inbox"
-              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-sf bd text-xs font-medium hover:opacity-85 transition-opacity whitespace-nowrap shrink-0"
-            >
-              <MessageSquare size={14} />
-              Social Inbox
-            </Link>
-
-            {colaView === 'clasica' && (
-              <button
-                type="button"
-                onClick={() => {
-                  setAddMode('catalog');
-                  setShowAddModal(true);
-                }}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
-                style={{ background: 'var(--tx)', color: 'var(--cd)' }}
-              >
-                <Plus size={14} />
-                Agregar a Cola
-              </button>
-            )}
-          </div>
+      <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--tx)]">
+            {colaView === 'bodega'
+              ? 'Bodega de Contenido'
+              : 'Cola Clásica de Productos'}
+          </h1>
+          <p className="text-xs tx-mu mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums">
+            <span>Distribuidora Multi-Nicho</span>
+            <span aria-hidden="true">·</span>
+            <span>
+              Último post:{' '}
+              {metrics.lastPostedItem?.posted_at
+                ? fmtAgo(metrics.lastPostedItem.posted_at)
+                : 'Sin registros'}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>{metrics.postedToday} publicados hoy</span>
+          </p>
         </div>
 
-        {/* Selector de vistas */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[var(--bd)]">
-          <div className="inline-flex items-center gap-1 p-1 bg-sf bd rounded-xl">
-            <button
-              type="button"
-              onClick={() => setColaView('bodega')}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                colaView === 'bodega' ? 'bg-cd bd font-semibold' : 'tx-mu hover:text-[var(--tx)]'
-              }`}
-            >
-              <Film size={14} style={{ color: colaView === 'bodega' ? 'var(--ac)' : undefined }} />
-              Bodega & Distribuidora Multi-Nicho
-            </button>
-            <button
-              type="button"
-              onClick={() => setColaView('clasica')}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                colaView === 'clasica' ? 'bg-cd bd font-semibold' : 'tx-mu hover:text-[var(--tx)]'
-              }`}
-            >
-              <Layers size={14} />
-              Cola Clásica ({metrics.pending} pend.)
-            </button>
-          </div>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => loadData(true)}
+            disabled={refreshing}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[var(--bd)] bg-cd text-xs font-medium tx-mu hover:text-[var(--tx)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+            <span>Actualizar</span>
+          </button>
 
-          <span className="text-[11px] tx-mu">
-            Endpoint automatizado: <code className="mono">POST /api/content-distribute?action=run_next</code>
-          </span>
+          <Link
+            to="/social-inbox"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[var(--bd)] bg-cd text-xs font-medium tx-mu hover:text-[var(--tx)] transition-colors whitespace-nowrap shrink-0"
+          >
+            <MessageSquare size={13} />
+            <span>Social Inbox</span>
+          </Link>
+
+          {colaView === 'clasica' && (
+            <button
+              type="button"
+              onClick={() => {
+                setAddMode('catalog');
+                setShowAddModal(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Plus size={14} />
+              <span>Agregar a Cola</span>
+            </button>
+          )}
         </div>
-      </section>
+      </header>
+
+      {/* Selector de vistas */}
+      <nav className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--bd)]">
+        <div className="flex items-center gap-5 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setColaView('bodega')}
+            className={`pb-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
+              colaView === 'bodega'
+                ? 'border-[var(--tx)] text-[var(--tx)] font-semibold'
+                : 'border-transparent tx-mu hover:text-[var(--tx)]'
+            }`}
+          >
+            Bodega &amp; Distribuidora Multi-Nicho
+          </button>
+          <button
+            type="button"
+            onClick={() => setColaView('clasica')}
+            className={`pb-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
+              colaView === 'clasica'
+                ? 'border-[var(--tx)] text-[var(--tx)] font-semibold'
+                : 'border-transparent tx-mu hover:text-[var(--tx)]'
+            }`}
+          >
+            Cola Clásica ({metrics.pending} pend.)
+          </button>
+        </div>
+
+        <span className="text-[11px] tx-mu font-mono pb-2 hidden md:inline">
+          POST /api/content-distribute?action=run_next
+        </span>
+      </nav>
 
       {colaView === 'bodega' ? (
         <BodegaContenidoView
@@ -646,23 +637,20 @@ export function ColaPage() {
         </div>
       )}
 
-      {/* TIRA DE KPIs DE LA COLA (4 COLUMNAS) */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+      {/* TIRA DE KPIs DE LA COLA (UNIFICADA CON DIVISIONES) */}
+      <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)] overflow-hidden">
         <button
           type="button"
           onClick={() => setFilter('pending')}
-          className="text-left bg-cd bd rounded-2xl p-4 hover:border-[var(--ac)] transition-colors cursor-pointer"
+          className="text-left p-4 hover:bg-sf/50 transition-colors cursor-pointer"
         >
-          <div className="flex items-center justify-between text-xs tx-mu">
-            <span>Pendientes en cola</span>
-            <Clock size={15} style={{ color: 'var(--ac)' }} />
-          </div>
+          <div className="text-[11px] font-medium tx-mu">Pendientes en cola</div>
           {loading ? (
-            <Skeleton h={34} />
+            <Skeleton h={32} />
           ) : (
-            <div className="mt-2">
-              <div className="text-2xl font-bold mono tabular-nums">{metrics.pending}</div>
-              <div className="text-xs tx-mu mt-0.5 tabular-nums">
+            <div className="mt-1">
+              <div className="text-xl font-bold font-mono tabular-nums">{metrics.pending}</div>
+              <div className="text-[11px] tx-mu mt-0.5 tabular-nums">
                 {metrics.pendingWithStock} con stock · {metrics.pendingOutOfStock} agotados
               </div>
             </div>
@@ -672,18 +660,17 @@ export function ColaPage() {
         <button
           type="button"
           onClick={() => setFilter('posted')}
-          className="text-left bg-cd bd rounded-2xl p-4 hover:border-[var(--ok)] transition-colors cursor-pointer"
+          className="text-left p-4 hover:bg-sf/50 transition-colors cursor-pointer"
         >
-          <div className="flex items-center justify-between text-xs tx-mu">
-            <span>Publicados</span>
-            <Send size={15} style={{ color: 'var(--ok)' }} />
-          </div>
+          <div className="text-[11px] font-medium tx-mu">Publicados</div>
           {loading ? (
-            <Skeleton h={34} />
+            <Skeleton h={32} />
           ) : (
-            <div className="mt-2">
-              <div className="text-2xl font-bold mono tabular-nums">{metrics.posted}</div>
-              <div className="text-xs tx-mu mt-0.5 tabular-nums">
+            <div className="mt-1">
+              <div className="text-xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+                {metrics.posted}
+              </div>
+              <div className="text-[11px] tx-mu mt-0.5 tabular-nums">
                 {metrics.postedToday} publicados hoy
               </div>
             </div>
@@ -693,23 +680,21 @@ export function ColaPage() {
         <button
           type="button"
           onClick={() => setFilter('error')}
-          className="text-left bg-cd bd rounded-2xl p-4 hover:border-[var(--er)] transition-colors cursor-pointer"
+          className="text-left p-4 hover:bg-sf/50 transition-colors cursor-pointer"
         >
-          <div className="flex items-center justify-between text-xs tx-mu">
-            <span>Con error</span>
-            <AlertCircle size={15} style={{ color: metrics.errorCount > 0 ? 'var(--er)' : 'var(--mu)' }} />
-          </div>
+          <div className="text-[11px] font-medium tx-mu">Con error</div>
           {loading ? (
-            <Skeleton h={34} />
+            <Skeleton h={32} />
           ) : (
-            <div className="mt-2">
+            <div className="mt-1">
               <div
-                className="text-2xl font-bold mono tabular-nums"
-                style={{ color: metrics.errorCount > 0 ? 'var(--er)' : 'var(--tx)' }}
+                className={`text-xl font-bold font-mono tabular-nums ${
+                  metrics.errorCount > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-[var(--tx)]'
+                }`}
               >
                 {metrics.errorCount}
               </div>
-              <div className="text-xs tx-mu mt-0.5">
+              <div className="text-[11px] tx-mu mt-0.5">
                 {metrics.errorCount > 0 ? 'Listos para reintentar' : 'Sin errores recientes'}
               </div>
             </div>
@@ -718,18 +703,15 @@ export function ColaPage() {
 
         <Link
           to="/social-inbox"
-          className="bg-cd bd rounded-2xl p-4 hover:border-[var(--ac)] transition-colors flex flex-col justify-between"
+          className="p-4 hover:bg-sf/50 transition-colors flex flex-col justify-between"
         >
-          <div className="flex items-center justify-between text-xs tx-mu">
-            <span>Leads desde posts</span>
-            <MessageSquare size={15} style={{ color: 'var(--ac)' }} />
-          </div>
+          <div className="text-[11px] font-medium tx-mu">Leads desde posts</div>
           {loading ? (
-            <Skeleton h={34} />
+            <Skeleton h={32} />
           ) : (
-            <div className="mt-2">
-              <div className="text-2xl font-bold mono tabular-nums">{metrics.totalLinkedLeads}</div>
-              <div className="text-xs tx-mu mt-0.5">Comentarios captados</div>
+            <div className="mt-1">
+              <div className="text-xl font-bold font-mono tabular-nums">{metrics.totalLinkedLeads}</div>
+              <div className="text-[11px] tx-mu mt-0.5">Comentarios captados</div>
             </div>
           )}
         </Link>
@@ -737,12 +719,9 @@ export function ColaPage() {
 
       {/* ALERTA DE PENDIENTES SIN STOCK */}
       {metrics.pendingOutOfStock > 0 && (
-        <div
-          className="bg-cd bd rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-          style={{ borderColor: 'var(--ac)' }}
-        >
+        <div className="bg-cd border border-amber-500/30 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-start gap-3">
-            <AlertTriangle size={18} style={{ color: 'var(--ac)' }} className="shrink-0 mt-0.5" />
+            <AlertTriangle size={16} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
             <div className="text-xs">
               <div className="font-semibold">
                 Tienes {metrics.pendingOutOfStock} producto{metrics.pendingOutOfStock > 1 ? 's' : ''} pendiente{metrics.pendingOutOfStock > 1 ? 's' : ''} en cola con stock disponible en 0.
@@ -760,7 +739,7 @@ export function ColaPage() {
                 setFilter('pending');
                 setStockFilter('out_of_stock');
               }}
-              className="px-3 py-2 rounded-xl bg-sf bd text-xs font-medium hover:opacity-85 whitespace-nowrap cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-sf border border-[var(--bd)] text-xs font-medium hover:opacity-85 whitespace-nowrap cursor-pointer"
             >
               Ver agotados
             </button>
@@ -771,15 +750,14 @@ export function ColaPage() {
                   type="button"
                   disabled={bulkBusy}
                   onClick={() => handleBulkDelete(metrics.pendingOutOfStockIds)}
-                  className="px-3 py-2 rounded-xl text-xs font-semibold text-white whitespace-nowrap cursor-pointer"
-                  style={{ background: 'var(--er)' }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-rose-600 whitespace-nowrap cursor-pointer"
                 >
                   {bulkBusy ? 'Quitando...' : `Confirmar (${metrics.pendingOutOfStockIds.length})`}
                 </button>
                 <button
                   type="button"
                   onClick={() => setConfirmBulkAction(null)}
-                  className="px-2.5 py-2 rounded-xl bg-sf bd text-xs cursor-pointer"
+                  className="px-2.5 py-1.5 rounded-lg bg-sf border border-[var(--bd)] text-xs cursor-pointer"
                 >
                   Cancelar
                 </button>
@@ -788,8 +766,7 @@ export function ColaPage() {
               <button
                 type="button"
                 onClick={() => setConfirmBulkAction('purge_oos')}
-                className="px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap cursor-pointer"
-                style={{ background: 'var(--ac)', color: '#fff' }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--tx)] text-[var(--cd)] whitespace-nowrap cursor-pointer"
               >
                 Quitar agotados
               </button>
@@ -799,10 +776,9 @@ export function ColaPage() {
       )}
 
       {/* BARRA DE FILTROS Y BÚSQUEDA */}
-      <section className="bg-cd bd rounded-2xl p-4 flex flex-col gap-3">
+      <section className="bg-cd border border-[var(--bd)] rounded-xl p-3.5 flex flex-col gap-3">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Tabs segmentados de estado */}
-          <div className="flex items-center gap-1 p-1 bg-sf bd rounded-xl overflow-x-auto">
+          <div className="flex items-center gap-1 p-1 bg-sf border border-[var(--bd)] rounded-lg overflow-x-auto">
             {(
               [
                 { key: 'all', label: `Todos (${metrics.all})` },
@@ -815,8 +791,10 @@ export function ColaPage() {
                 key={tab.key}
                 type="button"
                 onClick={() => setFilter(tab.key)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  filter === tab.key ? 'bg-cd bd font-semibold' : 'tx-mu hover:text-[var(--tx)]'
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  filter === tab.key
+                    ? 'bg-[var(--tx)] text-[var(--cd)] font-semibold'
+                    : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
                 {tab.label}
@@ -824,13 +802,12 @@ export function ColaPage() {
             ))}
           </div>
 
-          {/* Filtro stock + búsqueda */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 lg:max-w-lg">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1 lg:max-w-lg">
             <select
               value={stockFilter}
               onChange={(e) => setStockFilter(e.target.value as any)}
               aria-label="Filtrar por stock"
-              className="bg-sf bd rounded-xl px-3 py-2 text-xs outline-none focus:border-[var(--ac)]"
+              className="bg-sf border border-[var(--bd)] rounded-lg px-3 py-1.5 text-xs outline-none focus:border-[var(--tx)]"
             >
               <option value="all">Stock: Todos</option>
               <option value="in_stock">Solo con stock (&gt; 0)</option>
@@ -843,7 +820,7 @@ export function ColaPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar producto, SKU o fb_post_id..."
-                className="w-full bg-sf bd rounded-xl pl-8 pr-3 py-2 text-xs outline-none focus:border-[var(--ac)]"
+                className="w-full bg-sf border border-[var(--bd)] rounded-lg pl-8 pr-3 py-1.5 text-xs outline-none focus:border-[var(--tx)]"
               />
             </div>
           </div>
@@ -860,7 +837,7 @@ export function ColaPage() {
                 type="button"
                 disabled={bulkBusy}
                 onClick={() => handleBulkStatus('pending')}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sf bd text-xs font-medium hover:border-[var(--ac)] cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sf border border-[var(--bd)] text-xs font-medium hover:border-[var(--tx)] cursor-pointer"
               >
                 <RotateCcw size={13} />
                 Pasar a Pendiente
@@ -869,7 +846,7 @@ export function ColaPage() {
                 type="button"
                 disabled={bulkBusy}
                 onClick={() => handleBulkStatus('posted')}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sf bd text-xs font-medium hover:border-[var(--ok)] cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sf border border-[var(--bd)] text-xs font-medium hover:border-[var(--tx)] cursor-pointer"
               >
                 <CheckCircle2 size={13} />
                 Marcar Publicado
@@ -881,15 +858,14 @@ export function ColaPage() {
                     type="button"
                     disabled={bulkBusy}
                     onClick={() => handleBulkDelete()}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white cursor-pointer"
-                    style={{ background: 'var(--er)' }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-rose-600 cursor-pointer"
                   >
                     {bulkBusy ? 'Borrando...' : 'Confirmar borrado'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setConfirmBulkAction(null)}
-                    className="px-2.5 py-1.5 rounded-lg bg-sf bd text-xs cursor-pointer"
+                    className="px-2.5 py-1.5 rounded-lg bg-sf border border-[var(--bd)] text-xs cursor-pointer"
                   >
                     Cancelar
                   </button>
@@ -898,8 +874,7 @@ export function ColaPage() {
                 <button
                   type="button"
                   onClick={() => setConfirmBulkAction('delete')}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sf bd text-xs font-medium cursor-pointer"
-                  style={{ color: 'var(--er)' }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sf border border-[var(--bd)] text-xs font-medium text-rose-600 dark:text-rose-400 cursor-pointer"
                 >
                   <Trash2 size={13} />
                   Eliminar
@@ -911,8 +886,7 @@ export function ColaPage() {
       </section>
 
       {/* LISTADO PRINCIPAL DE POST_QUEUE */}
-      <section className="bg-cd bd rounded-2xl overflow-hidden">
-        {/* Cabecera de selección */}
+      <section className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
         {!loading && filtered.length > 0 && (
           <div className="px-4 py-2.5 bg-sf border-b border-[var(--bd)] flex items-center justify-between text-xs tx-mu">
             <label className="inline-flex items-center gap-2 cursor-pointer select-none">

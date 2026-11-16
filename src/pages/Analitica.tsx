@@ -187,39 +187,35 @@ export function AnaliticaPage() {
   }, [ordenesFiltradas, gastos, ventasMesAnterior, deptoSeleccionado]);
 
   return (
-    <div className="space-y-6 p-4 md:p-6 max-w-7xl mx-auto">
-      {/* HEADER DE ANALÍTICA & FILTROS */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4 shadow-sm">
-        <div className="min-w-0 shrink-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500 shrink-0">
-              <BarChart3 size={22} />
-            </span>
-            <h1 className="text-lg sm:text-xl font-black text-[var(--tx)] tracking-tight whitespace-normal sm:whitespace-nowrap">
-              Centro de Analítica & Mapa Demográfico COD
-            </h1>
-          </div>
-          <p className="text-xs text-[var(--mu)] mt-1 max-w-xl">
-            Inteligencia territorial en los 14 departamentos de El Salvador, efectividad de entrega contra entrega y comportamiento de compra.
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-16">
+      {/* Encabezado */}
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--tx)]">
+            Analítica
+          </h1>
+          <p className="text-xs text-[var(--mu)] mt-1">
+            Inteligencia territorial en 14 departamentos, efectividad COD y comportamiento de ventas
           </p>
         </div>
 
-        {/* SELECTOR DE RANGOS TEMPORALES & REFRESH */}
-        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
-          <div className="flex bg-sf p-1 rounded-xl border border-[var(--bd)] text-xs font-semibold">
+        {/* Selector de rango temporal y actualizar */}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="inline-flex bg-sf p-1 rounded-lg border border-[var(--bd)] text-xs font-medium">
             {[
-              { id: 'este_mes', label: 'Este Mes' },
-              { id: 'mes_anterior', label: 'Mes Ant.' },
-              { id: 'ultimos_7_dias', label: '7 Días' },
-              { id: 'historico', label: 'Todo' }
+              { id: 'este_mes', label: 'Este mes' },
+              { id: 'mes_anterior', label: 'Mes ant.' },
+              { id: 'ultimos_7_dias', label: '7 días' },
+              { id: 'historico', label: 'Todo' },
             ].map(r => (
               <button
                 key={r.id}
+                type="button"
                 onClick={() => setRangoTiempo(r.id as RangoTiempo)}
-                className={`px-3 py-1 rounded-lg transition-colors whitespace-nowrap ${
+                className={`px-3 py-1 rounded-md transition-colors whitespace-nowrap ${
                   rangoTiempo === r.id
-                    ? 'bg-cd shadow-sm text-[var(--tx)] font-bold'
-                    : 'tx-mu hover:text-[var(--tx)]'
+                    ? 'bg-cd text-[var(--tx)] font-semibold border border-[var(--bd)]'
+                    : 'text-[var(--mu)] hover:text-[var(--tx)]'
                 }`}
               >
                 {r.label}
@@ -227,160 +223,157 @@ export function AnaliticaPage() {
             ))}
           </div>
 
-          {/* Selector de Mes Específico si es Este Mes o Mes Anterior */}
           {(rangoTiempo === 'este_mes' || rangoTiempo === 'mes_anterior') && (
             <input
               id="mes"
               type="month"
               value={mes}
               onChange={(e) => setMes(e.target.value || mesActual())}
-              className="rounded-xl border border-[var(--bd)] bg-sf px-2.5 py-1 text-xs font-semibold outline-none focus:border-[var(--ac)]"
+              className="rounded-lg border border-[var(--bd)] bg-cd px-3 py-1.5 text-xs font-medium text-[var(--tx)] outline-none focus:border-[var(--tx)]"
             />
           )}
 
           <button
+            type="button"
             onClick={() => void cargarDatos()}
             disabled={cargando}
-            className="p-2 border border-[var(--bd)] bg-sf hover:bg-cd rounded-xl text-xs font-bold transition-colors"
+            className="p-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] transition-colors"
             title="Actualizar analítica"
           >
-            <RefreshCw size={15} className={cargando ? 'animate-spin' : ''} />
+            <RefreshCw size={14} className={cargando ? 'animate-spin' : ''} />
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* ERROR BANNER */}
+      {/* Error banner */}
       {error && (
-        <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-3.5 text-xs text-rose-600 flex items-center justify-between">
+        <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-xs text-rose-600 dark:text-rose-400 flex items-center justify-between gap-3">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="font-bold ml-2">✕</button>
+          <button type="button" onClick={() => setError(null)} className="opacity-70 hover:opacity-100">
+            <X size={14} />
+          </button>
         </div>
       )}
 
-      {/* FILTRO DE DEPARTAMENTO ACTIVO (CHIP FLOTANTE) */}
+      {/* Filtro de departamento activo */}
       {deptoSeleccionado && (
-        <div className="flex items-center justify-between bg-indigo-500/10 border border-indigo-500/30 text-indigo-600 px-4 py-2 rounded-xl text-xs font-semibold">
-          <div className="flex items-center gap-2">
-            <MapPin size={16} />
+        <div className="flex items-center justify-between bg-cd border border-[var(--bd)] px-4 py-2.5 rounded-xl text-xs">
+          <div className="flex items-center gap-2 text-[var(--tx)]">
+            <MapPin size={14} className="text-[var(--ac)] shrink-0" />
             <span>
-              Filtrando métricas exclusivamente para: <strong>{deptoSeleccionado}</strong> ({kpis.pedidos} pedidos)
+              Filtrando por departamento: <strong className="font-semibold">{deptoSeleccionado}</strong>{' '}
+              <span className="text-[var(--mu)] tabular-nums">({kpis.pedidos} pedidos)</span>
             </span>
           </div>
           <button
+            type="button"
             onClick={() => setDeptoSeleccionado(null)}
-            className="flex items-center gap-1 font-bold text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-lg hover:bg-indigo-700 transition-colors"
+            className="flex items-center gap-1 font-semibold text-xs px-2.5 py-1 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 transition-opacity"
           >
-            <X size={13} /> Ver Todo El Salvador
+            <X size={12} /> Ver todo El Salvador
           </button>
         </div>
       )}
 
-      {/* TARJETAS KPI PRINCIPALES */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Facturación Total</span>
-          <div className="text-2xl font-black mt-1 font-mono text-emerald-600">
+      {/* Franja unificada de 5 KPIs */}
+      <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
+        <div className="p-5">
+          <div className="text-xs font-medium text-[var(--mu)]">Facturación total</div>
+          <div className="text-2xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1.5">
             {formatCurrency(kpis.ventas)}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">
-            {kpis.variacion !== null ? `vs mes anterior: ${formatPorcentaje(kpis.variacion)}` : `${kpis.pedidos} pedidos`}
-          </span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Volumen de Pedidos</span>
-          <div className="text-2xl font-black mt-1 font-mono text-[var(--tx)]">
-            {kpis.pedidos} <span className="text-xs font-normal tx-mu">guías</span>
+          <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
+            {kpis.variacion !== null ? `vs mes ant.: ${formatPorcentaje(kpis.variacion)}` : `${kpis.pedidos} pedidos`}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">
-            {kpis.entregados} cobrados · {kpis.enRuta} en ruta
-          </span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Efectividad COD</span>
-          <div className={`text-2xl font-black mt-1 font-mono ${
-            kpis.tasaEntrega >= 80 ? 'text-emerald-500' :
-            kpis.tasaEntrega >= 65 ? 'text-amber-500' :
-            'text-rose-500'
-          }`}>
+        <div className="p-5">
+          <div className="text-xs font-medium text-[var(--mu)]">Volumen de pedidos</div>
+          <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
+            {kpis.pedidos} <span className="text-xs font-normal font-sans text-[var(--mu)]">guías</span>
+          </div>
+          <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
+            {kpis.entregados} cobrados · {kpis.enRuta} en ruta
+          </div>
+        </div>
+
+        <div className="p-5">
+          <div className="text-xs font-medium text-[var(--mu)]">Efectividad COD</div>
+          <div
+            className={`text-2xl font-bold font-mono tabular-nums mt-1.5 ${
+              kpis.tasaEntrega >= 80
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : kpis.tasaEntrega >= 65
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-rose-600 dark:text-rose-400'
+            }`}
+          >
             {kpis.tasaEntrega.toFixed(1)}%
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">
-            {kpis.cancelados} cancelados / devueltos
-          </span>
+          <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
+            {kpis.cancelados} cancelados / dev.
+          </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Ticket Promedio</span>
-          <div className="text-2xl font-black mt-1 font-mono text-indigo-500">
+        <div className="p-5">
+          <div className="text-xs font-medium text-[var(--mu)]">Ticket promedio</div>
+          <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
             {formatCurrency(kpis.ticketPromedio)}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Promedio por orden</span>
+          <div className="text-xs text-[var(--mu)] mt-1">Promedio por orden</div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm col-span-2 sm:col-span-1">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">ROAS Global Ads</span>
-          <div className={`text-2xl font-black mt-1 font-mono ${roasColorClass(kpis.roasGlobal)}`}>
+        <div className="p-5 col-span-2 md:col-span-1">
+          <div className="text-xs font-medium text-[var(--mu)]">ROAS global ads</div>
+          <div className={`text-2xl font-bold font-mono tabular-nums mt-1.5 ${roasColorClass(kpis.roasGlobal)}`}>
             {formatRoas(kpis.roasGlobal)}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">
+          <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
             Inversión: {formatCurrency(kpis.gasto)}
-          </span>
+          </div>
         </div>
-      </div>
+      </section>
 
-      {/* PESTAÑAS DE VISTA ANALÍTICA */}
-      <div className="flex bg-sf p-1.5 rounded-2xl border border-[var(--bd)] text-xs font-semibold gap-1">
-        <button
-          onClick={() => setTabActiva('mapa')}
-          className={`flex-1 py-2 rounded-xl transition-all flex items-center justify-center gap-2 ${
-            tabActiva === 'mapa'
-              ? 'bg-cd shadow text-indigo-600 font-bold border border-[var(--bd)]'
-              : 'tx-mu hover:text-[var(--tx)]'
-          }`}
-        >
-          <MapPin size={16} /> Mapa Demográfico El Salvador (14 Deptos)
-        </button>
-
-        <button
-          onClick={() => setTabActiva('logistica')}
-          className={`flex-1 py-2 rounded-xl transition-all flex items-center justify-center gap-2 ${
-            tabActiva === 'logistica'
-              ? 'bg-cd shadow text-indigo-600 font-bold border border-[var(--bd)]'
-              : 'tx-mu hover:text-[var(--tx)]'
-          }`}
-        >
-          <Truck size={16} /> Rendimiento Logístico & Couriers COD
-        </button>
-
-        <button
-          onClick={() => setTabActiva('ventas')}
-          className={`flex-1 py-2 rounded-xl transition-all flex items-center justify-center gap-2 ${
-            tabActiva === 'ventas'
-              ? 'bg-cd shadow text-indigo-600 font-bold border border-[var(--bd)]'
-              : 'tx-mu hover:text-[var(--tx)]'
-          }`}
-        >
-          <BarChart3 size={16} /> Tendencias & Productos
-        </button>
+      {/* Navegación por pestañas con línea inferior */}
+      <nav className="flex items-center gap-6 border-b border-[var(--bd)] overflow-x-auto">
+        {[
+          { id: 'mapa', label: 'Mapa El Salvador (14 Deptos)' },
+          { id: 'logistica', label: 'Rendimiento Logístico COD' },
+          { id: 'ventas', label: 'Tendencias & Productos' },
+        ].map(t => {
+          const active = tabActiva === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTabActiva(t.id as TabAnalitica)}
+              className={`pb-3 text-xs font-semibold whitespace-nowrap shrink-0 border-b-2 transition-colors ${
+                active
+                  ? 'border-[var(--tx)] text-[var(--tx)]'
+                  : 'border-transparent text-[var(--mu)] hover:text-[var(--tx)]'
+              }`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
 
         <Link
           to="/ltv"
-          className="flex-1 py-2 rounded-xl transition-all flex items-center justify-center gap-2 tx-mu hover:text-indigo-600 hover:bg-cd hover:shadow-sm"
+          className="pb-3 text-xs font-semibold whitespace-nowrap shrink-0 border-b-2 border-transparent text-[var(--mu)] hover:text-[var(--tx)] transition-colors ml-auto"
           title="Ir al módulo de Fidelización, LTV & Ofertas Flash"
         >
-          <Zap size={16} className="text-amber-500" /> Fidelización & LTV
+          Fidelización &amp; LTV →
         </Link>
-      </div>
+      </nav>
 
-      {/* CONTENIDO SEGÚN LA PESTAÑA */}
+      {/* Contenido según pestaña */}
       {cargando ? (
-        <div className="text-center py-20 bg-cd rounded-2xl border border-[var(--bd)] tx-mu text-xs">
-          Cargando y procesando analítica territorial y de pedidos...
+        <div className="text-center py-16 bg-cd rounded-xl border border-[var(--bd)] text-[var(--mu)] text-xs">
+          Cargando analítica territorial y de pedidos...
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="flex flex-col gap-6">
           {tabActiva === 'mapa' && (
             <MapaElSalvadorCalor
               pedidosData={ordenes}
@@ -390,38 +383,32 @@ export function AnaliticaPage() {
           )}
 
           {tabActiva === 'logistica' && (
-            <AnaliticaLogisticaCod
-              pedidosData={ordenesFiltradas}
-            />
+            <AnaliticaLogisticaCod pedidosData={ordenesFiltradas} />
           )}
 
           {tabActiva === 'ventas' && (
-            <div className="space-y-6">
-              {/* Gráfico de Ingresos Diarios */}
-              <section className="rounded-2xl border border-[var(--bd)] bg-cd p-5 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-6">
+              <section className="rounded-xl border border-[var(--bd)] bg-cd overflow-hidden">
+                <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
                   <div>
-                    <h3 className="text-base font-bold text-[var(--tx)]">
-                      Facturación Diaria en el Período
+                    <h3 className="text-sm font-semibold text-[var(--tx)]">
+                      Facturación diaria en el período
                     </h3>
-                    <p className="text-xs tx-mu">
-                      Evolución diaria de ventas en dólares americanos (USD).
+                    <p className="text-xs text-[var(--mu)] mt-0.5">
+                      Evolución diaria de ventas en USD
                     </p>
                   </div>
-                  <span className="text-xs font-semibold px-2.5 py-1 rounded-xl bg-sf border border-[var(--bd)]">
+                  <span className="text-xs font-medium text-[var(--mu)] tabular-nums">
                     {etiquetaMes(mes)}
                   </span>
                 </div>
 
-                <div className="pt-2">
+                <div className="p-5">
                   <VentasLineChart data={serie} />
                 </div>
               </section>
 
-              {/* Días de la semana y Productos */}
-              <AnaliticaHorariaProductos
-                pedidosData={ordenesFiltradas}
-              />
+              <AnaliticaHorariaProductos pedidosData={ordenesFiltradas} />
             </div>
           )}
         </div>

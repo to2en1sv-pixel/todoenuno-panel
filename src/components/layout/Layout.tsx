@@ -125,30 +125,31 @@ function LayoutShell() {
   const isMobileExtraActive = !mobileQuickTabs.some(t => t.to === pathname);
 
   return (
-    <div className="flex h-full bg-[var(--bg)] transition-colors duration-300">
+    <div className="flex h-full bg-[var(--bg)] transition-colors duration-200">
       {/* Header para Móvil */}
       <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-cd/95 backdrop-blur-md border-b border-[var(--bd)] flex items-center justify-between px-4 z-50">
-        <Link to="/" className="font-black text-sm tracking-tight text-[var(--tx)]">
+        <Link to="/" className="font-bold text-sm tracking-tight text-[var(--tx)] flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-[var(--ac)]" aria-hidden="true" />
           TODOENUNO OS
         </Link>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <PWAInstallButton compact />
           <NotificationSettingsButton compact />
           <button
             type="button"
             onClick={toggleTheme}
-            className="p-2 bg-sf rounded-lg text-[var(--tx)]"
+            className="p-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-[var(--mu)] hover:text-[var(--tx)] transition-colors"
             aria-label="Cambiar tema"
           >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </button>
           <button
             type="button"
             onClick={() => setIsMobileOpen(!isMobileOpen)}
-            className="p-2 bg-sf rounded-lg text-[var(--tx)]"
+            className="p-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-[var(--tx)] transition-colors"
             aria-label="Abrir menú"
           >
-            {isMobileOpen ? <X size={18} /> : <Menu size={18} />}
+            {isMobileOpen ? <X size={16} /> : <Menu size={16} />}
           </button>
         </div>
       </div>
@@ -160,18 +161,19 @@ function LayoutShell() {
           w-[248px] ${isCollapsed ? 'lg:w-[68px]' : 'lg:w-[228px]'}
           shrink-0 bg-cd border-r border-[var(--bd)] flex flex-col
           transition-all duration-200 ease-in-out overflow-y-auto overflow-x-hidden
-          ${isCollapsed ? 'p-3 lg:px-2 lg:py-3.5' : 'p-3.5'}
-          ${isMobileOpen ? 'translate-x-0 pb-20 lg:pb-3.5' : '-translate-x-full lg:translate-x-0'}
+          ${isCollapsed ? 'p-3 lg:px-2 lg:py-4' : 'p-4'}
+          ${isMobileOpen ? 'translate-x-0 pb-20 lg:pb-4' : '-translate-x-full lg:translate-x-0'}
         `}
       >
         {/* Cabecera Desktop */}
         <div
-          className={`hidden lg:flex items-center mb-3 ${
+          className={`hidden lg:flex items-center mb-4 pb-3 border-b border-[var(--bd)] ${
             isCollapsed ? 'flex-col gap-2' : 'justify-between px-1'
           }`}
         >
           {!isCollapsed && (
-            <Link to="/" className="font-black text-sm tracking-tight text-[var(--tx)] truncate">
+            <Link to="/" className="font-bold text-[13px] tracking-tight text-[var(--tx)] truncate flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[var(--ac)] shrink-0" aria-hidden="true" />
               TODOENUNO OS
             </Link>
           )}
@@ -180,7 +182,7 @@ function LayoutShell() {
             <button
               type="button"
               onClick={toggleTheme}
-              className="p-1.5 bg-sf rounded-lg text-[var(--tx)] hover:opacity-80 transition-opacity"
+              className="p-1.5 rounded-lg text-[var(--mu)] hover:text-[var(--tx)] hover:bg-sf transition-colors"
               title={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
             >
               {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
@@ -188,7 +190,7 @@ function LayoutShell() {
             <button
               type="button"
               onClick={() => setIsCollapsed(c => !c)}
-              className="p-1.5 bg-sf rounded-lg tx-mu hover:text-[var(--tx)] transition-colors"
+              className="p-1.5 rounded-lg text-[var(--mu)] hover:text-[var(--tx)] hover:bg-sf transition-colors"
               title={isCollapsed ? 'Expandir menú lateral' : 'Colapsar menú a íconos'}
             >
               {isCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
@@ -197,15 +199,15 @@ function LayoutShell() {
         </div>
 
         {/* Navegación Agrupada */}
-        <nav className="flex-1 flex flex-col gap-3">
+        <nav className="flex-1 flex flex-col gap-4">
           {navGroups.map((group, gIdx) => (
-            <div key={group.title} className="flex flex-col gap-1">
+            <div key={group.title} className="flex flex-col gap-0.5">
               {isCollapsed ? (
-                gIdx > 0 && <div className="hidden lg:block h-px bg-[var(--bd)] mx-1.5 my-0.5" />
+                gIdx > 0 && <div className="hidden lg:block h-px bg-[var(--bd)] mx-1.5 my-1" />
               ) : null}
 
               <div
-                className={`px-2 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-wider tx-mu ${
+                className={`px-2.5 pb-1 text-[11px] font-semibold tracking-tight tx-mu ${
                   isCollapsed ? 'lg:hidden' : ''
                 }`}
               >
@@ -222,21 +224,21 @@ function LayoutShell() {
                     to={item.to}
                     onClick={() => setIsMobileOpen(false)}
                     title={isCollapsed ? item.label : undefined}
-                    className={`relative rounded-xl text-[13px] flex items-center transition-colors ${
+                    className={`relative rounded-lg text-[13px] flex items-center transition-colors ${
                       isCollapsed
                         ? 'px-2.5 py-2 lg:justify-center lg:px-0 lg:py-2.5 gap-2.5 lg:gap-0'
-                        : 'px-2.5 py-2 gap-2.5'
-                    } ${active ? 'font-bold shadow-sm' : 'font-medium hover:bg-sf'}`}
-                    style={{
-                      background: active ? 'var(--tx)' : undefined,
-                      color: active ? 'var(--cd)' : 'var(--mu)',
-                    }}
+                        : 'px-2.5 py-1.5 gap-2.5'
+                    } ${
+                      active
+                        ? 'bg-[var(--tx)] text-[var(--cd)] font-semibold'
+                        : 'text-[var(--mu)] font-medium hover:bg-sf hover:text-[var(--tx)]'
+                    }`}
                   >
-                    <Icon size={16} className="shrink-0" />
+                    <Icon size={15} className="shrink-0" />
                     <span className={`truncate flex-1 ${isCollapsed ? 'lg:hidden' : ''}`}>{item.label}</span>
                     {badgeCount > 0 && (
                       <span
-                        className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-extrabold flex items-center justify-center leading-none shrink-0 ${
+                        className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold mono tabular-nums flex items-center justify-center leading-none shrink-0 ${
                           isCollapsed ? 'lg:absolute lg:top-1 lg:right-1 lg:min-w-[15px] lg:h-[15px] lg:text-[9px]' : ''
                         }`}
                         style={{
@@ -272,7 +274,7 @@ function LayoutShell() {
       )}
 
       {/* Contenido Principal */}
-      <main className="flex-1 min-w-0 overflow-y-auto p-4 lg:p-6 pt-20 pb-20 lg:pt-6 lg:pb-6 w-full text-[var(--tx)]">
+      <main className="flex-1 min-w-0 overflow-y-auto px-4 py-5 lg:px-8 lg:py-6 pt-20 pb-24 lg:pt-6 lg:pb-8 w-full text-[var(--tx)]">
         <Outlet />
       </main>
 
@@ -292,17 +294,17 @@ function LayoutShell() {
                 to={tab.to}
                 onClick={() => setIsMobileOpen(false)}
                 className={`flex flex-col items-center justify-center gap-0.5 text-[10px] transition-colors relative ${
-                  active ? 'text-[var(--ac)] font-bold' : 'tx-mu hover:text-[var(--tx)] font-medium'
+                  active ? 'text-[var(--tx)] font-semibold' : 'tx-mu hover:text-[var(--tx)] font-medium'
                 }`}
               >
                 {active && (
-                  <span className="absolute top-0 w-7 h-0.5 rounded-full bg-[var(--ac)]" />
+                  <span className="absolute top-0 w-7 h-0.5 rounded-full bg-[var(--tx)]" />
                 )}
                 <span className="relative">
                   <Icon size={18} />
                   {badgeCount > 0 && (
                     <span
-                      className="absolute -top-1.5 -right-2.5 min-w-[15px] h-[15px] px-1 rounded-full text-[9px] font-extrabold flex items-center justify-center leading-none"
+                      className="absolute -top-1.5 -right-2.5 min-w-[15px] h-[15px] px-1 rounded-full text-[9px] font-bold mono tabular-nums flex items-center justify-center leading-none"
                       style={{ background: 'var(--ac)', color: '#ffffff' }}
                     >
                       {badgeCount > 99 ? '99+' : badgeCount}
@@ -318,12 +320,12 @@ function LayoutShell() {
             onClick={() => setIsMobileOpen(prev => !prev)}
             className={`flex flex-col items-center justify-center gap-0.5 text-[10px] transition-colors relative ${
               isMobileOpen || isMobileExtraActive
-                ? 'text-[var(--ac)] font-bold'
+                ? 'text-[var(--tx)] font-semibold'
                 : 'tx-mu hover:text-[var(--tx)] font-medium'
             }`}
           >
             {(isMobileOpen || isMobileExtraActive) && (
-              <span className="absolute top-0 w-7 h-0.5 rounded-full bg-[var(--ac)]" />
+              <span className="absolute top-0 w-7 h-0.5 rounded-full bg-[var(--tx)]" />
             )}
             <Menu size={18} />
             <span>Más</span>

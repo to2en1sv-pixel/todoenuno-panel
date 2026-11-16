@@ -345,76 +345,76 @@ export function InventarioPage() {
     switch (tipo) {
       case 'inventario_inicial':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
-            📥 Inventario Inicial
+          <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400">
+            Inventario inicial
           </span>
         );
       case 'compra_entrada':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-            📦 Entrada Compra
+          <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+            Entrada compra
           </span>
         );
       case 'venta_salida':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-            🚚 Venta Entregada
+          <span className="text-xs font-medium text-sky-600 dark:text-sky-400">
+            Venta entregada
           </span>
         );
       case 'reserva_pedido':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-            ⏳ Reserva Pedido
+          <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+            Reserva pedido
           </span>
         );
       case 'liberar_reserva':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20">
-            🔓 Reserva Liberada
+          <span className="text-xs font-medium text-[var(--mu)]">
+            Reserva liberada
           </span>
         );
       case 'devolucion_entrada':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
-            ↩️ Devolución Bodega
+          <span className="text-xs font-medium text-violet-600 dark:text-violet-400">
+            Devolución bodega
           </span>
         );
       case 'ajuste_positivo':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/10 text-teal-600 border border-teal-500/20">
-            ➕ Ajuste Conteo (+)
+          <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+            Ajuste conteo (+)
           </span>
         );
       case 'ajuste_negativo':
       case 'merma_dano':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 border border-rose-500/20">
-            ⚠️ Merma / Ajuste (-)
+          <span className="text-xs font-medium text-rose-600 dark:text-rose-400">
+            Merma / Ajuste (-)
           </span>
         );
       default:
-        return <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-sf tx-mu">{tipo}</span>;
+        return <span className="text-xs font-mono text-[var(--mu)]">{tipo}</span>;
     }
   };
 
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-5 pb-14 h-full">
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-16 h-full">
       {/* Toast flotante */}
       {toastMsg && (
         <div
-          className={`fixed bottom-5 right-5 z-[60] max-w-md px-4 py-3 rounded-2xl shadow-2xl border flex items-center gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-bottom-4 ${
+          className={`fixed bottom-5 right-5 z-[60] max-w-md px-4 py-3 rounded-xl shadow-xl border flex items-center gap-2.5 text-xs font-medium ${
             toastMsg.type === 'ok'
-              ? 'bg-emerald-950/95 border-emerald-500/50 text-emerald-200'
-              : 'bg-rose-950/95 border-rose-500/50 text-rose-200'
+              ? 'bg-emerald-950/95 border-emerald-500/40 text-emerald-200'
+              : 'bg-rose-950/95 border-rose-500/40 text-rose-200'
           }`}
         >
           {toastMsg.type === 'ok' ? (
-            <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+            <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
           ) : (
-            <AlertTriangle size={16} className="text-rose-400 shrink-0" />
+            <AlertTriangle size={15} className="text-rose-400 shrink-0" />
           )}
           <span className="flex-1">{toastMsg.text}</span>
-          <button onClick={() => setToastMsg(null)} className="opacity-70 hover:opacity-100">
+          <button type="button" onClick={() => setToastMsg(null)} className="opacity-70 hover:opacity-100">
             <X size={14} />
           </button>
         </div>
@@ -422,264 +422,261 @@ export function InventarioPage() {
 
       {/* Alerta SQL Supabase */}
       {(!isRealDb || dbError) && (
-        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-start gap-2.5 text-xs">
-            <Database size={18} className="text-amber-500 shrink-0 mt-0.5" />
+            <Database size={16} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold text-amber-600 dark:text-amber-400 block">
+              <span className="font-semibold text-amber-700 dark:text-amber-300 block">
                 Conexión con Supabase pendiente de actualizar (Sprint 10)
               </span>
-              <span className="tx-mu block mt-0.5">
+              <span className="text-[var(--mu)] block mt-0.5">
                 {dbError ||
-                  'Ejecuta el script SQL Sprint 10 en Supabase para habilitar ingresos sin compra, Kárdex atómico y eliminación en cascada.'}
+                  'Ejecuta el script SQL Sprint 10 en Supabase para habilitar ingresos sin compra y Kárdex atómico.'}
               </span>
             </div>
           </div>
           <button
+            type="button"
             onClick={() => setShowSqlModal(true)}
-            className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 rounded-xl text-xs font-black flex items-center gap-1.5 shrink-0 transition-colors"
+            className="px-3.5 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] text-xs font-semibold flex items-center gap-1.5 shrink-0 hover:opacity-90 transition-opacity"
           >
-            <Code size={14} /> Copiar SQL Reparador
+            <Code size={13} /> Copiar SQL
           </button>
         </div>
       )}
 
-      {/* Encabezado Principal de Bodega */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-cd p-5 rounded-2xl border border-[var(--bd)] gap-4">
-        <div className="min-w-0 shrink-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <Boxes className="text-emerald-500 shrink-0" size={24} />
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight whitespace-normal sm:whitespace-nowrap">
-              Inventario & Kárdex
-            </h1>
-            <span
-              className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border shrink-0 flex items-center gap-1 ${
-                isRealDb
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
-              }`}
-            >
-              <Database size={10} /> {isRealDb ? 'Supabase Conectado' : 'Modo Respaldo'}
-            </span>
+      {/* Encabezado */}
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--tx)]">
+            Inventario &amp; Kárdex
+          </h1>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--mu)] mt-1">
+            <span>{metrics.activeSkus} SKUs activos</span>
+            <span aria-hidden="true">·</span>
+            <span>{isRealDb ? 'Supabase conectado' : 'Modo respaldo'}</span>
+            <span aria-hidden="true">·</span>
+            <span>Físico, reservas y Kárdex inmutable</span>
           </div>
-          <p className="text-xs text-[var(--mu)] mt-1 max-w-xl">
-            Control físico de bodega: existencias reales, unidades reservadas por pedidos, carga directa sin compra y Kárdex inmutable.
-          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
-          <Link
-            to="/catalogo"
-            className="px-3.5 py-2 border border-[var(--bd)] bg-sf hover:bg-cd rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
-          >
-            Catálogo Visual <ExternalLink size={13} />
-          </Link>
-
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
-            onClick={() => {
-              setEntradaTipo('inventario_inicial');
-              setEntradaAsentarFinanzas(false);
-              setShowEntradaModal(true);
-            }}
-            className="flex-1 sm:flex-none px-3.5 py-2 bg-[var(--tx)] text-[var(--cd)] rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 hover:opacity-90 shadow-sm"
+            type="button"
+            onClick={loadNativeInventory}
+            className="p-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] transition-colors"
+            title="Recargar inventario"
           >
-            <PackagePlus size={15} /> + Ingresar Stock
+            <RefreshCw size={14} className={loadingNative ? 'animate-spin' : ''} />
           </button>
 
           <button
+            type="button"
+            onClick={() => setShowSqlModal(true)}
+            className="px-3 py-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] flex items-center gap-1.5 transition-colors"
+            title="Script SQL Sprint 10"
+          >
+            <Code size={13} /> SQL
+          </button>
+
+          <Link
+            to="/catalogo"
+            className="px-3 py-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-medium text-[var(--tx)] flex items-center gap-1.5 transition-colors"
+          >
+            Catálogo <ExternalLink size={12} />
+          </Link>
+
+          <button
+            type="button"
             onClick={() => {
               const firstActive = stockItems.find(s => s.activo !== false);
               setAjusteSku(firstActive?.sku || '');
               setAjusteNuevoStock(firstActive ? String(firstActive.stock_fisico) : '');
               setShowAjusteModal(true);
             }}
-            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+            className="px-3.5 py-2 border border-[var(--bd)] bg-cd hover:bg-sf text-[var(--tx)] rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
           >
-            <SlidersHorizontal size={14} /> Conteo Físico
+            <SlidersHorizontal size={13} /> Conteo físico
           </button>
 
           <button
-            onClick={loadNativeInventory}
-            className="p-2 border border-[var(--bd)] rounded-xl text-xs font-bold hover:bg-sf transition-colors"
-            title="Recargar inventario desde Supabase"
+            type="button"
+            onClick={() => {
+              setEntradaTipo('inventario_inicial');
+              setEntradaAsentarFinanzas(false);
+              setShowEntradaModal(true);
+            }}
+            className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] rounded-lg text-xs font-semibold flex items-center gap-1.5 hover:opacity-90 transition-opacity"
           >
-            <RefreshCw size={16} className={loadingNative ? 'animate-spin' : ''} />
-          </button>
-
-          <button
-            onClick={() => setShowSqlModal(true)}
-            className="p-2 border border-[var(--bd)] rounded-xl text-xs font-bold hover:bg-sf transition-colors"
-            title="Script SQL Sprint 10 (Supabase)"
-          >
-            <Code size={16} />
+            <PackagePlus size={14} /> Ingresar stock
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Tarjetas KPI de Inventario (Solo SKUs Activos) */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
-            Stock Físico (Bodega)
-          </span>
-          <div className="text-2xl font-black mt-1 text-[var(--tx)]">
-            {metrics.totalFisico} <span className="text-xs font-normal tx-mu">uds</span>
+      {/* Franja unificada de 5 KPIs */}
+      <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
+        <div className="p-5">
+          <div className="text-xs font-medium text-[var(--mu)]">Stock físico</div>
+          <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
+            {metrics.totalFisico} <span className="text-xs font-normal font-sans text-[var(--mu)]">uds</span>
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">En {metrics.activeSkus} SKUs activos</span>
+          <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">{metrics.activeSkus} SKUs activos</div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
-            Stock Reservado
-          </span>
-          <div className="text-2xl font-black mt-1 text-amber-500">
-            {metrics.totalReservado} <span className="text-xs font-normal tx-mu">en camino</span>
+        <div className="p-5">
+          <div className="text-xs font-medium text-[var(--mu)]">Stock reservado</div>
+          <div className="text-2xl font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400 mt-1.5">
+            {metrics.totalReservado} <span className="text-xs font-normal font-sans text-[var(--mu)]">en ruta</span>
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Comprometido en pedidos activos</span>
+          <div className="text-xs text-[var(--mu)] mt-1">En pedidos activos</div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
-            Stock Disponible Real
-          </span>
-          <div className="text-2xl font-black mt-1 text-emerald-500">
-            {metrics.totalDisponible} <span className="text-xs font-normal tx-mu">para venta</span>
+        <div className="p-5">
+          <div className="text-xs font-medium text-[var(--mu)]">Disponible real</div>
+          <div className="text-2xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1.5">
+            {metrics.totalDisponible} <span className="text-xs font-normal font-sans text-[var(--mu)]">libre</span>
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Físico − Reservado</span>
+          <div className="text-xs text-[var(--mu)] mt-1">Físico − Reservado</div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)]">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
-            Valorización (Costo)
-          </span>
-          <div className="text-2xl font-black mt-1 text-[var(--ac)]">
+        <div className="p-5">
+          <div className="text-xs font-medium text-[var(--mu)]">Valoración al costo</div>
+          <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
             ${metrics.valorizacionCosto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">Costo de mercadería activa</span>
+          <div className="text-xs text-[var(--mu)] mt-1">Mercadería activa</div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-emerald-500/25 col-span-2 md:col-span-1">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">
-            Valor en Venta (PVP)
-          </span>
-          <div className="text-2xl font-black mt-1 text-emerald-500">
+        <div className="p-5 col-span-2 md:col-span-1">
+          <div className="text-xs font-medium text-[var(--mu)]">Valor en venta (PVP)</div>
+          <div className="text-2xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1.5">
             ${metrics.valorVentaTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
-          <span className="text-[10px] tx-mu mt-1 block">
-            Disp: ${metrics.valorVentaDisponible.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · Margen: +${metrics.utilidadPotencial.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </span>
-        </div>
-      </div>
-
-      {/* Selector de Pestañas & Buscador */}
-      <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3 bg-cd p-3 rounded-2xl border border-[var(--bd)]">
-        <div className="flex bg-sf p-1 rounded-xl overflow-x-auto">
-          <button
-            onClick={() => setTab('stock')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-              tab === 'stock' ? 'bg-cd shadow-sm text-[var(--tx)]' : 'text-[var(--mu)] hover:text-[var(--tx)]'
-            }`}
-          >
-            <Layers size={14} /> Control de Stock ({filteredInventory.length})
-          </button>
-          <button
-            onClick={() => setTab('kardex')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-              tab === 'kardex' ? 'bg-cd shadow-sm text-[var(--tx)]' : 'text-[var(--mu)] hover:text-[var(--tx)]'
-            }`}
-          >
-            <History size={14} /> Kárdex de Movimientos ({filteredKardex.length})
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 sm:w-64">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 tx-mu" />
-            <input
-              type="text"
-              placeholder={tab === 'stock' ? 'Buscar por SKU, nombre o ubicación...' : 'Buscar por SKU, motivo o tipo...'}
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full pl-9 pr-7 py-1.5 bg-sf border border-[var(--bd)] rounded-xl text-xs outline-none focus:border-[var(--ac)]"
-            />
-            {search && (
-              <button
-                onClick={() => setSearch('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 tx-mu hover:text-[var(--tx)]"
-              >
-                <X size={13} />
-              </button>
-            )}
+          <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
+            Margen +${metrics.utilidadPotencial.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
+        </div>
+      </section>
 
-          {tab === 'stock' ? (
+      {/* Navegación por pestañas */}
+      <nav className="flex items-center gap-6 border-b border-[var(--bd)] overflow-x-auto">
+        <button
+          type="button"
+          onClick={() => setTab('stock')}
+          className={`pb-3 text-xs font-semibold whitespace-nowrap shrink-0 border-b-2 transition-colors ${
+            tab === 'stock'
+              ? 'border-[var(--tx)] text-[var(--tx)]'
+              : 'border-transparent text-[var(--mu)] hover:text-[var(--tx)]'
+          }`}
+        >
+          Control de stock ({filteredInventory.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('kardex')}
+          className={`pb-3 text-xs font-semibold whitespace-nowrap shrink-0 border-b-2 transition-colors ${
+            tab === 'kardex'
+              ? 'border-[var(--tx)] text-[var(--tx)]'
+              : 'border-transparent text-[var(--mu)] hover:text-[var(--tx)]'
+          }`}
+        >
+          Kárdex de movimientos ({filteredKardex.length})
+        </button>
+      </nav>
+
+      {/* Barra de filtros limpia */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="relative flex-1 sm:max-w-sm">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mu)]" />
+          <input
+            type="text"
+            placeholder={tab === 'stock' ? 'Buscar por SKU, nombre o ubicación...' : 'Buscar por SKU, motivo o tipo...'}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-9 pr-8 py-2 bg-cd border border-[var(--bd)] rounded-lg text-xs text-[var(--tx)] outline-none focus:border-[var(--tx)]"
+          />
+          {search && (
             <button
-              onClick={() => setFilterCriticos(!filterCriticos)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors whitespace-nowrap ${
-                filterCriticos
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-600'
-                  : 'bg-sf border-[var(--bd)] text-[var(--mu)] hover:bg-cd'
-              }`}
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--mu)] hover:text-[var(--tx)]"
             >
-              <AlertTriangle size={14} /> Críticos ({metrics.skusCriticos})
+              <X size={13} />
             </button>
-          ) : (
-            <div className="flex bg-sf p-1 rounded-xl border border-[var(--bd)] text-[11px] font-bold">
-              {(
-                [
-                  ['all', 'Todos'],
-                  ['entradas', 'Entradas'],
-                  ['salidas', 'Ventas'],
-                  ['ajustes', 'Ajustes']
-                ] as const
-              ).map(([val, label]) => (
-                <button
-                  key={val}
-                  onClick={() => setKardexFilter(val)}
-                  className={`px-2.5 py-1 rounded-lg transition-colors ${
-                    kardexFilter === val ? 'bg-cd text-[var(--tx)] shadow-sm' : 'tx-mu hover:text-[var(--tx)]'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
           )}
         </div>
+
+        {tab === 'stock' ? (
+          <button
+            type="button"
+            onClick={() => setFilterCriticos(!filterCriticos)}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap ${
+              filterCriticos
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                : 'bg-cd border-[var(--bd)] text-[var(--mu)] hover:text-[var(--tx)]'
+            }`}
+          >
+            <AlertTriangle size={13} /> Críticos ({metrics.skusCriticos})
+          </button>
+        ) : (
+          <div className="inline-flex bg-sf p-1 rounded-lg border border-[var(--bd)] text-xs font-medium">
+            {(
+              [
+                ['all', 'Todos'],
+                ['entradas', 'Entradas'],
+                ['salidas', 'Ventas'],
+                ['ajustes', 'Ajustes']
+              ] as const
+            ).map(([val, label]) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setKardexFilter(val)}
+                className={`px-3 py-1 rounded-md transition-colors ${
+                  kardexFilter === val
+                    ? 'bg-cd text-[var(--tx)] font-semibold border border-[var(--bd)]'
+                    : 'text-[var(--mu)] hover:text-[var(--tx)]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* PESTAÑA 1: TABLA OPERATIVA DE CONTROL DE STOCK */}
       {tab === 'stock' && (
-        <div className="bg-cd border border-[var(--bd)] rounded-2xl overflow-hidden shadow-sm">
+        <div className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
-              <thead className="bg-sf border-b border-[var(--bd)] text-[10px] tx-mu uppercase font-bold">
+              <thead className="bg-sf/50 border-b border-[var(--bd)] text-[var(--mu)]">
                 <tr>
-                  <th className="px-4 py-3">Producto / SKU</th>
-                  <th className="px-4 py-3">Ubicación</th>
-                  <th className="px-4 py-3 text-center">Stock Físico</th>
-                  <th className="px-4 py-3 text-center">Reservado</th>
-                  <th className="px-4 py-3 text-center">Disponible</th>
-                  <th className="px-4 py-3 text-right">Val. Costo / Venta</th>
-                  <th className="px-4 py-3 text-right">Movimientos Rápidos</th>
+                  <th className="px-4 py-3 font-medium">Producto / SKU</th>
+                  <th className="px-4 py-3 font-medium">Ubicación</th>
+                  <th className="px-4 py-3 text-center font-medium">Físico</th>
+                  <th className="px-4 py-3 text-center font-medium">Reservado</th>
+                  <th className="px-4 py-3 text-center font-medium">Disponible</th>
+                  <th className="px-4 py-3 text-right font-medium">Valoración</th>
+                  <th className="px-4 py-3 text-right font-medium">Ajuste rápido</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--bd)]">
                 {loadingNative && filteredInventory.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-10 text-center tx-mu">
-                      Cargando inventario real desde Supabase...
+                    <td colSpan={7} className="py-12 text-center text-[var(--mu)]">
+                      Cargando inventario desde Supabase...
                     </td>
                   </tr>
                 ) : filteredInventory.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-10 text-center tx-mu space-y-2">
+                    <td colSpan={7} className="py-12 text-center text-[var(--mu)] space-y-2">
                       <div>No hay SKUs activos en inventario con estos filtros.</div>
                       <Link
                         to="/catalogo"
-                        className="inline-flex items-center gap-1 text-xs font-bold text-[var(--ac)] hover:underline"
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--tx)] hover:underline"
                       >
-                        Ir a Catálogo Visual para crear o activar un producto →
+                        Ir a Catálogo Visual →
                       </Link>
                     </td>
                   </tr>
@@ -693,18 +690,18 @@ export function InventarioPage() {
                       : [];
 
                     return (
-                      <tr key={item.sku} className="hover:bg-sf/50 transition-colors">
-                        <td className="px-4 py-3">
+                      <tr key={item.sku} className="hover:bg-sf/40 transition-colors">
+                        <td className="px-4 py-3.5">
                           <div className="flex items-start gap-3">
-                            <div className="w-10 h-10 rounded-xl overflow-hidden bg-sf border border-[var(--bd)] shrink-0">
+                            <div className="w-9 h-9 rounded-lg overflow-hidden bg-sf border border-[var(--bd)] shrink-0">
                               <ProductImg src={item.image_url} className="w-full h-full object-cover" />
                             </div>
                             <div className="min-w-0">
-                              <div className="font-mono font-bold text-[var(--tx)] text-[11px] flex items-center gap-1.5">
+                              <div className="font-mono font-semibold text-[var(--tx)] text-[11px] flex items-center gap-1.5">
                                 {item.sku}
                                 <Link
                                   to={`/catalogo?sku=${encodeURIComponent(item.sku)}`}
-                                  className="text-[var(--mu)] hover:text-[var(--ac)]"
+                                  className="text-[var(--mu)] hover:text-[var(--tx)]"
                                   title="Ver ficha en Catálogo Visual"
                                 >
                                   <ExternalLink size={11} />
@@ -719,11 +716,11 @@ export function InventarioPage() {
                                     <Link
                                       key={v.variante_id}
                                       to={`/catalogo?sku=${encodeURIComponent(item.sku)}`}
-                                      title={`${v.sku}: ${v.stock} unidades disponibles — clic para ajustar variantes en Catálogo`}
-                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-semibold transition-colors ${
+                                      title={`${v.sku}: ${v.stock} unidades disponibles`}
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-medium transition-colors ${
                                         v.stock > 0
-                                          ? 'bg-sf border-[var(--bd)] text-[var(--tx)] hover:border-indigo-500/50'
-                                          : 'bg-rose-500/5 border-rose-500/20 text-rose-500'
+                                          ? 'bg-sf border-[var(--bd)] text-[var(--tx)] hover:border-[var(--tx)]'
+                                          : 'bg-rose-500/5 border-rose-500/20 text-rose-600 dark:text-rose-400'
                                       }`}
                                     >
                                       <span
@@ -734,7 +731,7 @@ export function InventarioPage() {
                                         {v.color}
                                         {v.talla && v.talla !== 'Única' ? `·${v.talla}` : ''}
                                       </span>
-                                      <strong className="font-mono">{v.stock}</strong>
+                                      <strong className="font-mono tabular-nums">{v.stock}</strong>
                                     </Link>
                                   ))}
                                 </div>
@@ -742,80 +739,85 @@ export function InventarioPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3 tx-mu whitespace-nowrap">
+                        <td className="px-4 py-3.5 text-[var(--mu)] whitespace-nowrap">
                           {item.ubicacion || 'Bodega Central'}
                         </td>
-                        <td className="px-4 py-3 text-center font-mono font-bold text-sm">
+                        <td className="px-4 py-3.5 text-center font-mono tabular-nums font-bold text-sm text-[var(--tx)]">
                           {item.stock_fisico}
                         </td>
-                        <td className="px-4 py-3 text-center font-mono text-amber-500 font-bold">
+                        <td className="px-4 py-3.5 text-center font-mono tabular-nums">
                           {item.stock_reservado > 0 ? (
                             <button
                               type="button"
                               onClick={() => openReservedBreakdown(item.sku)}
-                              className="px-2 py-0.5 rounded-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 transition-colors cursor-pointer"
+                              className="px-2 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold hover:opacity-80 transition-opacity cursor-pointer"
                               title="Ver pedidos que tienen reservadas estas unidades"
                             >
-                              -{item.stock_reservado} 🔍
+                              -{item.stock_reservado}
                             </button>
                           ) : (
-                            '0'
+                            <span className="text-[var(--mu)]">0</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-center font-mono font-bold">
+                        <td className="px-4 py-3.5 text-center font-mono tabular-nums font-bold">
                           <span
-                            className={`px-2.5 py-0.5 rounded-full ${
+                            className={
                               item.stock_disponible <= 0
-                                ? 'bg-rose-500/10 text-rose-600'
+                                ? 'text-rose-600 dark:text-rose-400'
                                 : esBajo
-                                ? 'bg-amber-500/10 text-amber-600'
-                                : 'bg-emerald-500/10 text-emerald-600'
-                            }`}
+                                  ? 'text-amber-600 dark:text-amber-400'
+                                  : 'text-emerald-600 dark:text-emerald-400'
+                            }
                           >
                             {item.stock_disponible}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-right font-mono whitespace-nowrap">
-                          <div className="font-bold text-emerald-500">${valorizadoVenta.toFixed(2)}</div>
-                          <div className="text-[10px] tx-mu">
-                            Costo: ${valorizadoCosto.toFixed(2)} (PVP ${(item.precio_venta || 0).toFixed(2)})
+                        <td className="px-4 py-3.5 text-right font-mono tabular-nums whitespace-nowrap">
+                          <div className="font-semibold text-[var(--tx)]">${valorizadoVenta.toFixed(2)}</div>
+                          <div className="text-[11px] text-[var(--mu)]">
+                            Costo ${valorizadoCosto.toFixed(2)} · PVP ${(item.precio_venta || 0).toFixed(2)}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <td className="px-4 py-3.5 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1">
                             <button
+                              type="button"
                               onClick={() => handleQuickDelta(item.sku, -1)}
                               disabled={isAdjustingQuick}
-                              className="px-2 py-1 bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 rounded-lg text-[11px] font-bold"
+                              className="px-2 py-1 rounded border border-[var(--bd)] bg-cd hover:bg-sf text-rose-600 dark:text-rose-400 text-[11px] font-mono font-semibold"
                               title="Restar 1 unidad"
                             >
                               -1
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleQuickDelta(item.sku, 1)}
                               disabled={isAdjustingQuick}
-                              className="px-2 py-1 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 rounded-lg text-[11px] font-bold"
+                              className="px-2 py-1 rounded border border-[var(--bd)] bg-cd hover:bg-sf text-emerald-600 dark:text-emerald-400 text-[11px] font-mono font-semibold"
                               title="Sumar 1 unidad sin compra"
                             >
                               +1
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleQuickDelta(item.sku, 5)}
                               disabled={isAdjustingQuick}
-                              className="px-2 py-1 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 rounded-lg text-[11px] font-bold"
+                              className="px-2 py-1 rounded border border-[var(--bd)] bg-cd hover:bg-sf text-emerald-600 dark:text-emerald-400 text-[11px] font-mono font-semibold"
                               title="Sumar 5 unidades sin compra"
                             >
                               +5
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleQuickDelta(item.sku, 10)}
                               disabled={isAdjustingQuick}
-                              className="px-2 py-1 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 rounded-lg text-[11px] font-bold"
+                              className="px-2 py-1 rounded border border-[var(--bd)] bg-cd hover:bg-sf text-emerald-600 dark:text-emerald-400 text-[11px] font-mono font-semibold"
                               title="Sumar 10 unidades sin compra"
                             >
                               +10
                             </button>
                             <button
+                              type="button"
                               onClick={() => {
                                 setEntradaTipo('inventario_inicial');
                                 setEntradaAsentarFinanzas(false);
@@ -823,18 +825,19 @@ export function InventarioPage() {
                                 setEntradaCosto(String(item.costo_unitario || ''));
                                 setShowEntradaModal(true);
                               }}
-                              className="px-2.5 py-1 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 rounded-lg text-[11px] font-bold"
-                              title="Ingresar lote (sin compra o con compra)"
+                              className="px-2.5 py-1 rounded border border-[var(--bd)] bg-cd hover:bg-sf text-[var(--tx)] text-[11px] font-semibold"
+                              title="Ingresar lote"
                             >
                               + Lote
                             </button>
                             <button
+                              type="button"
                               onClick={() => {
                                 setAjusteSku(item.sku);
                                 setAjusteNuevoStock(String(item.stock_fisico));
                                 setShowAjusteModal(true);
                               }}
-                              className="px-2.5 py-1 border border-[var(--bd)] hover:bg-sf rounded-lg text-[11px] font-semibold"
+                              className="px-2.5 py-1 rounded border border-[var(--bd)] bg-cd hover:bg-sf text-[var(--mu)] hover:text-[var(--tx)] text-[11px] font-medium"
                               title="Fijar stock físico exacto"
                             >
                               Conteo
@@ -853,50 +856,50 @@ export function InventarioPage() {
 
       {/* PESTAÑA 2: KÁRDEX INMUTABLE DE MOVIMIENTOS */}
       {tab === 'kardex' && (
-        <div className="bg-cd border border-[var(--bd)] rounded-2xl overflow-hidden shadow-sm">
+        <div className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
-              <thead className="bg-sf border-b border-[var(--bd)] text-[10px] tx-mu uppercase font-bold">
+              <thead className="bg-sf/50 border-b border-[var(--bd)] text-[var(--mu)]">
                 <tr>
-                  <th className="px-4 py-3">Fecha y Hora</th>
-                  <th className="px-4 py-3">SKU</th>
-                  <th className="px-4 py-3">Tipo de Movimiento</th>
-                  <th className="px-4 py-3 text-center">Cantidad</th>
-                  <th className="px-4 py-3 text-center">Saldo Bodega</th>
-                  <th className="px-4 py-3">Motivo / Concepto</th>
-                  <th className="px-4 py-3">Origen</th>
+                  <th className="px-4 py-3 font-medium">Fecha y hora</th>
+                  <th className="px-4 py-3 font-medium">SKU</th>
+                  <th className="px-4 py-3 font-medium">Tipo de movimiento</th>
+                  <th className="px-4 py-3 text-center font-medium">Cantidad</th>
+                  <th className="px-4 py-3 text-center font-medium">Saldo</th>
+                  <th className="px-4 py-3 font-medium">Motivo / Concepto</th>
+                  <th className="px-4 py-3 font-medium">Origen</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--bd)]">
                 {filteredKardex.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-10 text-center tx-mu">
+                    <td colSpan={7} className="py-12 text-center text-[var(--mu)]">
                       No hay movimientos en el Kárdex para estos filtros.
                     </td>
                   </tr>
                 ) : (
                   filteredKardex.map(k => (
-                    <tr key={k.id} className="hover:bg-sf/50 transition-colors">
-                      <td className="px-4 py-3 font-mono text-[11px] whitespace-nowrap tx-mu">
+                    <tr key={k.id} className="hover:bg-sf/40 transition-colors">
+                      <td className="px-4 py-3 font-mono tabular-nums text-[11px] whitespace-nowrap text-[var(--mu)]">
                         {new Date(k.created_at).toLocaleString('es-SV', {
                           dateStyle: 'short',
                           timeStyle: 'short'
                         })}
                       </td>
-                      <td className="px-4 py-3 font-mono font-bold text-[var(--tx)]">{k.sku}</td>
+                      <td className="px-4 py-3 font-mono font-semibold text-[var(--tx)]">{k.sku}</td>
                       <td className="px-4 py-3 whitespace-nowrap">{getTipoBadge(k.tipo_movimiento)}</td>
                       <td
-                        className={`px-4 py-3 text-center font-mono font-bold ${
-                          k.cantidad > 0 ? 'text-emerald-500' : 'text-rose-500'
+                        className={`px-4 py-3 text-center font-mono tabular-nums font-bold ${
+                          k.cantidad > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                         }`}
                       >
                         {k.cantidad > 0 ? `+${k.cantidad}` : k.cantidad}
                       </td>
-                      <td className="px-4 py-3 text-center font-mono font-bold text-[var(--tx)]">
+                      <td className="px-4 py-3 text-center font-mono tabular-nums font-semibold text-[var(--tx)]">
                         {k.saldo_fisico}
                       </td>
                       <td className="px-4 py-3 max-w-sm truncate text-[var(--tx)]">{k.motivo}</td>
-                      <td className="px-4 py-3 whitespace-nowrap font-mono text-[10px] tx-mu">
+                      <td className="px-4 py-3 whitespace-nowrap font-mono text-[11px] text-[var(--mu)]">
                         {k.usuario || 'Sistema'}
                       </td>
                     </tr>
@@ -908,7 +911,7 @@ export function InventarioPage() {
         </div>
       )}
 
-      {/* MODAL 1: INGRESAR STOCK (SIN COMPRA O CON COMPRA) */}
+      {/* MODAL 1: INGRESAR STOCK */}
       {showEntradaModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
@@ -916,34 +919,30 @@ export function InventarioPage() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-lg rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+            className="w-full max-w-lg rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
           >
-            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
-              <div className="flex items-center gap-2">
-                <PackagePlus size={18} className="text-emerald-500" />
-                <h3 className="font-bold text-sm">Ingresar Unidades a Bodega</h3>
-              </div>
-              <button onClick={() => setShowEntradaModal(false)} className="p-1 rounded-lg hover:bg-black/10">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
+              <h3 className="font-semibold text-sm">Ingresar unidades a bodega</h3>
+              <button type="button" onClick={() => setShowEntradaModal(false)} className="p-1 rounded-lg text-[var(--mu)] hover:text-[var(--tx)]">
                 <X size={16} />
               </button>
             </div>
 
             <form onSubmit={handleSaveEntrada} className="p-5 space-y-4">
-              {/* Selector de Tipo de Entrada */}
-              <div className="grid grid-cols-2 gap-2 p-1 bg-sf rounded-xl border border-[var(--bd)]">
+              <div className="grid grid-cols-2 gap-1 p-1 bg-sf rounded-lg border border-[var(--bd)]">
                 <button
                   type="button"
                   onClick={() => {
                     setEntradaTipo('inventario_inicial');
                     setEntradaAsentarFinanzas(false);
                   }}
-                  className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                  className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
                     entradaTipo === 'inventario_inicial'
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'tx-mu hover:text-[var(--tx)]'
+                      ? 'bg-[var(--tx)] text-[var(--cd)]'
+                      : 'text-[var(--mu)] hover:text-[var(--tx)]'
                   }`}
                 >
-                  <Boxes size={14} /> Stock Real / Sin Compra
+                  <Boxes size={13} /> Stock real / Sin compra
                 </button>
                 <button
                   type="button"
@@ -951,25 +950,25 @@ export function InventarioPage() {
                     setEntradaTipo('compra_entrada');
                     setEntradaAsentarFinanzas(true);
                   }}
-                  className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                  className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
                     entradaTipo === 'compra_entrada'
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'tx-mu hover:text-[var(--tx)]'
+                      ? 'bg-[var(--tx)] text-[var(--cd)]'
+                      : 'text-[var(--mu)] hover:text-[var(--tx)]'
                   }`}
                 >
-                  <CreditCard size={14} /> Compra a Proveedor
+                  <CreditCard size={13} /> Compra a proveedor
                 </button>
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">SKU del Producto *</label>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">SKU del producto *</label>
                 <input
                   type="text"
                   list="skus-existentes-inv"
                   value={entradaSku}
                   onChange={e => setEntradaSku(e.target.value.toUpperCase())}
                   placeholder="Escribe o selecciona un SKU"
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs uppercase font-mono font-bold outline-none focus:border-[var(--ac)]"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs uppercase font-mono font-semibold text-[var(--tx)] outline-none focus:border-[var(--tx)]"
                   required
                 />
                 <datalist id="skus-existentes-inv">
@@ -985,21 +984,21 @@ export function InventarioPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Unidades a Sumar *</label>
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1">Unidades a sumar *</label>
                   <input
                     type="number"
                     min="1"
                     value={entradaCantidad}
                     onChange={e => setEntradaCantidad(e.target.value)}
-                    placeholder="Ej. 25"
-                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-base font-bold outline-none"
+                    placeholder="25"
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-sm font-mono tabular-nums font-semibold text-[var(--tx)] outline-none focus:border-[var(--tx)]"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
-                    {entradaTipo === 'compra_entrada' ? 'Costo Unitario ($)' : 'Costo Ref. ($ Opcional)'}
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1">
+                    {entradaTipo === 'compra_entrada' ? 'Costo unitario ($)' : 'Costo ref. ($ opcional)'}
                   </label>
                   <input
                     type="number"
@@ -1008,7 +1007,7 @@ export function InventarioPage() {
                     value={entradaCosto}
                     onChange={e => setEntradaCosto(e.target.value)}
                     placeholder="0.00"
-                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-base font-bold outline-none"
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-sm font-mono tabular-nums font-semibold text-[var(--tx)] outline-none focus:border-[var(--tx)]"
                   />
                 </div>
               </div>
@@ -1017,61 +1016,60 @@ export function InventarioPage() {
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Proveedor</label>
+                      <label className="block text-xs font-medium text-[var(--mu)] mb-1">Proveedor</label>
                       <input
                         type="text"
                         value={entradaProveedor}
                         onChange={e => setEntradaProveedor(e.target.value)}
-                        placeholder="Ej. Importadora Central"
-                        className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                        placeholder="Importadora Central"
+                        className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs text-[var(--tx)] outline-none focus:border-[var(--tx)]"
                       />
                     </div>
                     <div>
-                      <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Notas / Factura</label>
+                      <label className="block text-xs font-medium text-[var(--mu)] mb-1">Notas / Factura</label>
                       <input
                         type="text"
                         value={entradaNotas}
                         onChange={e => setEntradaNotas(e.target.value)}
                         placeholder="Factura #1234"
-                        className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                        className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs text-[var(--tx)] outline-none focus:border-[var(--tx)]"
                       />
                     </div>
                   </div>
 
-                  <div className="p-3 bg-sf rounded-xl border border-[var(--bd)] flex items-start gap-2.5">
+                  <div className="p-3 bg-sf rounded-lg border border-[var(--bd)] flex items-start gap-2.5">
                     <input
                       type="checkbox"
                       id="asentarFinanzasInv"
                       checked={entradaAsentarFinanzas}
                       onChange={e => setEntradaAsentarFinanzas(e.target.checked)}
-                      className="mt-0.5 rounded text-emerald-600 focus:ring-0"
+                      className="mt-0.5 rounded focus:ring-0"
                     />
                     <label htmlFor="asentarFinanzasInv" className="text-xs cursor-pointer">
-                      <span className="font-bold text-[var(--tx)] block">
+                      <span className="font-semibold text-[var(--tx)] block">
                         Asentar egreso automático en Finanzas
                       </span>
-                      <span className="text-[10px] tx-mu block">
+                      <span className="text-[11px] text-[var(--mu)] block mt-0.5 tabular-nums">
                         Registrará el pago de $
-                        {(parseInt(entradaCantidad || '0', 10) * parseFloat(entradaCosto || '0')).toFixed(2)} en
-                        Banco Principal.
+                        {(parseInt(entradaCantidad || '0', 10) * parseFloat(entradaCosto || '0')).toFixed(2)} en Banco Principal.
                       </span>
                     </label>
                   </div>
                 </>
               ) : (
                 <div>
-                  <label className="block text-[10px] uppercase font-bold tx-mu mb-1">
-                    Motivo / Nota (Opcional)
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1">
+                    Motivo / Nota (opcional)
                   </label>
                   <input
                     type="text"
                     value={entradaNotas}
                     onChange={e => setEntradaNotas(e.target.value)}
-                    placeholder="Ej. Existencia física actual en bodega"
-                    className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                    placeholder="Existencia física actual en bodega"
+                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs text-[var(--tx)] outline-none focus:border-[var(--tx)]"
                   />
-                  <p className="text-[10px] text-indigo-500 mt-1.5 font-medium">
-                    ✓ Suma las unidades directamente a tu inventario real sin crear egresos ni deudas en Finanzas.
+                  <p className="text-[11px] text-[var(--mu)] mt-1.5">
+                    Suma las unidades directamente a inventario sin crear egresos en Finanzas.
                   </p>
                 </div>
               )}
@@ -1080,24 +1078,20 @@ export function InventarioPage() {
                 <button
                   type="button"
                   onClick={() => setShowEntradaModal(false)}
-                  className="px-4 py-2 border border-[var(--bd)] rounded-xl text-xs font-semibold"
+                  className="px-4 py-2 border border-[var(--bd)] rounded-lg text-xs font-medium text-[var(--tx)] hover:bg-sf"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingEntrada}
-                  className={`px-5 py-2 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm ${
-                    entradaTipo === 'compra_entrada'
-                      ? 'bg-emerald-600 hover:bg-emerald-500'
-                      : 'bg-indigo-600 hover:bg-indigo-500'
-                  }`}
+                  className="px-5 py-2 bg-[var(--tx)] text-[var(--cd)] font-semibold rounded-lg text-xs hover:opacity-90 disabled:opacity-50"
                 >
                   {isSavingEntrada
                     ? 'Guardando...'
                     : entradaTipo === 'compra_entrada'
-                    ? 'Registrar Compra'
-                    : 'Sumar a Bodega'}
+                      ? 'Registrar compra'
+                      : 'Sumar a bodega'}
                 </button>
               </div>
             </form>
@@ -1113,18 +1107,18 @@ export function InventarioPage() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-sm rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+            className="w-full max-w-sm rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
           >
-            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
-              <h3 className="font-bold text-sm">Conteo Físico Real</h3>
-              <button onClick={() => setShowAjusteModal(false)} className="p-1 rounded-lg">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
+              <h3 className="font-semibold text-sm">Conteo físico real</h3>
+              <button type="button" onClick={() => setShowAjusteModal(false)} className="p-1 rounded-lg text-[var(--mu)] hover:text-[var(--tx)]">
                 <X size={16} />
               </button>
             </div>
 
             <form onSubmit={handleSaveAjuste} className="p-5 space-y-4">
               <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">SKU a Ajustar *</label>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">SKU a ajustar *</label>
                 <input
                   type="text"
                   list="skus-existentes-ajuste"
@@ -1136,7 +1130,7 @@ export function InventarioPage() {
                     if (found) setAjusteNuevoStock(String(found.stock_fisico));
                   }}
                   placeholder="Selecciona o escribe el SKU"
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xs font-mono font-bold uppercase outline-none"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono font-semibold uppercase text-[var(--tx)] outline-none focus:border-[var(--tx)]"
                   required
                 />
                 <datalist id="skus-existentes-ajuste">
@@ -1148,30 +1142,30 @@ export function InventarioPage() {
                       </option>
                     ))}
                 </datalist>
-                <span className="text-[10px] tx-mu mt-1 block">
+                <span className="text-[11px] text-[var(--mu)] mt-1 block">
                   Define cuántas unidades físicas existen exactamente hoy en bodega.
                 </span>
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Stock Físico Real *</label>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">Stock físico real *</label>
                 <input
                   type="number"
                   min="0"
                   value={ajusteNuevoStock}
                   onChange={e => setAjusteNuevoStock(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-[var(--bd)] bg-sf text-xl font-bold outline-none"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-lg font-mono tabular-nums font-bold text-[var(--tx)] outline-none focus:border-[var(--tx)]"
                   required
                   autoFocus
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase font-bold tx-mu mb-1">Motivo *</label>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">Motivo *</label>
                 <select
                   value={ajusteMotivo}
                   onChange={e => setAjusteMotivo(e.target.value)}
-                  className="w-full p-2 rounded-xl border border-[var(--bd)] bg-sf text-xs outline-none"
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs text-[var(--tx)] outline-none focus:border-[var(--tx)]"
                 >
                   <option value="Conteo físico periódico">Conteo físico periódico</option>
                   <option value="Carga de inventario real">Carga de inventario real</option>
@@ -1184,16 +1178,16 @@ export function InventarioPage() {
                 <button
                   type="button"
                   onClick={() => setShowAjusteModal(false)}
-                  className="px-3 py-1.5 border border-[var(--bd)] rounded-xl text-xs font-semibold"
+                  className="px-3.5 py-2 border border-[var(--bd)] rounded-lg text-xs font-medium text-[var(--tx)] hover:bg-sf"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingAjuste}
-                  className="px-4 py-1.5 bg-[var(--ac)] text-white font-bold rounded-xl text-xs"
+                  className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] font-semibold rounded-lg text-xs hover:opacity-90 disabled:opacity-50"
                 >
-                  {isSavingAjuste ? 'Guardando...' : 'Aplicar Conteo'}
+                  {isSavingAjuste ? 'Guardando...' : 'Aplicar conteo'}
                 </button>
               </div>
             </form>
@@ -1204,7 +1198,7 @@ export function InventarioPage() {
       {/* MODAL 3: SCRIPT SQL SPRINT 10 */}
       <Sprint10SqlModal open={showSqlModal} onClose={() => setShowSqlModal(false)} />
 
-      {/* MODAL 4: DESGLOSE DE UNIDADES RESERVADAS POR PEDIDOS ACTIVOS */}
+      {/* MODAL 4: DESGLOSE DE UNIDADES RESERVADAS */}
       {reservedModalSku && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
@@ -1212,30 +1206,30 @@ export function InventarioPage() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            className="w-full max-w-lg rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+            className="w-full max-w-lg rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
           >
-            <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
               <div>
-                <h3 className="font-bold text-sm flex items-center gap-2">
-                  🔒 Pedidos Reservando <span className="font-mono text-amber-500">#{reservedModalSku}</span>
+                <h3 className="font-semibold text-sm">
+                  Pedidos reservando <span className="font-mono">#{reservedModalSku}</span>
                 </h3>
-                <p className="text-[10px] tx-mu mt-0.5">
-                  Órdenes actualmente en fase Empaque o En Camino con unidades retenidas.
+                <p className="text-xs text-[var(--mu)] mt-0.5">
+                  Órdenes actualmente en fase Empaque o En Camino.
                 </p>
               </div>
-              <button onClick={() => setReservedModalSku(null)} className="p-1 rounded-lg hover:bg-black/10">
+              <button type="button" onClick={() => setReservedModalSku(null)} className="p-1 rounded-lg text-[var(--mu)] hover:text-[var(--tx)]">
                 <X size={16} />
               </button>
             </div>
 
-            <div className="p-4 max-h-80 overflow-y-auto space-y-2.5">
+            <div className="max-h-80 overflow-y-auto divide-y divide-[var(--bd)]">
               {loadingReserved ? (
-                <div className="py-8 text-center text-xs tx-mu">Buscando pedidos activos...</div>
+                <div className="py-10 text-center text-xs text-[var(--mu)]">Buscando pedidos activos...</div>
               ) : reservedOrders.length === 0 ? (
-                <div className="py-8 text-center text-xs tx-mu">
+                <div className="py-10 px-5 text-center text-xs text-[var(--mu)]">
                   No se encontraron pedidos activos en Por Empacar / En Camino para #{reservedModalSku}.
                   <span className="block mt-1 opacity-75">
-                    Si quedó reserva huérfana de un pedido antiguo borrado, usa Conteo Físico o ajusta en Kárdex.
+                    Si quedó reserva huérfana de un pedido antiguo borrado, usa Conteo Físico.
                   </span>
                 </div>
               ) : (
@@ -1245,27 +1239,21 @@ export function InventarioPage() {
                   return (
                     <div
                       key={ord.id}
-                      className="p-3 rounded-xl border border-[var(--bd)] bg-sf flex items-center justify-between gap-3"
+                      className="px-5 py-3.5 flex items-center justify-between gap-3"
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-mono text-[10px] font-bold tx-mu">
+                          <span className="font-mono text-[11px] font-semibold text-[var(--mu)]">
                             #{String(ord.id).slice(0, 8).toUpperCase()}
                           </span>
-                          <span className="text-xs font-bold text-[var(--tx)] truncate">
+                          <span className="text-xs font-semibold text-[var(--tx)] truncate">
                             {ord.nombre_cliente || 'Cliente'}
                           </span>
-                          <span
-                            className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full border ${
-                              ord.estado === 'en_camino'
-                                ? 'bg-violet-500/10 text-violet-500 border-violet-500/25'
-                                : 'bg-amber-500/10 text-amber-500 border-amber-500/25'
-                            }`}
-                          >
-                            {ord.estado === 'en_camino' ? '🛵 En Camino' : '📦 Por Empacar'}
+                          <span className="text-[11px] text-[var(--mu)]">
+                            · {ord.estado === 'en_camino' ? 'En camino' : 'Por empacar'}
                           </span>
                         </div>
-                        <div className="text-[10px] tx-mu mt-1 flex items-center gap-2 flex-wrap">
+                        <div className="text-[11px] text-[var(--mu)] mt-0.5 flex items-center gap-2 flex-wrap">
                           <span className="flex items-center gap-1">
                             <Truck size={10} /> {ord.courier || 'Sin asignar'}
                           </span>
@@ -1273,10 +1261,10 @@ export function InventarioPage() {
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <span className="text-xs font-black font-mono text-amber-500 block">
+                        <span className="text-xs font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400 block">
                           {qty} ud(s)
                         </span>
-                        <span className="text-[10px] font-bold text-emerald-500">
+                        <span className="text-[11px] font-mono tabular-nums text-[var(--mu)]">
                           ${Number(ord.total || 0).toFixed(2)}
                         </span>
                       </div>
@@ -1286,17 +1274,17 @@ export function InventarioPage() {
               )}
             </div>
 
-            <div className="p-4 border-t border-[var(--bd)] bg-sf flex items-center justify-between">
+            <div className="px-5 py-3.5 border-t border-[var(--bd)] bg-sf/40 flex items-center justify-between">
               <Link
                 to="/pedidos"
-                className="text-xs font-bold text-indigo-500 hover:underline flex items-center gap-1"
+                className="text-xs font-semibold text-[var(--tx)] hover:underline flex items-center gap-1"
               >
-                Ver todos en Centro de Pedidos <ExternalLink size={12} />
+                Ver todos en Pedidos <ExternalLink size={12} />
               </Link>
               <button
                 type="button"
                 onClick={() => setReservedModalSku(null)}
-                className="px-4 py-1.5 rounded-xl border border-[var(--bd)] bg-cd text-xs font-semibold"
+                className="px-4 py-1.5 rounded-lg border border-[var(--bd)] bg-cd text-xs font-medium text-[var(--tx)]"
               >
                 Cerrar
               </button>

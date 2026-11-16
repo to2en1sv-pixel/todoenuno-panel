@@ -257,48 +257,43 @@ export function SocialInbox() {
 
   // ---------- Render ----------
   return (
-    <div className="flex h-[calc(100vh-4rem)] w-full overflow-hidden bg-[var(--bg)]">
-      
-      {/* ================= Columna izquierda (Lista de Chats) ================= */}
-      {/* En móvil: Ocupa todo el ancho. Se oculta si hay un chat seleccionado. */}
-      {/* En escritorio: Ancho fijo, siempre visible. */}
-      <aside className={`w-full md:max-w-sm flex-col border-r border-[var(--bd)] bg-[var(--cd)] ${selectedKey ? 'hidden md:flex' : 'flex'}`}>
-        <div className="flex items-center justify-between border-b border-[var(--bd)] px-4 py-3">
-          <div className="flex items-center gap-2">
-            <Inbox className="h-5 w-5 text-[var(--ac)]" />
-            <h1 className="text-base font-semibold text-[var(--tx)]">Bandeja Social</h1>
-            <span className="rounded-full bg-[var(--ac)]/10 px-2 py-0.5 text-xs font-medium text-[var(--ac)]">
-              {conversations.length}
-            </span>
+    <div className="max-w-6xl mx-auto flex h-[calc(100vh-7rem)] lg:h-[calc(100vh-3.5rem)] w-full overflow-hidden rounded-xl border border-[var(--bd)] bg-cd">
+      {/* Columna izquierda: lista de conversaciones */}
+      <aside className={`w-full md:w-80 lg:w-96 shrink-0 flex-col border-r border-[var(--bd)] bg-cd ${selectedKey ? 'hidden md:flex' : 'flex'}`}>
+        <div className="flex items-center justify-between border-b border-[var(--bd)] px-4 py-3.5">
+          <div className="flex items-center gap-2 min-w-0">
+            <h1 className="text-sm font-bold tracking-tight text-[var(--tx)] truncate">Bandeja Social</h1>
+            <span className="text-xs text-[var(--mu)] font-mono tabular-nums">· {conversations.length}</span>
           </div>
           <button
+            type="button"
             onClick={load}
             title="Actualizar"
-            className="rounded-lg p-2 text-[var(--tx)]/60 hover:bg-[var(--bg)] hover:text-[var(--tx)]"
+            className="rounded-lg border border-[var(--bd)] bg-cd p-1.5 text-[var(--mu)] hover:bg-sf hover:text-[var(--tx)] transition-colors"
           >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
 
         <div className="border-b border-[var(--bd)] p-3">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--tx)]/40" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--mu)]" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar conversación..."
-              className="w-full rounded-lg border border-[var(--bd)] bg-[var(--bg)] py-2 pl-9 pr-3 text-sm text-[var(--tx)] outline-none focus:border-[var(--ac)] focus:ring-2 focus:ring-[var(--ac)]/20"
+              className="w-full rounded-lg border border-[var(--bd)] bg-sf py-2 pl-9 pr-3 text-xs text-[var(--tx)] outline-none focus:border-[var(--tx)] placeholder:text-[var(--mu)]"
             />
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto divide-y divide-[var(--bd)]">
           {loading && conversations.length === 0 ? (
-            <div className="flex h-32 items-center justify-center text-[var(--tx)]/40">
-              <Loader2 className="h-5 w-5 animate-spin" />
+            <div className="flex h-32 items-center justify-center text-[var(--mu)]">
+              <Loader2 className="h-4 w-4 animate-spin" />
             </div>
           ) : filtered.length === 0 ? (
-            <div className="p-6 text-center text-sm text-[var(--tx)]/60">
+            <div className="p-6 text-center text-xs text-[var(--mu)]">
               Sin conversaciones todavía.
             </div>
           ) : (
@@ -308,30 +303,31 @@ export function SocialInbox() {
               return (
                 <button
                   key={c.key}
+                  type="button"
                   onClick={() => setSelectedKey(c.key)}
-                  className={`flex w-full items-start gap-3 border-b border-[var(--bd)]/50 px-4 py-3 text-left transition ${
-                    isActive ? 'bg-[var(--ac)]/5' : 'hover:bg-[var(--bg)]'
+                  className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors ${
+                    isActive ? 'bg-sf' : 'hover:bg-sf/50'
                   }`}
                 >
-                  <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ac)] text-sm font-semibold text-[var(--cd)]">
+                  <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--bd)] bg-sf text-xs font-bold text-[var(--tx)]">
                     {initials(c.contactName)}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-medium text-[var(--tx)]">
+                      <span className="truncate text-xs font-semibold text-[var(--tx)]">
                         {c.contactName}
                       </span>
-                      <span className="flex-shrink-0 text-[11px] text-[var(--tx)]/40">
+                      <span className="flex-shrink-0 text-[11px] font-mono tabular-nums text-[var(--mu)]">
                         {formatTime(c.lastAt)}
                       </span>
                     </div>
                     <div className="mt-0.5 flex items-center justify-between gap-2">
-                      <p className="truncate text-xs text-[var(--tx)]/60">{c.lastText}</p>
+                      <p className="truncate text-xs text-[var(--mu)]">{c.lastText}</p>
                       <span
-                        className={`flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                        className={`flex-shrink-0 text-[10px] font-medium ${
                           hasComment
-                            ? 'bg-amber-500/10 text-amber-500'
-                            : 'bg-sky-500/10 text-sky-500'
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-[var(--mu)]'
                         }`}
                       >
                         {hasComment ? 'Comentario' : 'DM'}
@@ -345,62 +341,54 @@ export function SocialInbox() {
         </div>
       </aside>
 
-      {/* ================= Columna derecha (Ventana de Chat) ================= */}
-      {/* En móvil: Se oculta si no hay chat seleccionado. Ocupa todo si hay uno. */}
-      {/* En escritorio: Siempre visible ocupando el espacio restante. */}
+      {/* Columna derecha: ventana de chat */}
       <section className={`flex-1 flex-col bg-[var(--bg)] ${!selectedKey ? 'hidden md:flex' : 'flex'}`}>
         {!selected ? (
-          <div className="flex flex-1 flex-col items-center justify-center text-[var(--tx)]/40">
-            <MessageCircle className="mb-3 h-12 w-12" />
-            <p className="text-sm">Selecciona una conversación para empezar</p>
+          <div className="flex flex-1 flex-col items-center justify-center text-[var(--mu)] gap-2">
+            <MessageCircle className="h-8 w-8 opacity-40" />
+            <p className="text-xs">Selecciona una conversación para responder</p>
           </div>
         ) : (
           <>
-            {/* Header del Chat */}
-            <header className="flex items-center justify-between border-b border-[var(--bd)] bg-[var(--cd)] px-3 md:px-5 py-3">
-              <div className="flex items-center gap-2 md:gap-3">
-                {/* BOTÓN DE VOLVER (Solo visible en móvil) */}
+            <header className="flex items-center justify-between border-b border-[var(--bd)] bg-cd px-4 md:px-5 py-3">
+              <div className="flex items-center gap-3">
                 <button
+                  type="button"
                   onClick={() => setSelectedKey(null)}
-                  className="md:hidden p-1.5 -ml-1 rounded-lg text-[var(--tx)]/70 hover:bg-[var(--bg)]"
+                  className="md:hidden p-1.5 -ml-1 rounded-lg border border-[var(--bd)] text-[var(--tx)] hover:bg-sf"
                 >
-                  <ArrowLeft className="h-5 w-5" />
+                  <ArrowLeft className="h-4 w-4" />
                 </button>
 
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--ac)] text-sm font-semibold text-[var(--cd)]">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--bd)] bg-sf text-xs font-bold text-[var(--tx)]">
                   {initials(selected.contactName)}
                 </div>
                 <div>
                   <h2 className="text-sm font-semibold text-[var(--tx)]">
                     {selected.contactName}
                   </h2>
-                  <p className="text-xs text-[var(--tx)]/60">
+                  <p className="text-xs text-[var(--mu)]">
                     {pageNames[selected.pageId] || selected.pageId}
                   </p>
                 </div>
               </div>
-              <span className="hidden md:inline-block rounded-full bg-[var(--bg)] px-2.5 py-1 text-xs font-medium text-[var(--tx)]/70">
+              <span className="hidden md:inline-block text-xs font-mono tabular-nums text-[var(--mu)]">
                 {selected.items.length} mensaje{selected.items.length !== 1 ? 's' : ''}
               </span>
             </header>
 
-            {/* Historial de Mensajes */}
-            <div className="flex-1 space-y-3 overflow-y-auto p-4 md:p-5 bg-[var(--bg)]">
+            <div className="flex-1 space-y-3 overflow-y-auto p-4 md:p-5">
               {selected.items.map((it) => {
                 if (it.kind === 'comment') {
                   return (
                     <div key={it.id} className="flex justify-start">
-                      <div className="max-w-[85%] md:max-w-[75%] rounded-2xl rounded-tl-sm border border-amber-500/30 bg-amber-500/10 px-4 py-2 shadow-sm">
-                        <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600">
+                      <div className="max-w-[85%] md:max-w-[75%] rounded-xl rounded-tl-sm border border-amber-500/30 bg-amber-500/10 px-4 py-2.5">
+                        <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
                           <MessageCircle className="h-3 w-3" /> Comentario público
+                          {it.keyword && <span className="font-mono opacity-80">· {it.keyword}</span>}
                         </div>
-                        <p className="text-sm text-[var(--tx)]">{it.text}</p>
-                        {it.keyword && (
-                          <span className="mt-1 inline-block rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
-                            keyword: {it.keyword}
-                          </span>
-                        )}
-                        <div className="mt-1 text-[10px] text-[var(--tx)]/40">
+                        <p className="text-xs text-[var(--tx)] leading-relaxed">{it.text}</p>
+                        <div className="mt-1 text-[10px] font-mono tabular-nums text-[var(--mu)]">
                           {formatTime(it.createdAt)}
                         </div>
                       </div>
@@ -414,16 +402,16 @@ export function SocialInbox() {
                     className={`flex ${it.fromPage ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
-                      className={`max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-2 shadow-sm ${
+                      className={`max-w-[85%] md:max-w-[75%] rounded-xl px-4 py-2.5 ${
                         it.fromPage
-                          ? 'rounded-tr-sm bg-[var(--ac)] text-[var(--cd)]'
-                          : 'rounded-tl-sm bg-[var(--cd)] text-[var(--tx)] border border-[var(--bd)]'
+                          ? 'rounded-tr-sm bg-[var(--tx)] text-[var(--cd)]'
+                          : 'rounded-tl-sm bg-cd text-[var(--tx)] border border-[var(--bd)]'
                       }`}
                     >
-                      <p className="whitespace-pre-wrap text-sm">{it.text}</p>
+                      <p className="whitespace-pre-wrap text-xs leading-relaxed">{it.text}</p>
                       <div
-                        className={`mt-1 text-[10px] ${
-                          it.fromPage ? 'text-[var(--cd)]/70' : 'text-[var(--tx)]/40'
+                        className={`mt-1 text-[10px] font-mono tabular-nums ${
+                          it.fromPage ? 'opacity-65' : 'text-[var(--mu)]'
                         }`}
                       >
                         {formatTime(it.createdAt)}
@@ -435,9 +423,8 @@ export function SocialInbox() {
               <div ref={bottomRef} />
             </div>
 
-            {/* Input de Respuesta */}
-            <footer className="border-t border-[var(--bd)] bg-[var(--cd)] p-3">
-              {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
+            <footer className="border-t border-[var(--bd)] bg-cd p-3.5">
+              {error && <p className="mb-2 text-xs text-rose-600 dark:text-rose-400">{error}</p>}
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -456,17 +443,17 @@ export function SocialInbox() {
                   }}
                   rows={1}
                   placeholder="Escribe una respuesta por DM..."
-                  className="max-h-32 min-h-[42px] flex-1 resize-none rounded-xl border border-[var(--bd)] bg-[var(--bg)] px-4 py-2.5 text-sm text-[var(--tx)] outline-none focus:border-[var(--ac)] focus:ring-2 focus:ring-[var(--ac)]/20"
+                  className="max-h-32 min-h-[40px] flex-1 resize-none rounded-lg border border-[var(--bd)] bg-sf px-3.5 py-2.5 text-xs text-[var(--tx)] outline-none focus:border-[var(--tx)] placeholder:text-[var(--mu)]"
                 />
                 <button
                   type="submit"
                   disabled={sending || !draft.trim()}
-                  className="flex h-[42px] w-[42px] flex-shrink-0 items-center justify-center rounded-xl bg-[var(--ac)] text-[var(--cd)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex h-[40px] w-[40px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--tx)] text-[var(--cd)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {sending ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Send className="h-5 w-5" />
+                    <Send className="h-4 w-4" />
                   )}
                 </button>
               </form>

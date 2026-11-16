@@ -282,21 +282,19 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* HEADER DEL SUBMÓDULO DICOM INTERNO */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-cd p-4 sm:p-5 rounded-2xl border border-rose-500/20 gap-4 shadow-sm relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-full blur-2xl pointer-events-none" />
-
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-cd p-4 sm:p-5 rounded-xl border border-[var(--bd)] gap-4">
         <div className="flex items-start gap-3 min-w-0">
-          <div className="w-10 sm:w-12 h-10 sm:h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-500 shrink-0 mt-0.5">
-            <ShieldAlert size={22} />
+          <div className="w-10 h-10 rounded-lg bg-rose-500/10 border border-rose-500/25 flex items-center justify-center text-rose-600 dark:text-rose-400 shrink-0 mt-0.5">
+            <ShieldAlert size={20} />
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-base sm:text-lg font-black text-[var(--tx)] tracking-tight">
+              <h2 className="text-base sm:text-lg font-bold text-[var(--tx)] tracking-tight">
                 Directorio Antifraude & DICOM Interno COD
               </h2>
-              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/30 shrink-0">
+              <span className="text-[10px] font-mono uppercase font-semibold px-2 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/25 shrink-0">
                 Protección de Fletes
               </span>
             </div>
@@ -308,49 +306,49 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
 
         <button
           onClick={() => setModalAbierto(true)}
-          className="w-full md:w-auto px-4 py-2.5 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-rose-600/20 transition-all shrink-0"
+          className="w-full md:w-auto px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-lg text-xs flex items-center justify-center gap-1.5 transition-colors shrink-0"
         >
-          <Plus size={15} /> Boletinar Número
+          <Plus size={14} /> Boletinar Número
         </button>
       </div>
 
       {/* TARJETAS DE IMPACTO Y PROTECCIÓN FINANCIERA */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Números Boletinados</span>
-          <div className="text-2xl font-black font-mono mt-1 text-rose-500">
+      <div className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-[var(--bd)]">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu font-medium block">Números Boletinados</span>
+          <div className="text-2xl font-bold font-mono tabular-nums mt-1 text-rose-600 dark:text-rose-400">
             {metricas.totalBoletinados} <span className="text-xs font-normal tx-mu">clientes</span>
           </div>
-          <span className="text-[10px] tx-mu mt-0.5 block">En Lista Negra activa</span>
+          <span className="text-[11px] tx-mu mt-0.5 block">En Lista Negra activa</span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Fletes Ahorrados ($)</span>
-          <div className="text-2xl font-black font-mono mt-1 text-emerald-600">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu font-medium block">Fletes Ahorrados ($)</span>
+          <div className="text-2xl font-bold font-mono tabular-nums mt-1 text-emerald-600 dark:text-emerald-400">
             {formatCurrency(metricas.fletesEvitadosMonto)}
           </div>
-          <span className="text-[10px] tx-mu mt-0.5 block">Est. ~$3.50 flete/paquete</span>
+          <span className="text-[11px] tx-mu mt-0.5 block">Est. ~$3.50 flete/paquete</span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">Alias Detectados</span>
-          <div className="text-2xl font-black font-mono mt-1 text-indigo-500">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu font-medium block">Alias Detectados</span>
+          <div className="text-2xl font-bold font-mono tabular-nums mt-1 text-[var(--tx)]">
             {metricas.clientesConMultiplesNombres} <span className="text-xs font-normal tx-mu">cambiaron nombre</span>
           </div>
-          <span className="text-[10px] tx-mu mt-0.5 block">Mismo número, distinto nombre</span>
+          <span className="text-[11px] tx-mu mt-0.5 block">Mismo número, distinto nombre</span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] shadow-sm">
-          <span className="text-[10px] tx-mu uppercase font-bold tracking-wider block">En Observación Automática</span>
-          <div className="text-2xl font-black font-mono mt-1 text-amber-500">
+        <div className="p-4">
+          <span className="text-[11px] tx-mu font-medium block">En Observación</span>
+          <div className="text-2xl font-bold font-mono tabular-nums mt-1 text-amber-600 dark:text-amber-400">
             {metricas.autoDetectados} <span className="text-xs font-normal tx-mu">sospechosos</span>
           </div>
-          <span className="text-[10px] tx-mu mt-0.5 block">Con cancelaciones en pedidos</span>
+          <span className="text-[11px] tx-mu mt-0.5 block">Con cancelaciones en pedidos</span>
         </div>
       </div>
 
       {/* BARRA DE BÚSQUEDA Y FILTROS */}
-      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-cd p-3 rounded-2xl border border-[var(--bd)]">
+      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-cd p-3 rounded-xl border border-[var(--bd)]">
         <div className="relative flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 tx-mu" />
           <input
@@ -358,25 +356,25 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
             placeholder="Buscar por teléfono, nombre o motivo..."
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 bg-sf border border-[var(--bd)] rounded-xl text-xs outline-none focus:border-rose-500"
+            className="w-full pl-9 pr-3 py-1.5 bg-sf border border-[var(--bd)] rounded-lg text-xs outline-none focus:border-[var(--tx)]"
           />
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-xs tx-mu font-bold">Severidad:</span>
-          <div className="flex bg-sf p-1 rounded-xl border border-[var(--bd)] text-xs font-semibold">
+          <span className="text-xs tx-mu font-medium">Severidad:</span>
+          <div className="flex bg-sf p-0.5 rounded-lg border border-[var(--bd)] text-xs font-medium">
             {[
               { id: 'todos', label: 'Todos' },
-              { id: 'alta', label: '🔴 Alta' },
-              { id: 'media', label: '🟡 Media' },
-              { id: 'baja', label: '⚪ Baja' }
+              { id: 'alta', label: 'Alta' },
+              { id: 'media', label: 'Media' },
+              { id: 'baja', label: 'Baja' }
             ].map(f => (
               <button
                 key={f.id}
                 onClick={() => setFiltroSeveridad(f.id)}
-                className={`px-3 py-1 rounded-lg transition-colors whitespace-nowrap ${
+                className={`px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${
                   filtroSeveridad === f.id
-                    ? 'bg-cd shadow-sm text-[var(--tx)] font-bold'
+                    ? 'bg-[var(--tx)] text-[var(--cd)] font-semibold'
                     : 'tx-mu hover:text-[var(--tx)]'
                 }`}
               >
@@ -388,11 +386,11 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
       </div>
 
       {/* TABLA PRINCIPAL DE NÚMEROS BOLETINADOS */}
-      <div className="bg-cd rounded-2xl border border-[var(--bd)] overflow-hidden shadow-sm">
-        <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+      <div className="bg-cd rounded-xl border border-[var(--bd)] overflow-hidden">
+        <div className="px-4 py-3 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
           <div className="flex items-center gap-2">
-            <UserX size={16} className="text-rose-500" />
-            <h3 className="font-bold text-xs uppercase text-[var(--tx)]">
+            <UserX size={15} className="text-rose-500" />
+            <h3 className="font-semibold text-xs uppercase tracking-wider text-[var(--tx)]">
               Números en Lista Negra ({entriesFiltradas.length})
             </h3>
           </div>
@@ -536,15 +534,15 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
 
       {/* SECCIÓN DE CLIENTES DETECTADOS POR CANCELACIONES RECURRENTES EN PEDIDOS */}
       {clientesAutoDetectados.length > 0 && (
-        <div className="bg-cd rounded-2xl border border-amber-500/20 p-5 space-y-3">
+        <div className="bg-cd rounded-xl border border-amber-500/25 p-5 space-y-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-amber-500">
-              <FileWarning size={18} />
+            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+              <FileWarning size={17} />
               <h3 className="font-bold text-sm text-[var(--tx)]">
                 Detección Automática: Clientes con Cancelaciones Previas ({clientesAutoDetectados.length})
               </h3>
             </div>
-            <span className="text-[10px] tx-mu">Detectados por el historial de whatsapp_orders</span>
+            <span className="text-[10px] tx-mu font-mono">whatsapp_orders</span>
           </div>
 
           <p className="text-xs tx-mu leading-relaxed">
@@ -553,7 +551,7 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
             {clientesAutoDetectados.slice(0, 6).map(c => (
-              <div key={c.clean} className="p-3 rounded-xl bg-sf border border-[var(--bd)] flex flex-col justify-between space-y-2">
+              <div key={c.clean} className="p-3 rounded-lg bg-sf border border-[var(--bd)] flex flex-col justify-between space-y-2">
                 <div>
                   <div className="flex items-start justify-between">
                     <div>
@@ -563,28 +561,28 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
                       <h4 className="font-semibold text-xs text-[var(--tx)] mt-0.5">{c.nombre}</h4>
                     </div>
 
-                    <span className="text-[10px] font-black font-mono px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                    <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
                       {c.cancelados} canc.
                     </span>
                   </div>
 
                   {c.motivos.length > 0 && (
-                    <p className="text-[10px] text-rose-400 mt-1.5 italic line-clamp-1">
+                    <p className="text-[10px] text-rose-500 mt-1.5 italic line-clamp-1">
                       "{c.motivos[0]}"
                     </p>
                   )}
                 </div>
 
                 <div className="pt-2 border-t border-[var(--bd)] flex items-center justify-between">
-                  <span className="text-[10px] tx-mu">
+                  <span className="text-[10px] tx-mu font-mono">
                     {c.entregados} entregados
                   </span>
 
                   <button
                     onClick={() => handleBoletinarAutoDetectado(c)}
-                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[10px] font-bold transition-colors flex items-center gap-1"
+                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-md text-[10px] font-semibold transition-colors flex items-center gap-1"
                   >
-                    <ShieldAlert size={12} /> Boletinar
+                    <ShieldAlert size={11} /> Boletinar
                   </button>
                 </div>
               </div>
@@ -596,7 +594,7 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
       {/* MODAL: BOLETINAR NUEVO NÚMERO */}
       {modalAbierto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setModalAbierto(false)}>
-          <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden">
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] overflow-hidden">
             <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
               <div className="flex items-center gap-2 text-rose-500">
                 <ShieldAlert size={18} />
@@ -755,7 +753,7 @@ export function DirectorioListaNegra({ orders, onOpenPedido }: Props) {
       {/* MODAL NOTIFICAR AL CLIENTE POR WHATSAPP (DICOM / REHABILITACIÓN) */}
       {notificarItem && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-cd border border-[var(--bd)] rounded-2xl max-w-xl w-full p-5 space-y-4 shadow-2xl relative my-auto animate-in fade-in">
+          <div className="bg-cd border border-[var(--bd)] rounded-xl max-w-xl w-full p-5 space-y-4 relative my-auto animate-in fade-in">
             {/* Header del Modal */}
             <div className="flex items-start justify-between border-b border-[var(--bd)] pb-3">
               <div className="flex items-center gap-3">

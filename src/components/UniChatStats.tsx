@@ -467,20 +467,20 @@ export function UniChatStats({
       {/* Barra superior limpia */}
       <header className="px-3.5 py-2.5 sm:px-5 sm:py-3 border-b border-[var(--bd)] bg-cd flex flex-wrap items-center justify-between gap-2.5 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="flex items-center p-1 rounded-xl bg-sf bd shrink-0">
+          <div className="flex items-center p-0.5 rounded-lg bg-sf bd shrink-0">
             <button
               type="button"
               onClick={() => onBackToChats()}
-              className="px-3 py-1 rounded-lg text-xs font-medium tx-mu hover:text-[var(--tx)] flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer"
+              className="px-3 py-1 rounded-md text-xs font-medium tx-mu hover:text-[var(--tx)] flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer"
             >
               <MessageSquare size={13} />
               <span>Chats</span>
             </button>
             <button
               type="button"
-              className="px-3 py-1 rounded-lg text-xs font-semibold bg-cd bd flex items-center gap-1.5 whitespace-nowrap shadow-sm"
+              className="px-3 py-1 rounded-md text-xs font-semibold bg-[var(--tx)] text-[var(--cd)] flex items-center gap-1.5 whitespace-nowrap"
             >
-              <BarChart3 size={13} style={{ color: 'var(--ac)' }} />
+              <BarChart3 size={13} />
               <span>Estadísticas</span>
             </button>
           </div>
@@ -490,7 +490,7 @@ export function UniChatStats({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center p-1 rounded-xl bg-sf bd text-xs">
+          <div className="flex items-center p-0.5 rounded-lg bg-sf bd text-xs">
             {(
               [
                 { id: 'today', label: 'Hoy' },
@@ -503,9 +503,9 @@ export function UniChatStats({
                 key={item.id}
                 type="button"
                 onClick={() => setPeriod(item.id)}
-                className={`px-2.5 py-1 rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
+                className={`px-2.5 py-1 rounded-md whitespace-nowrap transition-colors cursor-pointer ${
                   period === item.id
-                    ? 'bg-cd bd font-semibold text-[var(--tx)]'
+                    ? 'bg-[var(--tx)] text-[var(--cd)] font-semibold'
                     : 'tx-mu hover:text-[var(--tx)] font-medium'
                 }`}
               >
@@ -519,10 +519,10 @@ export function UniChatStats({
               type="button"
               onClick={onToggleHideLegacy}
               title={hideLegacy ? 'Incluir chats antiguos de BuilderBot' : 'Ocultar chats antiguos de BuilderBot'}
-              className={`px-2.5 py-1.5 rounded-xl border text-xs font-medium flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
                 hideLegacy
                   ? 'border-[var(--bd)] bg-sf tx-mu hover:text-[var(--tx)]'
-                  : 'border-[var(--ac)] bg-cd text-[var(--tx)]'
+                  : 'border-[var(--tx)]/30 bg-cd text-[var(--tx)]'
               }`}
             >
               {hideLegacy ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -535,7 +535,7 @@ export function UniChatStats({
             onClick={handleManualRefresh}
             disabled={refreshing}
             title="Actualizar estadísticas"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sf bd text-xs font-medium hover:opacity-85 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cd bd text-xs font-medium hover:bg-sf transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
             <span className="hidden sm:inline">Actualizar</span>
@@ -545,14 +545,14 @@ export function UniChatStats({
 
       {/* Contenido scrollable */}
       <div className="flex-1 overflow-y-auto p-3.5 sm:p-5">
-        <div className="max-w-6xl mx-auto flex flex-col gap-4 pb-6">
+        <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-8">
           {statsError && (
-            <div className="p-3.5 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-500 text-xs font-semibold flex items-center justify-between gap-3">
+            <div className="p-3.5 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center justify-between gap-3">
               <span>{statsError}</span>
               <button
                 type="button"
                 onClick={() => loadStatsData(period, true)}
-                className="px-3 py-1.5 rounded-xl bg-rose-600 text-white text-xs font-semibold shrink-0 cursor-pointer"
+                className="px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-semibold shrink-0 cursor-pointer"
               >
                 Reintentar
               </button>
@@ -561,14 +561,14 @@ export function UniChatStats({
 
           {loadingStats ? (
             <div className="flex flex-col gap-4">
-              <div className="bg-cd bd rounded-2xl p-5 space-y-2.5">
+              <div className="bg-cd bd rounded-xl p-5 space-y-2.5">
                 <Skeleton h={14} />
                 <Skeleton h={28} />
                 <Skeleton h={14} />
               </div>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+              <div className="bg-cd bd rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
                 {[1, 2, 3, 4].map(i => (
-                  <div key={i} className="p-4 rounded-2xl bg-cd bd space-y-2">
+                  <div key={i} className="p-4 space-y-2">
                     <Skeleton h={14} />
                     <Skeleton h={30} />
                     <Skeleton h={12} />
@@ -581,7 +581,7 @@ export function UniChatStats({
               </div>
             </div>
           ) : kpis.totalChats === 0 && kpis.totalMsgs === 0 && funnelData.total === 0 ? (
-            <div className="p-8 rounded-2xl bg-cd bd text-center space-y-3 max-w-lg mx-auto my-8">
+            <div className="p-8 rounded-xl bg-cd bd text-center space-y-3 max-w-lg mx-auto my-8">
               <BarChart3 size={28} className="mx-auto tx-mu opacity-50" />
               <div className="space-y-1">
                 <h3 className="text-sm font-bold">Sin actividad registrada en {PERIOD_LABELS[period].toLowerCase()}</h3>
@@ -594,8 +594,7 @@ export function UniChatStats({
                   <button
                     type="button"
                     onClick={() => setPeriod('all')}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer"
-                    style={{ background: 'var(--tx)', color: 'var(--cd)' }}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-[var(--tx)] text-[var(--cd)] cursor-pointer"
                   >
                     Ver todo el historial
                   </button>
@@ -603,7 +602,7 @@ export function UniChatStats({
                 <button
                   type="button"
                   onClick={() => onBackToChats()}
-                  className="px-4 py-2 rounded-xl bg-sf bd text-xs font-medium cursor-pointer"
+                  className="px-4 py-2 rounded-lg bg-sf bd text-xs font-medium cursor-pointer"
                 >
                   Ir a Chats
                 </button>
@@ -612,9 +611,9 @@ export function UniChatStats({
           ) : (
             <>
               {/* Hero Resumen Ejecutivo */}
-              <section className="bg-cd bd rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <section className="bg-cd bd rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 text-xs tx-mu tabular-nums">
+                  <div className="flex flex-wrap items-center gap-2 text-xs tx-mu font-mono tabular-nums">
                     <span>{PERIOD_LABELS[period]}</span>
                     <span aria-hidden="true">·</span>
                     <span>Automatización Todd {kpis.botRate}%</span>
@@ -627,7 +626,7 @@ export function UniChatStats({
                   >
                     {heroHeadline}
                   </h1>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs tx-mu tabular-nums">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs tx-mu font-mono tabular-nums">
                     <span>{kpis.totalMsgs} mensajes totales</span>
                     <span aria-hidden="true">·</span>
                     <span>{kpis.incomingMsgs} de clientes</span>
@@ -636,13 +635,12 @@ export function UniChatStats({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2.5 shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                   {kpis.unreadChats > 0 && (
                     <button
                       type="button"
                       onClick={() => onBackToChats('unread')}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-opacity hover:opacity-90 whitespace-nowrap shrink-0 cursor-pointer"
-                      style={{ background: 'var(--tx)', color: 'var(--cd)' }}
+                      className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold bg-[var(--tx)] text-[var(--cd)] transition-opacity hover:opacity-90 whitespace-nowrap shrink-0 cursor-pointer"
                     >
                       <MessageSquare size={14} />
                       Atender pendientes ({kpis.unreadChats})
@@ -651,92 +649,88 @@ export function UniChatStats({
                   <button
                     type="button"
                     onClick={() => onBackToChats()}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-sf bd text-xs font-medium hover:opacity-85 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-cd bd text-xs font-medium hover:bg-sf transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     Volver a bandeja
                   </button>
                 </div>
               </section>
 
-              {/* Strip de 4 KPIs (estilo Hoy.tsx) */}
-              <section className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+              {/* Strip unificada de 4 KPIs */}
+              <section className="bg-cd bd rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
                 {/* KPI 1: Conversaciones */}
-                <div className="bg-cd bd rounded-2xl p-4 flex flex-col justify-between gap-2.5">
+                <div className="p-4 flex flex-col justify-between gap-2.5">
                   <div className="flex items-center justify-between text-xs tx-mu">
                     <span>Conversaciones</span>
-                    <Bot size={15} style={{ color: 'var(--ac)' }} />
+                    <Bot size={14} className="tx-mu" />
                   </div>
                   <div>
-                    <div className="text-xl sm:text-2xl font-bold mono tabular-nums">
+                    <div className="text-xl sm:text-2xl font-bold font-mono tabular-nums">
                       {kpis.totalChats}
                     </div>
-                    <div className="text-xs tx-mu mt-0.5 tabular-nums">
+                    <div className="text-xs tx-mu mt-0.5 font-mono tabular-nums">
                       {kpis.botChats} Todd · {kpis.humanChats} humano ({kpis.botRate}% auto)
                     </div>
                   </div>
-                  <div className="h-1.5 w-full rounded-full bg-sf overflow-hidden flex">
+                  <div className="h-1 w-full rounded-full bg-sf overflow-hidden flex">
                     <div
-                      className="h-full transition-all"
+                      className="h-full transition-all bg-[var(--tx)]"
                       style={{
                         width: `${kpis.totalChats > 0 ? kpis.botRate : 0}%`,
-                        background: 'var(--ac)',
                       }}
                     />
                   </div>
                 </div>
 
                 {/* KPI 2: Conversión Chat -> Pedido */}
-                <div className="bg-cd bd rounded-2xl p-4 flex flex-col justify-between gap-2.5">
+                <div className="p-4 flex flex-col justify-between gap-2.5">
                   <div className="flex items-center justify-between text-xs tx-mu">
                     <span>Cierre Chat → Pedido</span>
-                    <TrendingUp size={15} style={{ color: 'var(--ok)' }} />
+                    <TrendingUp size={14} className="text-emerald-600 dark:text-emerald-400" />
                   </div>
                   <div>
                     <div className="flex items-baseline gap-2 flex-wrap">
-                      <span
-                        className="text-xl sm:text-2xl font-bold mono tabular-nums"
-                        style={{ color: 'var(--ok)' }}
-                      >
+                      <span className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
                         {kpis.conversionRate.toFixed(1)}%
                       </span>
-                      <span className="text-xs font-semibold mono tabular-nums tx-mu">
+                      <span className="text-xs font-semibold font-mono tabular-nums tx-mu">
                         {formatMoney(kpis.convertedRevenue)}
                       </span>
                     </div>
-                    <div className="text-xs tx-mu mt-0.5 tabular-nums">
+                    <div className="text-xs tx-mu mt-0.5 font-mono tabular-nums">
                       {kpis.convertedChats} de {kpis.identifiableChats || kpis.totalChats} chats compraron
                     </div>
                   </div>
-                  <div className="h-1.5 w-full rounded-full bg-sf overflow-hidden">
+                  <div className="h-1 w-full rounded-full bg-sf overflow-hidden">
                     <div
-                      className="h-full transition-all"
+                      className="h-full transition-all bg-emerald-500"
                       style={{
                         width: `${Math.min(100, Math.round(kpis.conversionRate))}%`,
-                        background: 'var(--ok)',
                       }}
                     />
                   </div>
                 </div>
 
                 {/* KPI 3: Sin responder ahora */}
-                <div className="bg-cd bd rounded-2xl p-4 flex flex-col justify-between gap-2.5">
+                <div className="p-4 flex flex-col justify-between gap-2.5">
                   <div className="flex items-center justify-between text-xs tx-mu">
                     <span>Sin responder</span>
                     <Clock
-                      size={15}
-                      style={{ color: kpis.unreadChats > 0 ? 'var(--er)' : 'var(--mu)' }}
+                      size={14}
+                      className={kpis.unreadChats > 0 ? 'text-rose-600 dark:text-rose-400' : 'tx-mu'}
                     />
                   </div>
                   <div>
                     <div className="flex items-baseline gap-2">
                       <span
-                        className="text-xl sm:text-2xl font-bold mono tabular-nums"
-                        style={kpis.unreadChats > 0 ? { color: 'var(--er)' } : undefined}
+                        className={`text-xl sm:text-2xl font-bold font-mono tabular-nums ${
+                          kpis.unreadChats > 0 ? 'text-rose-600 dark:text-rose-400' : ''
+                        }`}
                       >
                         {kpis.unreadChats}
                       </span>
                       {kpis.unreadChats > 0 && (
-                        <span className="text-xs mono tabular-nums tx-mu">
+                        <span className="text-xs font-mono tabular-nums tx-mu">
                           prom. {formatWaitDuration(kpis.avgWaitMinutes)}
                         </span>
                       )}
@@ -753,8 +747,7 @@ export function UniChatStats({
                       <button
                         type="button"
                         onClick={() => onBackToChats('unread')}
-                        className="font-semibold hover:underline inline-flex items-center gap-1 whitespace-nowrap cursor-pointer"
-                        style={{ color: 'var(--ac)' }}
+                        className="font-semibold hover:underline inline-flex items-center gap-1 whitespace-nowrap cursor-pointer text-[var(--tx)]"
                       >
                         Atender <ArrowRight size={12} />
                       </button>
@@ -763,21 +756,21 @@ export function UniChatStats({
                 </div>
 
                 {/* KPI 4: Mensajes procesados */}
-                <div className="bg-cd bd rounded-2xl p-4 flex flex-col justify-between gap-2.5">
+                <div className="p-4 flex flex-col justify-between gap-2.5">
                   <div className="flex items-center justify-between text-xs tx-mu">
                     <span>Mensajes</span>
-                    <ShoppingBag size={15} className="tx-mu" />
+                    <ShoppingBag size={14} className="tx-mu" />
                   </div>
                   <div>
-                    <div className="text-xl sm:text-2xl font-bold mono tabular-nums">
+                    <div className="text-xl sm:text-2xl font-bold font-mono tabular-nums">
                       {kpis.totalMsgs}
                     </div>
-                    <div className="text-xs tx-mu mt-0.5 tabular-nums">
+                    <div className="text-xs tx-mu mt-0.5 font-mono tabular-nums">
                       {kpis.incomingMsgs} entrantes · {kpis.outgoingMsgs} salientes
                     </div>
                   </div>
-                  <div className="text-xs tx-mu tabular-nums">
-                    Promedio <span className="mono font-semibold text-[var(--tx)]">{kpis.avgMsgsPerChat.toFixed(1)}</span> msgs / chat
+                  <div className="text-xs tx-mu font-mono tabular-nums">
+                    Promedio <span className="font-semibold text-[var(--tx)]">{kpis.avgMsgsPerChat.toFixed(1)}</span> msgs / chat
                   </div>
                 </div>
               </section>
@@ -785,7 +778,7 @@ export function UniChatStats({
               {/* Cuerpo Analítico: Embudo Todd + Horarios Pico */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {/* Embudo de Bot Todd */}
-                <section className="bg-cd bd rounded-2xl p-5 flex flex-col justify-between gap-4">
+                <section className="bg-cd bd rounded-xl p-5 flex flex-col justify-between gap-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="flex items-center gap-2">
@@ -881,7 +874,7 @@ export function UniChatStats({
                 </section>
 
                 {/* Horarios Pico de Mensajes Entrantes */}
-                <section className="bg-cd bd rounded-2xl p-5 flex flex-col justify-between gap-4">
+                <section className="bg-cd bd rounded-xl p-5 flex flex-col justify-between gap-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="flex items-center gap-2">
@@ -1012,7 +1005,7 @@ export function UniChatStats({
               {/* Productos Consultados & Anuncios Meta Ads */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {/* Top Productos */}
-                <section className="bg-cd bd rounded-2xl p-5 space-y-3">
+                <section className="bg-cd bd rounded-xl p-5 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-2">
@@ -1085,7 +1078,7 @@ export function UniChatStats({
                 </section>
 
                 {/* Anuncios Meta Ads */}
-                <section className="bg-cd bd rounded-2xl p-5 space-y-3">
+                <section className="bg-cd bd rounded-xl p-5 space-y-3">
                   <div>
                     <div className="flex items-center gap-2">
                       <Megaphone size={16} style={{ color: 'var(--ac)' }} />

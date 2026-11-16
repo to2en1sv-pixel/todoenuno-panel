@@ -705,16 +705,17 @@ export function BodegaContenidoView({
 
   return (
     <div className="space-y-5">
-      {/* BANNER MULTI-NICHO (4 PÁGINAS DE FACEBOOK EN FB_PAGES) */}
-      <section className="bg-cd bd rounded-2xl p-4 sm:p-5 space-y-4">
+      {/* BANNER MULTI-NICHO (PÁGINAS DE FACEBOOK EN FB_PAGES) */}
+      <section className="bg-cd border border-[var(--bd)] rounded-xl p-4 sm:p-5 space-y-3.5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
-                <Film size={12} /> Distribuidora Multi-Nicho ({metaPages.filter((p) => p.has_token).length} Páginas FB)
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-semibold text-[var(--tx)]">
+                Distribuidora Multi-Nicho ({metaPages.filter((p) => p.has_token).length} páginas FB)
               </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-500/10 text-blue-600 border border-blue-500/20">
-                Solo Facebook activo · Rotación {config.cronStrategy === 'round_robin' ? 'Round-Robin' : 'Página principal'}
+              <span className="tx-mu">·</span>
+              <span className="tx-mu">
+                Rotación {config.cronStrategy === 'round_robin' ? 'Round-Robin' : 'Página principal'}
               </span>
             </div>
 
@@ -723,16 +724,16 @@ export function BodegaContenidoView({
               <button
                 type="button"
                 onClick={() => setPageFilter('all')}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${
+                className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
                   pageFilter === 'all'
-                    ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)]'
+                    ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)] font-semibold'
                     : 'bg-sf border-[var(--bd)] tx-mu hover:text-[var(--tx)]'
                 }`}
               >
-                Todas las páginas ({metrics.readyCount} listos)
+                Todas ({metrics.readyCount})
               </button>
               {metaPages.length === 0 ? (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
                   <AlertTriangle size={12} /> Sin páginas en fb_pages
                 </span>
               ) : (
@@ -746,18 +747,17 @@ export function BodegaContenidoView({
                       key={p.page_id}
                       type="button"
                       onClick={() => setPageFilter(selected ? 'all' : p.page_id)}
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
                         selected
-                          ? 'bg-blue-600 text-white border-blue-600'
+                          ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)] font-semibold'
                           : disabled
                             ? 'bg-sf border-[var(--bd)] tx-mu opacity-55'
-                            : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/25 hover:border-blue-500'
+                            : 'bg-sf border-[var(--bd)] text-[var(--tx)] hover:border-[var(--tx)]/40'
                       }`}
                     >
-                      <CheckCircle2 size={11} />
                       <span>{p.page_name}</span>
-                      {prof?.niche && <span className="opacity-75">· {prof.niche}</span>}
-                      <span className="mono opacity-80">({readyN})</span>
+                      {prof?.niche && <span className="opacity-70">· {prof.niche}</span>}
+                      <span className="font-mono tabular-nums opacity-75">({readyN})</span>
                     </button>
                   );
                 })
@@ -769,22 +769,22 @@ export function BodegaContenidoView({
             <button
               type="button"
               onClick={() => setShowConfigPanel((v) => !v)}
-              className="px-3 py-2 rounded-xl bg-sf bd text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-85 cursor-pointer"
+              className="px-3 py-2 rounded-lg bg-sf border border-[var(--bd)] text-xs font-medium inline-flex items-center gap-1.5 hover:border-[var(--tx)]/40 cursor-pointer"
             >
-              <Settings2 size={14} /> Configurar 4 Nichos & Cron
+              <Settings2 size={13} /> Nichos &amp; Cron
             </button>
 
             <button
               type="button"
               onClick={handleRunNextCron}
               disabled={runningNext || metrics.readyCount === 0}
-              className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-              title="Publica la siguiente pieza lista con stock disponible (respeta el filtro de página si está activo o rota por Round-Robin)"
+              className="px-3 py-2 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf disabled:opacity-50 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+              title="Publica la siguiente pieza lista con stock disponible"
             >
-              {runningNext ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+              {runningNext ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
               {pageFilter !== 'all'
-                ? `Publicar Siguiente (${pageMap.get(pageFilter)?.page_name || 'Página'})`
-                : 'Publicar Siguiente (Rotación)'}
+                ? `Publicar (${pageMap.get(pageFilter)?.page_name || 'Página'})`
+                : 'Publicar siguiente'}
             </button>
 
             <button
@@ -794,8 +794,7 @@ export function BodegaContenidoView({
                 setCreateTab('manual');
                 setShowCreateModal(true);
               }}
-              className="px-4 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-              style={{ background: 'var(--tx)', color: 'var(--cd)' }}
+              className="px-3.5 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
             >
               <Plus size={14} /> Nueva Pieza
             </button>
@@ -1050,66 +1049,56 @@ export function BodegaContenidoView({
       )}
 
       {/* KPIs DE BODEGA */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div className="bg-cd bd rounded-2xl p-4">
-          <div className="flex items-center justify-between text-xs tx-mu">
-            <span>Listos para distribuir</span>
-            <Clock size={15} className="text-indigo-500" />
-          </div>
-          <div className="text-2xl font-black mono mt-2">{metrics.readyCount}</div>
-          <div className="text-xs tx-mu mt-0.5">
+      <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)] overflow-hidden">
+        <div className="p-4">
+          <div className="text-[11px] font-medium tx-mu">Listos para distribuir</div>
+          <div className="text-xl font-bold font-mono tabular-nums mt-1">{metrics.readyCount}</div>
+          <div className="text-[11px] tx-mu mt-0.5">
             {metrics.pausedStockCount > 0
               ? `${metrics.pausedStockCount} pausados por stock 0`
               : 'Todos con stock válido'}
           </div>
         </div>
 
-        <div className="bg-cd bd rounded-2xl p-4">
-          <div className="flex items-center justify-between text-xs tx-mu">
-            <span>Publicados (FB / IG)</span>
-            <Send size={15} className="text-emerald-500" />
+        <div className="p-4">
+          <div className="text-[11px] font-medium tx-mu">Publicados (FB / IG)</div>
+          <div className="text-xl font-bold font-mono tabular-nums mt-1 text-emerald-600 dark:text-emerald-400">
+            {metrics.publishedCount}
           </div>
-          <div className="text-2xl font-black mono mt-2">{metrics.publishedCount}</div>
-          <div className="text-xs tx-mu mt-0.5">{metrics.publishedToday} publicados hoy</div>
+          <div className="text-[11px] tx-mu mt-0.5">{metrics.publishedToday} publicados hoy</div>
         </div>
 
-        <div className="bg-cd bd rounded-2xl p-4">
-          <div className="flex items-center justify-between text-xs tx-mu">
-            <span>Piezas Evergreen</span>
-            <RotateCcw size={15} className="text-amber-500" />
-          </div>
-          <div className="text-2xl font-black mono mt-2">{metrics.evergreenCount}</div>
-          <div className="text-xs tx-mu mt-0.5">Reciclables cada 45 días</div>
+        <div className="p-4">
+          <div className="text-[11px] font-medium tx-mu">Piezas Evergreen</div>
+          <div className="text-xl font-bold font-mono tabular-nums mt-1">{metrics.evergreenCount}</div>
+          <div className="text-[11px] tx-mu mt-0.5">Reciclables cada 45 días</div>
         </div>
 
         <Link
           to="/social-inbox"
-          className="bg-cd bd rounded-2xl p-4 hover:border-[var(--ac)] transition-colors flex flex-col justify-between"
+          className="p-4 hover:bg-sf/50 transition-colors flex flex-col justify-between"
         >
-          <div className="flex items-center justify-between text-xs tx-mu">
-            <span>Leads desde posts</span>
-            <MessageSquare size={15} className="text-sky-500" />
-          </div>
-          <div className="text-2xl font-black mono mt-2">{totalLinkedLeads}</div>
-          <div className="text-xs tx-mu mt-0.5">Comentarios en FB/IG</div>
+          <div className="text-[11px] font-medium tx-mu">Leads desde posts</div>
+          <div className="text-xl font-bold font-mono tabular-nums mt-1">{totalLinkedLeads}</div>
+          <div className="text-[11px] tx-mu mt-0.5">Comentarios en FB/IG</div>
         </Link>
       </section>
 
       {/* INVITACIÓN A IMPORTAR SI LA BODEGA ESTÁ VACÍA Y HAY EN COLA CLÁSICA */}
       {!loading && items.length === 0 && legacyItemsToImport.length > 0 && (
-        <div className="bg-cd bd rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-indigo-500/30">
+        <div className="bg-cd border border-[var(--bd)] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="text-xs">
             <strong className="text-sm block">
               Tienes {legacyItemsToImport.length} publicación(es) en tu Cola Clásica
             </strong>
             <span className="tx-mu">
-              Puedes importarlas a tu nueva Bodega con 1 clic para darles copys de Instagram y control anti-agotados.
+              Puedes importarlas a tu Bodega con 1 clic para control anti-agotados.
             </span>
           </div>
           <button
             type="button"
             onClick={handleImportLegacyQueue}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shrink-0"
+            className="px-3.5 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] text-xs font-semibold shrink-0 cursor-pointer"
           >
             Importar a Bodega ({legacyItemsToImport.length})
           </button>
@@ -1117,27 +1106,31 @@ export function BodegaContenidoView({
       )}
 
       {/* BARRA DE FILTROS POR PILAR Y ESTADO */}
-      <section className="bg-cd bd rounded-2xl p-4 space-y-3">
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+      <section className="bg-cd border border-[var(--bd)] rounded-xl p-3.5 space-y-3">
+        <div className="flex items-center gap-1 overflow-x-auto pb-1">
           <button
             type="button"
             onClick={() => setPilarFilter('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold border whitespace-nowrap ${
-              pilarFilter === 'all' ? 'bg-sf border-[var(--tx)] text-[var(--tx)]' : 'border-[var(--bd)] tx-mu'
+            className={`px-2.5 py-1 rounded-md text-xs font-medium border whitespace-nowrap cursor-pointer ${
+              pilarFilter === 'all'
+                ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)] font-semibold'
+                : 'border-[var(--bd)] bg-sf tx-mu hover:text-[var(--tx)]'
             }`}
           >
-            Todos los pilares ({items.length})
+            Todos ({items.length})
           </button>
           {CONTENT_PILARS.map((p) => (
             <button
               key={p.id}
               type="button"
               onClick={() => setPilarFilter(p.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold border whitespace-nowrap ${
-                pilarFilter === p.id ? 'bg-sf border-[var(--tx)] text-[var(--tx)]' : 'border-[var(--bd)] tx-mu'
+              className={`px-2.5 py-1 rounded-md text-xs font-medium border whitespace-nowrap cursor-pointer ${
+                pilarFilter === p.id
+                  ? 'bg-[var(--tx)] text-[var(--cd)] border-[var(--tx)] font-semibold'
+                  : 'border-[var(--bd)] bg-sf tx-mu hover:text-[var(--tx)]'
               }`}
             >
-              {p.emoji} {p.label}
+              {p.label}
             </button>
           ))}
         </div>
@@ -1146,7 +1139,7 @@ export function BodegaContenidoView({
           <select
             value={originFilter}
             onChange={(e) => setOriginFilter(e.target.value as any)}
-            className="px-3 py-2 rounded-xl bg-sf bd text-xs outline-none"
+            className="px-3 py-1.5 rounded-lg bg-sf border border-[var(--bd)] text-xs outline-none"
           >
             <option value="all">Origen: Todos</option>
             <option value="manual">Manual / Marca</option>
@@ -1156,7 +1149,7 @@ export function BodegaContenidoView({
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as any)}
-            className="px-3 py-2 rounded-xl bg-sf bd text-xs outline-none"
+            className="px-3 py-1.5 rounded-lg bg-sf border border-[var(--bd)] text-xs outline-none"
           >
             <option value="all">Estado: Todos</option>
             <option value="listo">Listos para publicar</option>
@@ -1172,7 +1165,7 @@ export function BodegaContenidoView({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar por título, SKU o copy..."
-              className="w-full bg-sf bd rounded-xl pl-8 pr-3 py-2 text-xs outline-none"
+              className="w-full bg-sf border border-[var(--bd)] rounded-lg pl-8 pr-3 py-1.5 text-xs outline-none focus:border-[var(--tx)]"
             />
           </div>
         </div>
@@ -1182,11 +1175,11 @@ export function BodegaContenidoView({
       {loading ? (
         <div className="py-12 text-center text-xs tx-mu">Cargando Bodega de Contenido...</div>
       ) : filteredItems.length === 0 ? (
-        <div className="bg-cd bd rounded-2xl p-12 text-center space-y-3">
-          <Layers size={32} className="mx-auto tx-mu" />
-          <div className="text-sm font-bold">Tu Bodega de Contenido está lista para llenarse</div>
+        <div className="bg-cd border border-[var(--bd)] rounded-xl p-12 text-center space-y-3">
+          <Layers size={28} className="mx-auto tx-mu" />
+          <div className="text-sm font-semibold">Tu Bodega de Contenido está lista</div>
           <p className="text-xs tx-mu max-w-md mx-auto">
-            Sube videos cortos, testimonios o fotos de productos, genera copys automáticos para Facebook e Instagram y publícalos sin miedo a pautar productos agotados.
+            Sube videos cortos o fotos de productos, genera copys automáticos y publícalos evitando SKUs agotados.
           </p>
           <button
             type="button"
@@ -1195,8 +1188,7 @@ export function BodegaContenidoView({
               setCreateTab('manual');
               setShowCreateModal(true);
             }}
-            className="px-4 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
-            style={{ background: 'var(--tx)', color: 'var(--cd)' }}
+            className="px-4 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
           >
             <Plus size={14} /> Agregar primera pieza
           </button>
@@ -1210,7 +1202,7 @@ export function BodegaContenidoView({
             const busy = publishingId === it.id;
 
             return (
-              <article key={it.id} className="bg-cd bd rounded-2xl overflow-hidden flex flex-col justify-between shadow-sm">
+              <article key={it.id} className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden flex flex-col justify-between">
                 <div>
                   {/* Preview multimedia */}
                   <div className="relative h-44 bg-sf border-b border-[var(--bd)] flex items-center justify-center overflow-hidden">
@@ -1227,32 +1219,27 @@ export function BodegaContenidoView({
                       )
                     ) : (
                       <div className="text-center tx-mu space-y-1">
-                        {it.mediaType === 'video' ? <Film size={26} className="mx-auto" /> : <ImageIcon size={26} className="mx-auto" />}
-                        <span className="text-[11px] block">Solo texto / sin archivo</span>
+                        {it.mediaType === 'video' ? <Film size={24} className="mx-auto" /> : <ImageIcon size={24} className="mx-auto" />}
+                        <span className="text-[11px] block">Sin archivo multimedia</span>
                       </div>
                     )}
 
                     <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/70 text-white backdrop-blur-sm">
-                        {pilarMeta.emoji} {pilarMeta.label}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-black/60 text-white backdrop-blur-sm">
-                        {it.mediaType === 'video' ? '🎬 Video' : '🖼️ Imagen'}
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-black/75 text-white">
+                        {pilarMeta.label} · {it.mediaType === 'video' ? 'Video' : 'Imagen'}
                       </span>
                     </div>
 
                     <div className="absolute top-2.5 right-2.5">
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase ${
                           it.status === 'publicado'
                             ? 'bg-emerald-600 text-white'
-                            : it.status === 'pausado_stock' || outOfStock
-                            ? 'bg-rose-600 text-white'
-                            : it.status === 'error'
+                            : it.status === 'pausado_stock' || outOfStock || it.status === 'error'
                             ? 'bg-rose-600 text-white'
                             : it.status === 'borrador'
-                            ? 'bg-zinc-600 text-white'
-                            : 'bg-indigo-600 text-white'
+                            ? 'bg-zinc-700 text-white'
+                            : 'bg-zinc-900 text-white'
                         }`}
                       >
                         {outOfStock && it.status !== 'publicado' ? 'Stock 0' : it.status}
@@ -1263,24 +1250,21 @@ export function BodegaContenidoView({
                   {/* Cuerpo */}
                   <div className="p-4 space-y-2.5">
                     <div className="flex items-start justify-between gap-2">
-                      <h3 className="text-sm font-black leading-snug line-clamp-2">{it.titulo}</h3>
+                      <h3 className="text-sm font-semibold leading-snug line-clamp-2 text-[var(--tx)]">{it.titulo}</h3>
                       {it.evergreen && (
-                        <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 font-bold">
-                          ♻️ Evergreen
+                        <span className="shrink-0 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                          Evergreen
                         </span>
                       )}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] tx-mu">
                       {getItemAssignedPageIds(it).map((pid) => {
                         const pg = pageMap.get(pid);
                         const prof = config.pageProfiles?.[pid];
                         return (
-                          <span
-                            key={pid}
-                            className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 border border-blue-500/20 font-bold text-[10px]"
-                          >
-                            📘 {pg?.page_name || pid}
+                          <span key={pid} className="font-medium text-[var(--tx)]">
+                            {pg?.page_name || pid}
                             {prof?.niche ? ` (${prof.niche})` : ''}
                           </span>
                         );
@@ -1288,16 +1272,14 @@ export function BodegaContenidoView({
 
                       {it.sku ? (
                         <span
-                          className={`px-2 py-0.5 rounded-md font-mono font-bold border ${
-                            outOfStock
-                              ? 'bg-rose-500/10 text-rose-600 border-rose-500/30'
-                              : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
+                          className={`font-mono tabular-nums font-medium ${
+                            outOfStock ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
                           }`}
                         >
-                          #{it.sku} {stockInfo ? `· ${stockInfo.stock_disponible} disp.` : ''}
+                          · #{it.sku} {stockInfo ? `(${stockInfo.stock_disponible} disp.)` : ''}
                         </span>
                       ) : (
-                        <span className="px-2 py-0.5 rounded-md bg-sf bd tx-mu">Contenido general / Marca</span>
+                        <span>· Contenido de marca</span>
                       )}
 
                       {it.publishResults?.fb_post_id && (
@@ -1305,19 +1287,19 @@ export function BodegaContenidoView({
                           href={`https://facebook.com/${it.publishResults.fb_post_id}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 font-bold text-[10px] hover:underline"
+                          className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium hover:underline"
                         >
                           <ExternalLink size={10} /> Ver post
                         </a>
                       )}
                     </div>
 
-                    <p className="text-[11px] tx-mu bg-sf bd rounded-xl p-2.5 line-clamp-3 whitespace-pre-wrap">
-                      {it.copies?.fb || it.copies?.ig || 'Sin copy redactado todavía — edita para generar con IA.'}
+                    <p className="text-xs tx-mu bg-sf border border-[var(--bd)] rounded-lg p-2.5 line-clamp-3 whitespace-pre-wrap">
+                      {it.copies?.fb || it.copies?.ig || 'Sin copy redactado — edita para generar con IA.'}
                     </p>
 
                     {it.publishResults?.error && (
-                      <p className="text-[11px] text-rose-600 bg-rose-500/10 border border-rose-500/20 rounded-lg px-2.5 py-1.5">
+                      <p className="text-[11px] text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-2.5 py-1.5">
                         {it.publishResults.error}
                       </p>
                     )}
@@ -1330,16 +1312,16 @@ export function BodegaContenidoView({
                     <button
                       type="button"
                       onClick={() => openEditModal(it)}
-                      className="px-2.5 py-1.5 rounded-lg bg-cd bd text-xs font-bold inline-flex items-center gap-1 hover:border-[var(--ac)] cursor-pointer"
+                      className="px-2.5 py-1.5 rounded-lg bg-cd border border-[var(--bd)] text-xs font-medium inline-flex items-center gap-1 hover:border-[var(--tx)]/40 cursor-pointer"
                     >
-                      <Edit3 size={12} /> Editar / IA
+                      <Edit3 size={12} /> Editar
                     </button>
 
                     {(it.status === 'publicado' || it.status === 'pausado_stock') && (
                       <button
                         type="button"
                         onClick={() => handleRecycle(it)}
-                        className="px-2.5 py-1.5 rounded-lg bg-cd bd text-xs font-bold inline-flex items-center gap-1 hover:border-amber-500 cursor-pointer"
+                        className="px-2.5 py-1.5 rounded-lg bg-cd border border-[var(--bd)] text-xs font-medium inline-flex items-center gap-1 hover:border-[var(--tx)]/40 cursor-pointer"
                         title="Regresar a Listo para distribuir"
                       >
                         <RotateCcw size={12} /> Reciclar
@@ -1349,7 +1331,7 @@ export function BodegaContenidoView({
                     <button
                       type="button"
                       onClick={() => handleDeleteItem(it.id)}
-                      className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                      className="p-1.5 rounded-lg tx-mu hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer"
                       title="Eliminar de Bodega"
                     >
                       <Trash2 size={13} />
@@ -1360,14 +1342,14 @@ export function BodegaContenidoView({
                     type="button"
                     disabled={busy || (outOfStock && config.autoSkipOutOfStock)}
                     onClick={() => handlePublishItem(it)}
-                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white text-xs font-black inline-flex items-center gap-1.5 cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 disabled:opacity-45 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                   >
-                    {busy ? <Loader2 size={13} className="animate-spin" /> : <Play size={12} />}
+                    {busy ? <Loader2 size={12} className="animate-spin" /> : <Play size={11} />}
                     {busy
                       ? 'Publicando...'
                       : it.targets?.instagram
                         ? 'Publicar FB/IG'
-                        : 'Publicar en FB'}
+                        : 'Publicar FB'}
                   </button>
                 </div>
               </article>

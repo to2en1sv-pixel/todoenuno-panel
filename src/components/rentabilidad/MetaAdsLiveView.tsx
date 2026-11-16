@@ -177,19 +177,19 @@ export function MetaAdsLiveView({ onSynced }: Props) {
   return (
     <div className="space-y-5">
       {/* CABECERA DE CONEXIÓN & SYNC */}
-      <section className="bg-cd bd rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <section className="bg-cd bd rounded-xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-sf text-[var(--tx)] border border-[var(--bd)]">
               <Zap size={12} /> Meta Marketing API · Cruce COD Real
             </span>
 
             {report?.connected ? (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                 <CheckCircle2 size={12} /> {report.accounts.filter((a) => a.active && a.has_token).length} Cuenta(s) Conectada(s)
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20">
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
                 <AlertTriangle size={12} />
                 {report?.status === 'missing_table'
                   ? 'Infraestructura lista · Falta ejecutar SQL en Supabase'
@@ -198,13 +198,13 @@ export function MetaAdsLiveView({ onSynced }: Props) {
             )}
 
             {report?.lastSyncedAt && (
-              <span className="text-[11px] tx-mu tabular-nums">
+              <span className="text-[11px] tx-mu font-mono tabular-nums">
                 Último sync: {fmtAgo(report.lastSyncedAt)}
               </span>
             )}
           </div>
           <p className="text-xs tx-mu">
-            Extrae gasto real, mensajes, CTR y frecuencia desde Meta Ads, alimenta <code className="mono">gastos_publicidad</code> y cruza contra pedidos <strong>entregados</strong> y stock en bodega.
+            Extrae gasto real, mensajes, CTR y frecuencia desde Meta Ads, alimenta <code className="font-mono">gastos_publicidad</code> y cruza contra pedidos <strong>entregados</strong> y stock en bodega.
           </p>
         </div>
 
@@ -213,7 +213,7 @@ export function MetaAdsLiveView({ onSynced }: Props) {
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
             aria-label="Rango de días Meta Ads"
-            className="px-3 py-2 rounded-xl bg-sf bd text-xs font-bold outline-none"
+            className="px-3 py-2 rounded-lg bg-sf bd text-xs font-medium outline-none"
           >
             <option value={1}>Hoy</option>
             <option value={7}>Últimos 7 días</option>
@@ -225,7 +225,7 @@ export function MetaAdsLiveView({ onSynced }: Props) {
             type="button"
             onClick={() => loadReport(days)}
             disabled={loading}
-            className="px-3 py-2 rounded-xl bg-sf bd text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+            className="px-3 py-2 rounded-lg bg-cd bd text-xs font-medium inline-flex items-center gap-1.5 hover:bg-sf transition-colors cursor-pointer"
           >
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             Refrescar
@@ -235,7 +235,7 @@ export function MetaAdsLiveView({ onSynced }: Props) {
             type="button"
             onClick={handleSyncNow}
             disabled={syncing}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+            className="px-3.5 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 disabled:opacity-50 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
           >
             {syncing ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />}
             {syncing ? 'Sincronizando...' : 'Sincronizar Meta Ads'}
@@ -257,23 +257,23 @@ export function MetaAdsLiveView({ onSynced }: Props) {
 
       {/* BANNER ONBOARDING CUANDO AÚN NO SE CARGAN LOS TOKENS */}
       {!loading && report && !report.connected && (
-        <section className="bg-cd bd rounded-2xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-amber-500/30">
+        <section className="bg-cd bd rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-amber-500/30">
           <div className="space-y-1.5 max-w-2xl">
-            <div className="text-sm font-bold flex items-center gap-2">
+            <div className="text-sm font-semibold flex items-center gap-2">
               <ShieldCheck size={16} className="text-amber-500" />
               Conexión segura preparada (sin tokens expuestos en el navegador)
             </div>
             <p className="text-xs tx-mu leading-relaxed">
               Cuando generes tu <strong>System User Token</strong> en Meta Business Suite con los permisos{' '}
-              <code className="mono">ads_read</code> y <code className="mono">read_insights</code>:
+              <code className="font-mono">ads_read</code> y <code className="font-mono">read_insights</code>:
               1) crea las tablas protegidas por RLS con el SQL del módulo Sistema, y 2) inserta tu{' '}
-              <code className="mono">ad_account_id</code> (<code className="mono">act_...</code>) y token directo en{' '}
-              <code className="mono">meta_ad_accounts</code>. Al instante este tablero empezará a sincronizar tus gastos y ROAS cobrado.
+              <code className="font-mono">ad_account_id</code> (<code className="font-mono">act_...</code>) y token directo en{' '}
+              <code className="font-mono">meta_ad_accounts</code>. Al instante este tablero empezará a sincronizar tus gastos y ROAS cobrado.
             </p>
           </div>
           <Link
             to="/sistema?tab=diagnostico"
-            className="px-4 py-2.5 rounded-xl bg-sf bd text-xs font-bold inline-flex items-center gap-1.5 hover:border-[var(--ac)] shrink-0"
+            className="px-3.5 py-2 rounded-lg bg-sf bd text-xs font-semibold inline-flex items-center gap-1.5 hover:border-[var(--tx)]/40 shrink-0"
           >
             Ver SQL y Monitor en Sistema <ExternalLink size={13} />
           </Link>
@@ -281,13 +281,13 @@ export function MetaAdsLiveView({ onSynced }: Props) {
       )}
 
       {/* KPIs EN VIVO */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div className="bg-cd bd rounded-2xl p-4">
+      <section className="bg-cd bd rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
+        <div className="p-4">
           <div className="flex items-center justify-between text-xs tx-mu">
             <span>Gasto Meta ({days}d)</span>
-            <TrendingUp size={15} className="text-indigo-500" />
+            <TrendingUp size={14} className="tx-mu" />
           </div>
-          <div className="text-2xl font-black mono mt-2">
+          <div className="text-2xl font-bold font-mono tabular-nums mt-2">
             {formatCurrency(report?.totals.spend || 0)}
           </div>
           <div className="text-xs tx-mu mt-0.5 tabular-nums">
@@ -295,48 +295,48 @@ export function MetaAdsLiveView({ onSynced }: Props) {
           </div>
         </div>
 
-        <div className="bg-cd bd rounded-2xl p-4">
+        <div className="p-4">
           <div className="flex items-center justify-between text-xs tx-mu">
             <span>Conversaciones Meta</span>
-            <MessageSquare size={15} className="text-sky-500" />
+            <MessageSquare size={14} className="tx-mu" />
           </div>
-          <div className="text-2xl font-black mono mt-2">
+          <div className="text-2xl font-bold font-mono tabular-nums mt-2">
             {formatNumber(report?.totals.conversations || 0)}
           </div>
-          <div className="text-xs tx-mu mt-0.5 tabular-nums">
+          <div className="text-xs tx-mu mt-0.5 font-mono tabular-nums">
             {report?.totals.costPerMsg !== null && report?.totals.costPerMsg !== undefined
               ? `${formatCurrency(report.totals.costPerMsg)} / conversación`
               : 'Sin mensajes medidos aún'}
           </div>
         </div>
 
-        <div className="bg-cd bd rounded-2xl p-4">
+        <div className="p-4">
           <div className="flex items-center justify-between text-xs tx-mu">
             <span>ROAS Cobrado Real</span>
-            <CheckCircle2 size={15} className="text-emerald-500" />
+            <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400" />
           </div>
-          <div className="text-2xl font-black mono mt-2">
+          <div className="text-2xl font-bold font-mono tabular-nums mt-2">
             {report?.totals.roasCobrado !== null && report?.totals.roasCobrado !== undefined
               ? `${report.totals.roasCobrado.toFixed(2)}x`
               : '—'}
           </div>
-          <div className="text-xs tx-mu mt-0.5 tabular-nums">
+          <div className="text-xs tx-mu mt-0.5 font-mono tabular-nums">
             {formatCurrency(report?.totals.deliveredSales || 0)} entregados ({report?.totals.deliveredOrders || 0} ped.)
           </div>
         </div>
 
-        <div className="bg-cd bd rounded-2xl p-4">
+        <div className="p-4">
           <div className="flex items-center justify-between text-xs tx-mu">
             <span>Alertas Stock / Fatiga</span>
             <AlertTriangle
-              size={15}
-              className={(report?.totals.stockAlerts || 0) + (report?.totals.fatigueAlerts || 0) > 0 ? 'text-rose-500' : 'tx-mu'}
+              size={14}
+              className={(report?.totals.stockAlerts || 0) + (report?.totals.fatigueAlerts || 0) > 0 ? 'text-rose-600 dark:text-rose-400' : 'tx-mu'}
             />
           </div>
-          <div className="text-2xl font-black mono mt-2">
+          <div className="text-2xl font-bold font-mono tabular-nums mt-2">
             {(report?.totals.stockAlerts || 0) + (report?.totals.fatigueAlerts || 0)}
           </div>
-          <div className="text-xs tx-mu mt-0.5 tabular-nums">
+          <div className="text-xs tx-mu mt-0.5 font-mono tabular-nums">
             {report?.totals.stockAlerts || 0} stock 0 · {report?.totals.fatigueAlerts || 0} fatiga creativa
           </div>
         </div>
@@ -344,32 +344,32 @@ export function MetaAdsLiveView({ onSynced }: Props) {
 
       {/* PANEL DE ALERTAS INTELIGENTES (PAUTA EN STOCK 0 O FATIGA) */}
       {alertAds.length > 0 && (
-        <section className="bg-cd bd rounded-2xl p-4 space-y-2.5 border-rose-500/30">
+        <section className="bg-cd bd rounded-xl p-4 space-y-2.5 border-rose-500/30">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-xs font-black uppercase text-rose-500 flex items-center gap-1.5">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
               <Flame size={14} /> Alertas de Fuga de Presupuesto ({alertAds.length})
             </h3>
-            <Link to="/cola" className="text-xs font-bold hover:underline" style={{ color: 'var(--ac)' }}>
+            <Link to="/cola" className="text-xs font-semibold hover:underline text-[var(--tx)]">
               Renovar creativos en Bodega →
             </Link>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
             {alertAds.map((a) => (
-              <div key={a.ad_id || a.ad_name} className="p-3 rounded-xl bg-sf bd flex items-start justify-between gap-3 text-xs">
+              <div key={a.ad_id || a.ad_name} className="p-3 rounded-lg bg-sf bd flex items-start justify-between gap-3 text-xs">
                 <div className="min-w-0">
-                  <div className="font-bold truncate">{a.ad_name}</div>
-                  <div className="text-[11px] tx-mu font-mono">
+                  <div className="font-semibold truncate">{a.ad_name}</div>
+                  <div className="text-[11px] tx-mu font-mono tabular-nums">
                     Código: {a.codigo_anuncio} · Gasto: {formatCurrency(a.spend)}
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1 shrink-0">
                   {a.stockAlert && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-500/15 text-rose-600 font-bold text-[10px]">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold text-[10px]">
                       <PackageX size={11} /> Stock 0 ({a.linkedSku})
                     </span>
                   )}
                   {a.fatigueAlert && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 text-amber-600 font-bold text-[10px]">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold text-[10px]">
                       <Flame size={11} /> Fatiga (Frec. {a.frequency}x)
                     </span>
                   )}
@@ -381,7 +381,7 @@ export function MetaAdsLiveView({ onSynced }: Props) {
       )}
 
       {/* TABLA DETALLADA POR ANUNCIO CRUZADO CON PEDIDOS REALES */}
-      <section className="bg-cd bd rounded-2xl overflow-hidden">
+      <section className="bg-cd bd rounded-xl overflow-hidden">
         <div className="px-5 py-4 border-b border-[var(--bd)] flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-bold">Rendimiento por Anuncio (Meta Ads × Entregas COD)</h3>
@@ -469,19 +469,19 @@ export function MetaAdsLiveView({ onSynced }: Props) {
                     </td>
                     <td className="px-4 py-3 text-center">
                       {a.stockAlert ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-600">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400">
                           Stock 0
                         </span>
                       ) : a.fatigueAlert ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-600">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400">
                           Fatiga
                         </span>
                       ) : a.roasCobrado !== null && a.roasCobrado >= 3 ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                           Escalando
                         </span>
                       ) : (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sf bd tx-mu">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-sf bd tx-mu">
                           Activo
                         </span>
                       )}

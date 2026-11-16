@@ -497,16 +497,16 @@ export function EventStreamViewer() {
     <div className="flex flex-col gap-5">
       {/* Banner de Estado de Integración SQL */}
       {!isRealDb && (
-        <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="bg-cd border border-amber-500/30 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-start gap-3">
-            <div className="p-2 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0">
-              <AlertTriangle size={18} />
+            <div className="p-2 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0">
+              <AlertTriangle size={17} />
             </div>
             <div>
-              <div className="font-bold text-sm text-[var(--tx)] flex items-center gap-2">
+              <div className="font-semibold text-sm text-[var(--tx)] flex items-center gap-2 flex-wrap">
                 Sprint 1: Schema OS y Event Store Listo
-                <span className="text-[10px] px-2 py-0.5 bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold rounded-full">
-                  Pendiente de ejecutar en Supabase
+                <span className="text-[10px] px-2 py-0.5 bg-amber-500/15 text-amber-700 dark:text-amber-300 font-mono font-semibold rounded">
+                  Pendiente en Supabase
                 </span>
               </div>
               <p className="text-xs text-[var(--mu)] mt-0.5">
@@ -516,52 +516,52 @@ export function EventStreamViewer() {
           </div>
           <button
             onClick={() => setShowSqlModal(true)}
-            className="w-full sm:w-auto px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-2 shadow-sm transition-colors shrink-0"
+            className="w-full sm:w-auto px-3.5 py-2 bg-[var(--tx)] text-[var(--cd)] font-semibold text-xs rounded-lg flex items-center justify-center gap-1.5 hover:opacity-90 transition-opacity shrink-0"
           >
-            <Code size={14} /> Ver SQL y Guía de Instalación
+            <Code size={13} /> Ver SQL
           </button>
         </div>
       )}
 
-      {/* KPI Cards del Event Store */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[var(--sf)] flex items-center justify-center text-[var(--ac)]">
-            <Activity size={20} />
+      {/* KPI Strip Unificada del Event Store */}
+      <div className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-[var(--bd)]">
+        <div className="p-4 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-sf border border-[var(--bd)] flex items-center justify-center tx-mu shrink-0">
+            <Activity size={17} />
           </div>
           <div>
-            <div className="text-[11px] tx-mu uppercase font-bold tracking-wider">Eventos en Buffer</div>
-            <div className="text-2xl font-black">{events.length}</div>
+            <div className="text-[11px] tx-mu font-medium">Eventos en Buffer</div>
+            <div className="text-2xl font-bold font-mono tabular-nums">{events.length}</div>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-            <Layers size={20} />
+        <div className="p-4 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+            <Layers size={17} />
           </div>
           <div>
-            <div className="text-[11px] tx-mu uppercase font-bold tracking-wider">Tipos de Eventos</div>
-            <div className="text-2xl font-black">{eventTypes.length}</div>
+            <div className="text-[11px] tx-mu font-medium">Tipos de Eventos</div>
+            <div className="text-2xl font-bold font-mono tabular-nums">{eventTypes.length}</div>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500">
-            <Radio size={20} />
+        <div className="p-4 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-sf border border-[var(--bd)] flex items-center justify-center tx-mu shrink-0">
+            <Radio size={17} />
           </div>
           <div>
-            <div className="text-[11px] tx-mu uppercase font-bold tracking-wider">Consumidores OS</div>
-            <div className="text-2xl font-black">{consumers.length}</div>
+            <div className="text-[11px] tx-mu font-medium">Consumidores OS</div>
+            <div className="text-2xl font-bold font-mono tabular-nums">{consumers.length}</div>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-cd border border-[var(--bd)] flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isRealDb ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'}`}>
-            <Database size={20} />
+        <div className="p-4 flex items-center gap-3">
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border ${isRealDb ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
+            <Database size={17} />
           </div>
-          <div>
-            <div className="text-[11px] tx-mu uppercase font-bold tracking-wider">Motor Activo</div>
-            <div className="text-xs font-bold truncate">
+          <div className="min-w-0">
+            <div className="text-[11px] tx-mu font-medium">Motor Activo</div>
+            <div className="text-xs font-semibold truncate">
               {isRealDb ? 'Supabase OS Real' : 'Simulador + In-Memory'}
             </div>
           </div>
@@ -569,17 +569,17 @@ export function EventStreamViewer() {
       </div>
 
       {/* Barra de Controles y Filtros */}
-      <div className="bg-cd border border-[var(--bd)] rounded-2xl p-4 flex flex-col gap-3">
+      <div className="bg-cd border border-[var(--bd)] rounded-xl p-4 flex flex-col gap-3">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-sf border border-[var(--bd)] rounded-xl text-xs font-semibold">
-              <span className={`w-2.5 h-2.5 rounded-full ${isPaused ? 'bg-amber-500' : 'bg-emerald-500 animate-pulse'}`} />
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-sf border border-[var(--bd)] rounded-lg text-xs font-medium">
+              <span className={`w-2 h-2 rounded-full ${isPaused ? 'bg-amber-500' : 'bg-emerald-500'}`} />
               <span>{isPaused ? 'Flujo Pausado' : 'Escuchando en Vivo'}</span>
             </div>
 
             <button
               onClick={() => setIsPaused(!isPaused)}
-              className="px-3 py-1.5 rounded-xl border border-[var(--bd)] bg-sf hover:bg-black/5 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+              className="px-3 py-1.5 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-xs font-medium flex items-center gap-1.5 transition-colors"
             >
               {isPaused ? <Play size={13} className="text-emerald-500" /> : <Pause size={13} className="text-amber-500" />}
               {isPaused ? 'Reanudar' : 'Pausar'}
@@ -587,7 +587,7 @@ export function EventStreamViewer() {
 
             <button
               onClick={() => loadData(true)}
-              className="p-1.5 rounded-xl border border-[var(--bd)] bg-sf hover:bg-black/5 text-xs transition-colors"
+              className="p-1.5 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-xs transition-colors"
               title="Recargar eventos"
             >
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -597,16 +597,16 @@ export function EventStreamViewer() {
           <div className="flex items-center gap-2 w-full lg:w-auto">
             <button
               onClick={() => setShowEmitModal(true)}
-              className="flex-1 lg:flex-none px-4 py-2 bg-[var(--tx)] text-[var(--cd)] rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity shadow-sm"
+              className="flex-1 lg:flex-none px-3.5 py-2 bg-[var(--tx)] text-[var(--cd)] rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 hover:opacity-90 transition-opacity"
             >
               <Send size={13} /> Emitir Evento de Prueba
             </button>
 
             <button
               onClick={() => setShowSqlModal(true)}
-              className="px-3 py-2 border border-[var(--bd)] rounded-xl text-xs font-bold flex items-center gap-1.5 hover:bg-sf transition-colors"
+              className="px-3 py-2 border border-[var(--bd)] bg-cd rounded-lg text-xs font-medium flex items-center gap-1.5 hover:bg-sf transition-colors"
             >
-              <Code size={14} /> SQL Sprint 1
+              <Code size={13} /> SQL Sprint 1
             </button>
           </div>
         </div>
@@ -616,24 +616,24 @@ export function EventStreamViewer() {
           <div className="flex items-center gap-1 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
             {[
               { id: 'all', label: 'Todos' },
-              { id: 'order', label: '📦 Pedidos' },
-              { id: 'chat', label: '💬 Chat' },
-              { id: 'lead', label: '🎯 Leads' },
-              { id: 'marketing', label: '📢 Marketing' },
-              { id: 'inventory', label: '🏷️ Inventario' },
-              { id: 'supplier', label: '🏢 Proveedores' },
-              { id: 'finance', label: '💰 Finanzas' },
-              { id: 'customer', label: '🛡️ DICOM' },
-              { id: 'ltv', label: '⚡ LTV' },
-              { id: 'system', label: '⚙️ Sistema' },
+              { id: 'order', label: 'Pedidos' },
+              { id: 'chat', label: 'Chat' },
+              { id: 'lead', label: 'Leads' },
+              { id: 'marketing', label: 'Marketing' },
+              { id: 'inventory', label: 'Inventario' },
+              { id: 'supplier', label: 'Proveedores' },
+              { id: 'finance', label: 'Finanzas' },
+              { id: 'customer', label: 'DICOM' },
+              { id: 'ltv', label: 'LTV' },
+              { id: 'system', label: 'Sistema' },
             ].map((d) => (
               <button
                 key={d.id}
                 onClick={() => setSelectedDomain(d.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+                className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
                   selectedDomain === d.id
-                    ? 'bg-[var(--tx)] text-[var(--cd)]'
-                    : 'text-[var(--mu)] hover:bg-sf'
+                    ? 'bg-[var(--tx)] text-[var(--cd)] font-semibold'
+                    : 'text-[var(--mu)] hover:bg-sf hover:text-[var(--tx)]'
                 }`}
               >
                 {d.label}
@@ -648,7 +648,7 @@ export function EventStreamViewer() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Buscar por cliente, SKU, teléfono o tipo de evento..."
-              className="w-full pl-9 pr-8 py-1.5 text-xs rounded-xl bg-sf border border-[var(--bd)] outline-none focus:border-[var(--ac)] transition-colors"
+              className="w-full pl-9 pr-8 py-1.5 text-xs rounded-lg bg-sf border border-[var(--bd)] outline-none focus:border-[var(--tx)] transition-colors"
             />
             {searchTerm && (
               <button
@@ -663,11 +663,11 @@ export function EventStreamViewer() {
       </div>
 
       {/* Lista Principal del Event Stream (Visor Vivo del Paso 5) */}
-      <div className="bg-cd border border-[var(--bd)] rounded-2xl overflow-hidden shadow-sm flex flex-col">
+      <div className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden flex flex-col">
         <div className="px-5 py-3 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
           <div className="flex items-center gap-2">
-            <Radio size={15} className="text-emerald-500 animate-pulse" />
-            <span className="text-xs font-bold uppercase tracking-wider text-[var(--tx)]">
+            <Radio size={14} className="text-emerald-500" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-[var(--tx)]">
               Event Stream Feed ({filteredEvents.length} eventos)
             </span>
           </div>
@@ -679,7 +679,7 @@ export function EventStreamViewer() {
         <div className="divide-y divide-[var(--bd)] max-h-[600px] overflow-y-auto font-sans">
           {filteredEvents.length === 0 ? (
             <div className="p-12 text-center flex flex-col items-center justify-center text-[var(--mu)]">
-              <Activity size={36} className="opacity-20 mb-2" />
+              <Activity size={32} className="opacity-20 mb-2" />
               <p className="text-sm font-semibold">No hay eventos que coincidan con los filtros</p>
               <p className="text-xs opacity-75 mt-1">
                 Prueba cambiando los filtros o emite un evento de prueba con el botón superior.
@@ -699,7 +699,7 @@ export function EventStreamViewer() {
                   <div className="flex items-start gap-3 min-w-0 flex-1">
                     {/* Timestamp estilo terminal */}
                     <div className="flex flex-col items-start shrink-0 min-w-[70px]">
-                      <span className="text-xs font-bold font-mono text-[var(--tx)]">
+                      <span className="text-xs font-semibold font-mono tabular-nums text-[var(--tx)]">
                         {formatTime(event.occurred_at)}
                       </span>
                       <span className="text-[10px] tx-mu">
@@ -709,7 +709,7 @@ export function EventStreamViewer() {
 
                     {/* Badge de Dominio */}
                     <div className="shrink-0">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${badge.bg}`}>
+                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase tracking-wider border ${badge.bg}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
                         {badge.label}
                       </span>
@@ -718,7 +718,7 @@ export function EventStreamViewer() {
                     {/* Nombre del evento y resumen del payload */}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-bold font-mono text-[var(--tx)] group-hover:text-[var(--ac)] transition-colors">
+                        <span className="text-sm font-semibold font-mono text-[var(--tx)] transition-colors">
                           {event.type}
                         </span>
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-sf border border-[var(--bd)] font-mono text-[var(--mu)]">
@@ -729,8 +729,8 @@ export function EventStreamViewer() {
                       {/* Resumen contextual según datos */}
                       <div className="text-xs text-[var(--mu)] mt-0.5 flex items-center gap-2 flex-wrap truncate">
                         {p.nombre_cliente && (
-                          <span className="font-semibold text-[var(--tx)]">
-                            👤 {p.nombre_cliente}
+                          <span className="font-medium text-[var(--tx)]">
+                            {p.nombre_cliente}
                           </span>
                         )}
                         {p.total !== undefined && (
@@ -786,11 +786,11 @@ export function EventStreamViewer() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl flex flex-col"
+            className="w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] flex flex-col"
           >
             <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
               <div className="flex items-center gap-2">
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border ${getDomainBadge(selectedEvent.type).bg}`}>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-mono font-semibold border ${getDomainBadge(selectedEvent.type).bg}`}>
                   {selectedEvent.type}
                 </span>
                 <span className="text-xs font-mono tx-mu">
@@ -869,7 +869,7 @@ export function EventStreamViewer() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+            className="w-full max-w-lg rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] overflow-hidden"
           >
             <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
               <div className="flex items-center gap-2">
@@ -997,7 +997,7 @@ export function EventStreamViewer() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl flex flex-col"
+            className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] flex flex-col"
           >
             <div className="p-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
               <div className="flex items-center gap-2">

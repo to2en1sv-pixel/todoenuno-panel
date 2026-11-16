@@ -718,90 +718,54 @@ export function SistemaPage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-5 pb-12">
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-16">
       {/* ENCABEZADO GENERAL */}
-      <section className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-cd p-5 rounded-2xl bd gap-4">
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <Server size={20} style={{ color: 'var(--ac)' }} className="shrink-0" />
-            <h1 className="text-lg sm:text-xl font-bold tracking-tight">
-              Sistema, Plantillas & Diagnóstico
-            </h1>
-          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--tx)]">
+            Sistema, Plantillas &amp; Diagnóstico
+          </h1>
           <p className="text-xs tx-mu mt-1">
-            Personaliza los mensajes WhatsApp de Pedidos/Repartidor, monitorea tablas, crons y eventos del sistema.
+            Plantillas WhatsApp · Couriers y PIN QR · Reglas Bot Todd · Salud de tablas, Meta y Crons
           </p>
         </div>
-
-        {/* Selector de Pestañas */}
-        <div className="flex items-center p-1 bg-sf rounded-xl bd w-full lg:w-auto overflow-x-auto">
-          <button
-            type="button"
-            onClick={() => handleTabChange('plantillas')}
-            className={`flex-1 lg:flex-none px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'plantillas' ? 'bg-cd bd' : 'tx-mu hover:text-[var(--tx)]'
-            }`}
+        <div className="flex items-center gap-2 shrink-0">
+          <Link
+            to="/repartidor"
+            className="px-3 py-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
           >
-            <MessageSquare size={14} style={{ color: activeTab === 'plantillas' ? 'var(--ac)' : undefined }} />
-            Plantillas WhatsApp
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleTabChange('couriers')}
-            className={`flex-1 lg:flex-none px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'couriers' ? 'bg-cd bd' : 'tx-mu hover:text-[var(--tx)]'
-            }`}
-          >
-            <Truck size={14} style={{ color: activeTab === 'couriers' ? 'var(--ac)' : undefined }} />
-            Couriers & Envíos
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleTabChange('todd')}
-            className={`flex-1 lg:flex-none px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'todd' ? 'bg-cd bd' : 'tx-mu hover:text-[var(--tx)]'
-            }`}
-          >
-            <Bot size={14} style={{ color: activeTab === 'todd' ? 'var(--ac)' : undefined }} />
-            Bot Todd
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleTabChange('diagnostico')}
-            className={`flex-1 lg:flex-none px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'diagnostico' ? 'bg-cd bd' : 'tx-mu hover:text-[var(--tx)]'
-            }`}
-          >
-            <Activity size={14} />
-            Salud & Crons
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleTabChange('stream')}
-            className={`flex-1 lg:flex-none px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'stream' ? 'bg-cd bd' : 'tx-mu hover:text-[var(--tx)]'
-            }`}
-          >
-            <Radio size={14} style={{ color: activeTab === 'stream' ? 'var(--ok)' : undefined }} />
-            Event Stream
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleTabChange('architecture')}
-            className={`flex-1 lg:flex-none px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'architecture' ? 'bg-cd bd' : 'tx-mu hover:text-[var(--tx)]'
-            }`}
-          >
-            <Layers size={14} />
-            Arquitectura
-          </button>
+            Portal Repartidor <ExternalLink size={12} className="tx-mu" />
+          </Link>
         </div>
-      </section>
+      </header>
+
+      {/* Selector de Pestañas Underline */}
+      <nav className="flex items-center gap-6 border-b border-[var(--bd)] overflow-x-auto">
+        {(
+          [
+            { id: 'plantillas', label: 'Plantillas WhatsApp', icon: MessageSquare },
+            { id: 'couriers', label: 'Couriers & Envíos', icon: Truck },
+            { id: 'todd', label: 'Bot Todd', icon: Bot },
+            { id: 'diagnostico', label: 'Salud & Crons', icon: Activity },
+            { id: 'stream', label: 'Event Stream', icon: Radio },
+            { id: 'architecture', label: 'Arquitectura', icon: Layers },
+          ] as const
+        ).map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => handleTabChange(id)}
+            className={`pb-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap -mb-px inline-flex items-center gap-1.5 cursor-pointer ${
+              activeTab === id
+                ? 'border-[var(--tx)] text-[var(--tx)] font-semibold'
+                : 'border-transparent tx-mu hover:text-[var(--tx)]'
+            }`}
+          >
+            <Icon size={13} />
+            {label}
+          </button>
+        ))}
+      </nav>
 
       {/* ================================================================== */}
       {/* PESTAÑA 1: EDITOR DE PLANTILLAS WHATSAPP (PEDIDOS & REPARTIDOR)   */}
@@ -822,7 +786,7 @@ export function SistemaPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
             {/* Lista de plantillas */}
-            <aside className="lg:col-span-4 bg-cd bd rounded-2xl p-4 flex flex-col gap-3">
+            <aside className="lg:col-span-4 bg-cd bd rounded-xl p-4 flex flex-col gap-3">
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <h2 className="text-sm font-semibold">Plantillas registradas</h2>
@@ -833,8 +797,7 @@ export function SistemaPage() {
                 <button
                   type="button"
                   onClick={handleAddTemplate}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer shrink-0"
-                  style={{ background: 'var(--tx)', color: 'var(--cd)' }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[var(--tx)] text-[var(--cd)] cursor-pointer shrink-0 hover:opacity-90"
                 >
                   <Plus size={13} />
                   Nueva
@@ -844,7 +807,7 @@ export function SistemaPage() {
               {loadingTemplates ? (
                 <div className="py-8 text-center text-xs tx-mu">Cargando plantillas...</div>
               ) : (
-                <div className="flex flex-col gap-2">
+                <div className="border border-[var(--bd)] rounded-xl divide-y divide-[var(--bd)] overflow-hidden">
                   {templates.map((tpl) => {
                     const active = tpl.id === selectedTemplate?.id;
                     return (
@@ -855,20 +818,21 @@ export function SistemaPage() {
                           setSelectedTplId(tpl.id);
                           setConfirmDeleteTplId(null);
                         }}
-                        className={`text-left p-3 rounded-xl bd transition-colors cursor-pointer ${
-                          active ? 'bg-sf border-[var(--ac)]' : 'bg-cd hover:bg-sf/60'
+                        className={`w-full text-left p-3 transition-colors cursor-pointer ${
+                          active ? 'bg-sf font-semibold' : 'bg-cd hover:bg-sf/60'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-semibold truncate">{tpl.titulo}</span>
                           <span
-                            className="text-[11px] font-medium shrink-0"
-                            style={{ color: tpl.activo ? 'var(--ok)' : 'var(--mu)' }}
+                            className={`text-[11px] font-medium shrink-0 ${
+                              tpl.activo ? 'text-emerald-600 dark:text-emerald-400' : 'tx-mu'
+                            }`}
                           >
                             {tpl.activo ? 'Activa' : 'Pausada'}
                           </span>
                         </div>
-                        <div className="text-[11px] tx-mu mt-1 truncate">
+                        <div className="text-[11px] tx-mu mt-0.5 truncate">
                           {tpl.categoria === 'repartidor'
                             ? 'Uso: Panel Repartidor'
                             : 'Uso: Modal Pedidos'}
@@ -882,15 +846,15 @@ export function SistemaPage() {
               )}
 
               <div className="pt-2 border-t border-[var(--bd)] text-[11px] tx-mu flex items-center justify-between">
-                <span>Los cambios se reflejan al instante en:</span>
-                <Link to="/pedidos" className="font-semibold hover:underline" style={{ color: 'var(--ac)' }}>
+                <span>Reflejo inmediato en:</span>
+                <Link to="/pedidos" className="font-semibold text-[var(--tx)] hover:underline">
                   Pedidos →
                 </Link>
               </div>
             </aside>
 
             {/* Editor + Vista Previa */}
-            <div className="lg:col-span-8 bg-cd bd rounded-2xl p-5 flex flex-col gap-4">
+            <div className="lg:col-span-8 bg-cd bd rounded-xl p-5 flex flex-col gap-4">
               {!selectedTemplate ? (
                 <div className="py-10 text-center text-xs tx-mu">
                   Selecciona una plantilla de la izquierda para editarla.
@@ -1135,17 +1099,17 @@ export function SistemaPage() {
           {/* Columna izquierda: Tablas reales + Crons */}
           <div className="lg:col-span-2 flex flex-col gap-4">
             {/* Chequeo en vivo de tablas Supabase */}
-            <section className="bg-cd bd rounded-2xl p-5">
+            <section className="bg-cd bd rounded-xl p-5">
               <div className="flex items-center justify-between gap-2 mb-4">
                 <div className="flex items-center gap-2">
-                  <Database size={16} style={{ color: 'var(--ac)' }} />
+                  <Database size={16} className="tx-mu" />
                   <h2 className="text-sm font-semibold">Diagnóstico en Vivo de Tablas Supabase</h2>
                 </div>
                 <button
                   type="button"
                   onClick={runSystemHealthCheck}
                   disabled={checkingTables}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sf bd text-xs font-medium cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sf bd text-xs font-medium cursor-pointer disabled:opacity-50"
                 >
                   <RefreshCw size={13} className={checkingTables ? 'animate-spin' : ''} />
                   {checkingTables ? 'Verificando...' : 'Ejecutar chequeo'}
@@ -1160,23 +1124,20 @@ export function SistemaPage() {
                   >
                     <div className="min-w-0">
                       <div className="text-xs font-semibold truncate">{item.label}</div>
-                      <div className="text-[11px] tx-mu mono truncate">
+                      <div className="text-[11px] tx-mu font-mono tabular-nums truncate">
                         {item.table} · {item.ms} ms
                       </div>
                     </div>
                     <div className="text-right shrink-0">
                       {item.ok ? (
                         <>
-                          <div
-                            className="text-xs font-bold mono tabular-nums"
-                            style={{ color: 'var(--ok)' }}
-                          >
+                          <div className="text-xs font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
                             {item.count?.toLocaleString('en-US')} reg.
                           </div>
                           <div className="text-[10px] tx-mu">Operativa</div>
                         </>
                       ) : (
-                        <div className="text-xs font-semibold" style={{ color: 'var(--er)' }}>
+                        <div className="text-xs font-semibold text-rose-600 dark:text-rose-400">
                           Error
                         </div>
                       )}
@@ -1187,7 +1148,7 @@ export function SistemaPage() {
             </section>
 
             {/* Tareas programadas cron-job.org */}
-            <section className="bg-cd bd rounded-2xl p-5">
+            <section className="bg-cd bd rounded-xl p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <Activity size={16} className="tx-mu" />
@@ -1197,7 +1158,7 @@ export function SistemaPage() {
                   type="button"
                   onClick={checkCrons}
                   disabled={isCheckingCrons}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sf bd text-xs font-medium rounded-xl disabled:opacity-50 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sf bd text-xs font-medium rounded-lg disabled:opacity-50 cursor-pointer"
                 >
                   <RefreshCw size={13} className={isCheckingCrons ? 'animate-spin' : ''} />
                   {isCheckingCrons ? 'Consultando...' : 'Refrescar'}
@@ -1205,10 +1166,7 @@ export function SistemaPage() {
               </div>
 
               {cronError && (
-                <div
-                  className="p-3 bg-sf bd text-xs rounded-xl mb-4"
-                  style={{ borderColor: 'var(--er)', color: 'var(--er)' }}
-                >
+                <div className="p-3 bg-sf border border-rose-500/40 text-rose-600 dark:text-rose-400 text-xs rounded-lg mb-4">
                   {cronError}
                 </div>
               )}
@@ -1223,17 +1181,18 @@ export function SistemaPage() {
                     >
                       <div className="min-w-0">
                         <div className="font-semibold text-xs sm:text-sm truncate">{job.title}</div>
-                        <div className="text-[11px] tx-mu mono truncate mt-0.5">{job.url}</div>
+                        <div className="text-[11px] tx-mu font-mono truncate mt-0.5">{job.url}</div>
                       </div>
                       <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between gap-1 shrink-0">
                         <span
-                          className="text-xs font-semibold flex items-center gap-1"
-                          style={{ color: ok ? 'var(--ok)' : 'var(--er)' }}
+                          className={`text-xs font-semibold flex items-center gap-1 ${
+                            ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                          }`}
                         >
                           {ok ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
                           {ok ? 'Éxito' : job.lastStatusText}
                         </span>
-                        <div className="text-[11px] tx-mu flex items-center gap-1 tabular-nums">
+                        <div className="text-[11px] tx-mu flex items-center gap-1 font-mono tabular-nums">
                           <Clock size={11} /> {fmtTime(job.lastExecution)}
                         </div>
                       </div>
@@ -1250,7 +1209,7 @@ export function SistemaPage() {
             </section>
 
             {/* Infraestructura Segura Meta (Páginas + Ads) */}
-            <section className="bg-cd bd rounded-2xl p-5 flex flex-col gap-4">
+            <section className="bg-cd bd rounded-xl p-5 flex flex-col gap-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2">
@@ -1445,11 +1404,11 @@ export function SistemaPage() {
             </section>
 
             {/* Bot Telegram Compras & Consultas (Vercel + GPT-4o-mini) */}
-            <section className="bg-cd bd rounded-2xl p-5 flex flex-col gap-4">
+            <section className="bg-cd bd rounded-xl p-5 flex flex-col gap-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2">
-                    <Send size={16} style={{ color: 'var(--ac)' }} />
+                    <Send size={16} className="tx-mu" />
                     <h2 className="text-sm font-semibold">Bot Telegram Operaciones & Brief (Vercel + GPT)</h2>
                   </div>
                   <p className="text-[11px] tx-mu mt-0.5">
@@ -1461,7 +1420,7 @@ export function SistemaPage() {
                     type="button"
                     onClick={checkTelegramBot}
                     disabled={checkingTelegram}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sf bd text-xs font-medium rounded-xl disabled:opacity-50 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sf bd text-xs font-medium rounded-lg disabled:opacity-50 cursor-pointer"
                   >
                     <RefreshCw size={13} className={checkingTelegram ? 'animate-spin' : ''} />
                     Verificar
@@ -1470,8 +1429,7 @@ export function SistemaPage() {
                     type="button"
                     onClick={handleRegisterTelegramWebhook}
                     disabled={registeringTelegram}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl disabled:opacity-50 cursor-pointer"
-                    style={{ background: 'var(--tx)', color: 'var(--cd)' }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-[var(--tx)] text-[var(--cd)] disabled:opacity-50 cursor-pointer hover:opacity-90"
                   >
                     {registeringTelegram ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
                     Conectar Webhook
@@ -1556,16 +1514,16 @@ export function SistemaPage() {
 
           {/* Columna derecha: Bot Todd & Seguridad */}
           <div className="lg:col-span-1 flex flex-col gap-4">
-            <section className="bg-cd bd rounded-2xl p-5 flex flex-col gap-3">
+            <section className="bg-cd bd rounded-xl p-5 flex flex-col gap-3">
               <div className="flex items-center gap-2">
-                <Bot size={16} style={{ color: 'var(--ac)' }} />
+                <Bot size={16} className="tx-mu" />
                 <h2 className="text-sm font-semibold">Integraciones & Endpoints</h2>
               </div>
 
               <div className="p-3.5 bg-sf bd rounded-xl flex items-center justify-between gap-2">
                 <div>
                   <div className="text-xs font-semibold">Supabase Catálogo</div>
-                  <div className="text-[11px] tx-mu mt-0.5">
+                  <div className="text-[11px] tx-mu mt-0.5 font-mono tabular-nums">
                     {productos.data?.length ?? 0} productos activos
                   </div>
                 </div>
@@ -1581,7 +1539,7 @@ export function SistemaPage() {
               <div className="p-3.5 bg-sf bd rounded-xl flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="text-xs font-semibold">Bot Todd v2 Bridge</div>
-                  <div className="text-[11px] tx-mu mono truncate mt-0.5">/api/todd-bridge</div>
+                  <div className="text-[11px] tx-mu font-mono truncate mt-0.5">/api/todd-bridge</div>
                 </div>
                 {toddBridgeOk ? (
                   <span
@@ -1608,9 +1566,9 @@ export function SistemaPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl p-5 bg-cd bd">
-              <h3 className="font-semibold text-sm mb-2 flex items-center gap-2" style={{ color: 'var(--ac)' }}>
-                <ShieldCheck size={16} /> Monitoreo Seguro
+            <section className="rounded-xl p-5 bg-cd bd">
+              <h3 className="font-semibold text-sm mb-2 flex items-center gap-2 text-[var(--tx)]">
+                <ShieldCheck size={15} className="tx-mu" /> Monitoreo Seguro
               </h3>
               <p className="text-xs tx-mu leading-relaxed">
                 Las consultas de diagnóstico son de solo lectura: verifican conectividad, tiempos de respuesta y estado de crons sin disparar envíos ni modificar pedidos.
@@ -1630,9 +1588,9 @@ export function SistemaPage() {
       {/* ================================================================== */}
       {activeTab === 'architecture' && (
         <div className="flex flex-col gap-4">
-          <section className="bg-cd bd rounded-2xl p-6">
+          <section className="bg-cd bd rounded-xl p-6">
             <h2 className="text-base font-bold flex items-center gap-2 mb-2">
-              <Sparkles size={18} style={{ color: 'var(--ac)' }} />
+              <Sparkles size={16} className="tx-mu" />
               Arquitectura TODOENUNO OS — Estado Actual
             </h2>
             <p className="text-xs tx-mu leading-relaxed">
@@ -1673,7 +1631,7 @@ export function SistemaPage() {
           </section>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <section className="bg-cd bd rounded-2xl p-5">
+            <section className="bg-cd bd rounded-xl p-5">
               <h3 className="text-xs font-semibold tx-mu uppercase tracking-wider mb-3 flex items-center gap-2">
                 <Layers size={14} /> Capacidades en Producción
               </h3>
@@ -1687,7 +1645,7 @@ export function SistemaPage() {
                 ].map((row) => (
                   <div key={row.name} className="py-2.5 first:pt-1 last:pb-1 flex items-center justify-between gap-2">
                     <span className="font-medium">{row.name}</span>
-                    <span className="font-semibold shrink-0" style={{ color: 'var(--ok)' }}>
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
                       {row.status}
                     </span>
                   </div>
@@ -1695,7 +1653,7 @@ export function SistemaPage() {
               </div>
             </section>
 
-            <section className="bg-cd bd rounded-2xl p-5 flex flex-col justify-between gap-4">
+            <section className="bg-cd bd rounded-xl p-5 flex flex-col justify-between gap-4">
               <div>
                 <h3 className="text-xs font-semibold tx-mu uppercase tracking-wider mb-3 flex items-center gap-2">
                   <Code size={14} /> Archivos y Recursos Clave
@@ -1719,15 +1677,14 @@ export function SistemaPage() {
               <div className="pt-3 border-t border-[var(--bd)] flex flex-wrap justify-end gap-2">
                 <Link
                   to="/docs"
-                  className="px-3.5 py-2 bg-sf bd text-xs font-semibold rounded-xl hover:border-[var(--ac)]"
+                  className="px-3.5 py-2 bg-sf bd text-xs font-medium rounded-lg hover:border-[var(--tx)]"
                 >
                   Abrir Docs & Roadmap
                 </Link>
                 <button
                   type="button"
                   onClick={() => handleTabChange('plantillas')}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer"
-                  style={{ background: 'var(--tx)', color: 'var(--cd)' }}
+                  className="px-4 py-2 text-xs font-semibold rounded-lg bg-[var(--tx)] text-[var(--cd)] flex items-center gap-1.5 cursor-pointer hover:opacity-90"
                 >
                   <MessageSquare size={14} />
                   Editar Plantillas WhatsApp
@@ -1757,10 +1714,10 @@ export function SistemaPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
             {/* Agregar nuevo courier */}
-            <section className="lg:col-span-4 bg-cd bd rounded-2xl p-5 flex flex-col gap-3">
+            <section className="lg:col-span-4 bg-cd bd rounded-xl p-5 flex flex-col gap-3">
               <div>
                 <h2 className="text-sm font-bold flex items-center gap-2">
-                  <Truck size={16} style={{ color: 'var(--ac)' }} />
+                  <Truck size={15} className="tx-mu" />
                   Agregar Transportista / Courier
                 </h2>
                 <p className="text-[11px] tx-mu mt-0.5">
@@ -1929,11 +1886,11 @@ export function SistemaPage() {
             </section>
 
             {/* Lista editable de couriers */}
-            <section className="lg:col-span-8 bg-cd bd rounded-2xl p-5 flex flex-col gap-4">
+            <section className="lg:col-span-8 bg-cd bd rounded-xl p-5 flex flex-col gap-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[var(--bd)]">
                 <div>
                   <h2 className="text-sm font-bold">
-                    Couriers Registrados ({couriersList.filter((c) => c.activo).length} activos)
+                    Couriers Registrados (<span className="font-mono tabular-nums">{couriersList.filter((c) => c.activo).length}</span> activos)
                   </h2>
                   <p className="text-[11px] tx-mu">
                     Origen: {courierSource === 'supabase' ? 'Nube (Supabase)' : 'Respaldo local'} · Asigna PIN numérico a cada motorista para entrar por QR.
@@ -1944,7 +1901,7 @@ export function SistemaPage() {
                     type="button"
                     onClick={handleResetCouriers}
                     disabled={savingCouriers}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sf bd rounded-xl text-xs font-semibold cursor-pointer hover:border-[var(--ac)]"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sf bd rounded-lg text-xs font-medium cursor-pointer hover:border-[var(--tx)]"
                   >
                     <RotateCcw size={13} /> Restaurar base
                   </button>
@@ -1952,8 +1909,7 @@ export function SistemaPage() {
                     type="button"
                     onClick={() => persistCouriersList(couriersList)}
                     disabled={savingCouriers || !hasUnsavedCouriers}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-45"
-                    style={{ background: 'var(--ac)', color: '#fff' }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-[var(--tx)] text-[var(--cd)] cursor-pointer disabled:opacity-45 hover:opacity-90"
                   >
                     {savingCouriers ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
                     {hasUnsavedCouriers ? 'Guardar cambios' : 'Guardado'}

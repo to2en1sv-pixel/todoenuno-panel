@@ -156,7 +156,7 @@ export function SistemaToddConfig() {
 
   if (loading) {
     return (
-      <div className="bg-cd bd rounded-2xl p-8 flex items-center justify-center gap-2 text-xs tx-mu">
+      <div className="bg-cd bd rounded-xl p-8 flex items-center justify-center gap-2 text-xs tx-mu">
         <Loader2 size={15} className="animate-spin" />
         Cargando reglas operativas de Bot Todd...
       </div>
@@ -181,11 +181,11 @@ export function SistemaToddConfig() {
         {/* COLUMNA IZQUIERDA (8/12): 4 BLOQUES EDITABLES */}
         <div className="lg:col-span-8 flex flex-col gap-4">
           {/* 1. TIEMPOS Y COBERTURA DE ENTREGA */}
-          <section className="bg-cd bd rounded-2xl p-5 space-y-4">
+          <section className="bg-cd bd rounded-xl p-5 space-y-4">
             <div className="flex items-start justify-between gap-3 pb-3 border-b border-[var(--bd)]">
               <div>
                 <h2 className="text-sm font-bold flex items-center gap-2">
-                  <Clock size={16} style={{ color: 'var(--ac)' }} />
+                  <Clock size={15} className="tx-mu" />
                   Tiempos de entrega y horarios
                 </h2>
                 <p className="text-xs tx-mu mt-0.5">
@@ -266,7 +266,7 @@ export function SistemaToddConfig() {
           </section>
 
           {/* 2. EMPRESAS DE ENVÍO / COURIERS */}
-          <section className="bg-cd bd rounded-2xl p-5 space-y-4">
+          <section className="bg-cd bd rounded-xl p-5 space-y-4">
             <div className="pb-3 border-b border-[var(--bd)]">
               <h2 className="text-sm font-bold flex items-center gap-2">
                 <Truck size={16} style={{ color: 'var(--ac)' }} />
@@ -358,7 +358,7 @@ export function SistemaToddConfig() {
           </section>
 
           {/* 3. MODO DÍA FESTIVO / AVISO TEMPORAL */}
-          <section className="bg-cd bd rounded-2xl p-5 space-y-4">
+          <section className="bg-cd bd rounded-xl p-5 space-y-4">
             <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-[var(--bd)]">
               <div>
                 <h2 className="text-sm font-bold flex items-center gap-2">
@@ -447,7 +447,7 @@ export function SistemaToddConfig() {
           </section>
 
           {/* 4. PAGOS, GARANTÍA Y REGLAS EXTRA */}
-          <section className="bg-cd bd rounded-2xl p-5 space-y-4">
+          <section className="bg-cd bd rounded-xl p-5 space-y-4">
             <div className="pb-3 border-b border-[var(--bd)]">
               <h2 className="text-sm font-bold flex items-center gap-2">
                 <CreditCard size={16} style={{ color: 'var(--ac)' }} />
@@ -544,7 +544,7 @@ export function SistemaToddConfig() {
 
         {/* COLUMNA DERECHA (4/12): VISTA PREVIA EN VIVO Y ACCIONES */}
         <aside className="lg:col-span-4 flex flex-col gap-4 lg:sticky lg:top-6">
-          <section className="bg-cd bd rounded-2xl p-5 space-y-4">
+          <section className="bg-cd bd rounded-xl p-5 space-y-4">
             <div className="flex items-center justify-between gap-2 pb-3 border-b border-[var(--bd)]">
               <div className="flex items-center gap-2">
                 <Sparkles size={15} style={{ color: 'var(--ok)' }} />
@@ -577,8 +577,7 @@ export function SistemaToddConfig() {
                 type="button"
                 disabled={saving}
                 onClick={handleSave}
-                className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                style={{ background: 'var(--tx)', color: 'var(--cd)' }}
+                className="w-full py-2.5 px-4 rounded-lg text-xs font-semibold bg-[var(--tx)] text-[var(--cd)] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 hover:opacity-90"
               >
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                 {saving
@@ -591,7 +590,7 @@ export function SistemaToddConfig() {
               <button
                 type="button"
                 onClick={handleResetDefaults}
-                className="w-full py-2 px-3 rounded-xl bg-sf bd text-xs font-medium flex items-center justify-center gap-1.5 hover:border-[var(--ac)] cursor-pointer"
+                className="w-full py-2 px-3 rounded-lg bg-sf bd text-xs font-medium flex items-center justify-center gap-1.5 hover:border-[var(--tx)] cursor-pointer"
               >
                 <RotateCcw size={13} />
                 Restaurar valores por defecto
@@ -599,7 +598,7 @@ export function SistemaToddConfig() {
             </div>
           </section>
 
-          <section className="bg-cd bd rounded-2xl p-5 space-y-2.5">
+          <section className="bg-cd bd rounded-xl p-5 space-y-2.5">
             <h3 className="text-xs font-bold flex items-center gap-2" style={{ color: 'var(--ac)' }}>
               <Bot size={14} />
               Conexión automática con n8n
