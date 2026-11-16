@@ -65,7 +65,6 @@ const DRIVER_TIME_PRESETS: Array<{ label: string; value: string }> = [
   { label: "2 horas", value: "2 horas" },
 ];
 
-type RutaTab = "en_ruta" | "por_empacar" | "entregados_hoy" | "novedades";
 type CobroTipo = "efectivo" | "transferencia";
 
 function getElSalvadorDateKey(iso?: string | null): string {
@@ -218,7 +217,6 @@ export function ConfirmarEntregaPage() {
       return "Todos los Couriers";
     }
   });
-  const [rutaTab, setRutaTab] = useState<RutaTab>("en_ruta");
   const [busquedaRuta, setBusquedaRuta] = useState("");
   const [tiempoEstimado, setTiempoEstimado] = useState<string>("30 minutos");
 
@@ -826,10 +824,9 @@ export function ConfirmarEntregaPage() {
     return todosLosPedidos.filter((p) => (p.courier || "Motorista Central 1") === courierSeleccionado);
   }, [todosLosPedidos, courierSeleccionado]);
 
-  // Clasificación operativa del día
-  const { enRutaList, porEmpacarList, entregadosHoyList, novedadesList } = useMemo(() => {
+  // Clasificación operativa del día (Tu Ruta = solo en_camino; entregadosHoy y novedades solo para KPIs y Cuadre)
+  const { enRutaList, entregadosHoyList, novedadesList } = useMemo(() => {
     const enRuta: any[] = [];
-    const porEmpacar: any[] = [];
     const entregadosHoy: any[] = [];
     const novedades: any[] = [];
 
@@ -842,21 +839,17 @@ export function ConfirmarEntregaPage() {
       } else if (est === "en_camino") {
         enRuta.push(p);
         if (hasOrderIssue(p)) novedades.push(p);
-      } else if (est === "por_empacar") {
-        porEmpacar.push(p);
-        if (hasOrderIssue(p)) novedades.push(p);
       } else if (est === "cancelado") {
         if (getElSalvadorDateKey(p.updated_at || p.created_at) === todaySv && hasOrderIssue(p)) {
           novedades.push(p);
         }
-      } else if (hasOrderIssue(p)) {
+      } else if (est !== "por_empacar" && hasOrderIssue(p)) {
         novedades.push(p);
       }
     }
 
     return {
       enRutaList: enRuta,
-      porEmpacarList: porEmpacar,
       entregadosHoyList: entregadosHoy,
       novedadesList: novedades,
     };
@@ -878,29 +871,19 @@ export function ConfirmarEntregaPage() {
 
     return {
       enRuta: enRutaList.length,
-      porEmpacar: porEmpacarList.length,
       entregadosHoy: entregadosHoyList.length,
       novedades: novedadesList.length,
       efectivoHoy,
       transferenciasHoy,
       totalRecaudadoHoy: efectivoHoy + transferenciasHoy,
     };
-  }, [enRutaList, porEmpacarList, entregadosHoyList, novedadesList]);
+  }, [enRutaList, entregadosHoyList, novedadesList]);
 
-  const listaTabActiva = useMemo(() => {
-    const base =
-      rutaTab === "en_ruta"
-        ? enRutaList
-        : rutaTab === "por_empacar"
-        ? porEmpacarList
-        : rutaTab === "entregados_hoy"
-        ? entregadosHoyList
-        : novedadesList;
-
+  const tuRutaFiltrada = useMemo(() => {
     const q = busquedaRuta.trim().toLowerCase();
-    if (!q) return base;
+    if (!q) return enRutaList;
 
-    return base.filter((p) => {
+    return enRutaList.filter((p) => {
       const hay = [
         p.nombre_cliente,
         p.telefono,
@@ -916,7 +899,7 @@ export function ConfirmarEntregaPage() {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [rutaTab, enRutaList, porEmpacarList, entregadosHoyList, novedadesList, busquedaRuta]);
+  }, [enRutaList, busquedaRuta]);
 
   const selectCourierOptions = useMemo(() => {
     if (
@@ -1235,50 +1218,11 @@ export function ConfirmarEntregaPage() {
           </div>
         </div>
 
-        {/* Pestañas de Etapa */}
-        <div className="mt-4 grid grid-cols-4 gap-1.5 bg-slate-900 p-1 rounded-2xl border border-slate-800">
-          {[
-            { id: "en_ruta" as RutaTab, label: "En Ruta", count: enRutaList.length },
-            { id: "por_empacar" as RutaTab, label: "Empaque", count: porEmpacarList.length },
-            { id: "entregados_hoy" as RutaTab, label: "Hoy ✓", count: entregadosHoyList.length },
-            { id: "novedades" as RutaTab, label: "Novedad", count: novedadesList.length },
-          ].map((tab) => {
-            const active = rutaTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setRutaTab(tab.id)}
-                className={`py-2 px-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1 ${
-                  active
-                    ? "bg-emerald-600 text-white shadow"
-                    : "text-slate-400 hover:text-white hover:bg-slate-800/60"
-                }`}
-              >
-                <span className="truncate">{tab.label}</span>
-                <span
-                  className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono ${
-                    active ? "bg-black/25 text-white" : "bg-slate-800 text-slate-400"
-                  }`}
-                >
-                  {tab.count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Lista de Paquetes en Ruta */}
-        <div className="mt-4 space-y-3 flex-1 pb-10">
+        {/* Columna Única: Tu Ruta */}
+        <div className="mt-5 space-y-3 flex-1 pb-10">
           <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              {rutaTab === "en_ruta"
-                ? `Paquetes en Ruta (${listaTabActiva.length})`
-                : rutaTab === "por_empacar"
-                ? `Por Empacar (${listaTabActiva.length})`
-                : rutaTab === "entregados_hoy"
-                ? `Entregados Hoy (${listaTabActiva.length})`
-                : `Con Novedad (${listaTabActiva.length})`}
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+              Tu Ruta ({tuRutaFiltrada.length})
             </h2>
             {!isCourierLocked && (
               <button
@@ -1291,20 +1235,14 @@ export function ConfirmarEntregaPage() {
             )}
           </div>
 
-          {listaTabActiva.length === 0 ? (
+          {tuRutaFiltrada.length === 0 ? (
             <div className="p-8 text-center text-xs text-slate-500 bg-slate-900/60 rounded-2xl border border-slate-800">
               {busquedaRuta
                 ? "No hay paquetes que coincidan con tu búsqueda."
-                : rutaTab === "en_ruta"
-                ? "No hay paquetes pendientes en ruta para este motorista."
-                : rutaTab === "por_empacar"
-                ? "No hay pedidos por empacar asignados."
-                : rutaTab === "entregados_hoy"
-                ? "Aún no se registran entregas hoy para este motorista."
-                : "Sin novedades registradas."}
+                : "No tienes paquetes pendientes en tu ruta por ahora."}
             </div>
           ) : (
-            listaTabActiva.map((p) => {
+            tuRutaFiltrada.map((p) => {
               const entregado = p.estado === "entregado";
               const novedad = hasOrderIssue(p);
               const prepagado = isOrderPrepaid(p);
