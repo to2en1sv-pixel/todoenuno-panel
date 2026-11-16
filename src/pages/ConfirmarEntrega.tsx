@@ -219,6 +219,7 @@ export function ConfirmarEntregaPage() {
   });
   const [busquedaRuta, setBusquedaRuta] = useState("");
   const [tiempoEstimado, setTiempoEstimado] = useState<string>("30 minutos");
+  const autoAssignedOrderIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (driverSession?.role === "courier" && driverSession.courierName) {
@@ -418,6 +419,75 @@ export function ConfirmarEntregaPage() {
     cargarDatos();
   }, [id]);
 
+  // Auto-asignar paquete al motorista autenticado cuando escanea un QR (/entregar/:id)
+  useEffect(() => {
+    if (!id || !pedido?.id) return;
+    if (driverAccess.requirePin && !driverSession) return;
+    if (driverSession?.role !== "courier" || !driverSession.courierName) return;
+
+    const courierName = driverSession.courierName.trim();
+    const estActual = String(pedido.estado || "");
+    if (estActual === "entregado" || estActual === "cancelado") return;
+
+    const key = `${pedido.id}:${courierName}`;
+    if (autoAssignedOrderIdRef.current === key) return;
+
+    const sameCourier =
+      String(pedido.courier || "").trim().toLowerCase() === courierName.toLowerCase();
+    const needsRouteState = estActual === "por_empacar" || estActual === "nuevo" || !estActual;
+
+    if (sameCourier && !needsRouteState) {
+      autoAssignedOrderIdRef.current = key;
+      return;
+    }
+
+    autoAssignedOrderIdRef.current = key;
+
+    (async () => {
+      try {
+        const nextEstado = needsRouteState ? "en_camino" : estActual;
+        const assignStamp = `[Asignado por QR a ${courierName} ${getElSalvadorTimeLabel()}]`;
+        const nextNotas = pedido.notas ? `${pedido.notas} • ${assignStamp}` : assignStamp;
+        const patch: Record<string, any> = {
+          courier: courierName,
+          notas: nextNotas,
+          ...(nextEstado !== estActual ? { estado: nextEstado } : {}),
+        };
+
+        const { error: updErr } = await supabase
+          .from("whatsapp_orders")
+          .update(patch)
+          .eq("id", pedido.id);
+
+        if (updErr) throw updErr;
+
+        if (nextEstado !== estActual) {
+          try {
+            await syncOrderInventoryOnStatusChange({
+              order: pedido,
+              prevEstado: estActual || "nuevo",
+              nextEstado,
+              usuario: courierName,
+            });
+          } catch (invErr) {
+            console.warn("Error sincronizando Kárdex al auto-asignar por QR:", invErr);
+          }
+        }
+
+        const updated = { ...pedido, ...patch };
+        setPedido(updated);
+        setTodosLosPedidos((prev) =>
+          prev.some((item) => item.id === pedido.id)
+            ? prev.map((item) => (item.id === pedido.id ? updated : item))
+            : [updated, ...prev]
+        );
+        showToast("ok", `Paquete asignado automáticamente a tu ruta (${courierName}).`);
+      } catch (err) {
+        console.warn("No se pudo auto-asignar paquete por QR:", err);
+      }
+    })();
+  }, [id, pedido?.id, pedido?.courier, pedido?.estado, driverAccess.requirePin, driverSession]);
+
   // Manejo de canvas de firma táctil con escalado exacto
   useEffect(() => {
     if (mostrarFirma && canvasRef.current) {
@@ -492,7 +562,27 @@ export function ConfirmarEntregaPage() {
     }
   };
 
-  // Enviar aviso de llegada directo vía Evolution API
+  const buildDriverWaUrl = (targetOrder: any): string | undefined => {
+    const waPhone = formatSvWaPhone(targetOrder?.telefono);
+    if (!waPhone) return undefined;
+    const baseMsg = renderWhatsappTemplate(driverTemplate, targetOrder, {
+      tiempo: tiempoEstimado,
+    });
+    const extraLines: string[] = [];
+    if (targetOrder?.direccion && !baseMsg.includes(targetOrder.direccion)) {
+      extraLines.push(`📍 Dirección: ${targetOrder.direccion}`);
+    }
+    const code =
+      targetOrder?.pedido_codigo ||
+      (targetOrder?.id ? `#${String(targetOrder.id).slice(0, 8).toUpperCase()}` : "");
+    if (code && !baseMsg.includes(code)) {
+      extraLines.push(`🧾 Pedido: ${code}`);
+    }
+    const fullMsg = extraLines.length > 0 ? `${baseMsg}\n${extraLines.join("\n")}` : baseMsg;
+    return `https://wa.me/${waPhone}?text=${encodeURIComponent(fullMsg)}`;
+  };
+
+  // Enviar aviso de llegada directo vía Evolution API (en paralelo a abrir WhatsApp del repartidor)
   const handleAvisarLlegadaEvolution = async (targetOrder: any) => {
     if (!targetOrder?.telefono) {
       showToast("err", "Este pedido no tiene teléfono registrado.");
@@ -509,6 +599,7 @@ export function ConfirmarEntregaPage() {
       const res = await fetch("/api/send-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        keepalive: true,
         body: JSON.stringify({
           contactPhone: waPhone,
           contactName: targetOrder.nombre_cliente || "Cliente",
@@ -535,12 +626,12 @@ export function ConfirmarEntregaPage() {
         setPedido((prev: any) => (prev ? { ...prev, notas: nextNotas } : prev));
       }
 
-      showToast("ok", `Aviso de llegada enviado por WhatsApp a ${targetOrder.nombre_cliente || "cliente"}.`);
+      showToast("ok", `Aviso de tienda enviado y WhatsApp abierto para ${targetOrder.nombre_cliente || "cliente"}.`);
     } catch (err: any) {
       console.error("Error enviando aviso de llegada:", err);
       showToast(
         "warn",
-        `Evolution no respondió (${err?.message || "error"}). Usa el botón WhatsApp manual si lo necesitas.`
+        `Se abrió tu WhatsApp (Evolution no respondió: ${err?.message || "error"}).`
       );
     } finally {
       setSendingWaId(null);
@@ -559,6 +650,13 @@ export function ConfirmarEntregaPage() {
       ? "Transferencia"
       : "Efectivo";
 
+    const assignedCourier =
+      driverSession?.role === "courier" && driverSession.courierName
+        ? driverSession.courierName
+        : courierSeleccionado !== "Todos los Couriers"
+        ? courierSeleccionado
+        : pedido.courier || "Motorista Central 1";
+
     const hora = getElSalvadorTimeLabel();
     const stampParts = [
       `Entregado en ruta ${todaySv} ${hora}`,
@@ -576,6 +674,7 @@ export function ConfirmarEntregaPage() {
         .from("whatsapp_orders")
         .update({
           estado: "entregado",
+          courier: assignedCourier,
           notas: nextNotas,
         })
         .eq("id", pedido.id);
@@ -585,10 +684,10 @@ export function ConfirmarEntregaPage() {
       // Descontar unidad física / consumir reserva en Inventario & Kárdex
       try {
         await syncOrderInventoryOnStatusChange({
-          order: pedido,
+          order: { ...pedido, courier: assignedCourier },
           prevEstado,
           nextEstado: "entregado",
-          usuario: pedido.courier || "Motorista Móvil",
+          usuario: assignedCourier,
         });
       } catch (invErr) {
         console.warn("Error sincronizando inventario en entrega móvil:", invErr);
@@ -673,7 +772,7 @@ export function ConfirmarEntregaPage() {
         });
       } catch {}
 
-      const updatedOrder = { ...pedido, estado: "entregado", notas: nextNotas };
+      const updatedOrder = { ...pedido, estado: "entregado", courier: assignedCourier, notas: nextNotas };
       setPedido(updatedOrder);
       setTodosLosPedidos((prev) =>
         prev.map((item) => (item.id === pedido.id ? updatedOrder : item))
@@ -818,11 +917,17 @@ export function ConfirmarEntregaPage() {
   const pagaConNum = parseFloat(pagaCon || "0");
   const cambio = pagaConNum >= totalNum ? pagaConNum - totalNum : 0;
 
-  // Filtrado por courier seleccionado
+  // Filtrado estricto por courier seleccionado / autenticado
+  const activeCourierName =
+    driverSession?.role === "courier" && driverSession.courierName
+      ? driverSession.courierName
+      : courierSeleccionado;
+
   const pedidosDelCourier = useMemo(() => {
-    if (courierSeleccionado === "Todos los Couriers") return todosLosPedidos;
-    return todosLosPedidos.filter((p) => (p.courier || "Motorista Central 1") === courierSeleccionado);
-  }, [todosLosPedidos, courierSeleccionado]);
+    if (activeCourierName === "Todos los Couriers") return todosLosPedidos;
+    const target = activeCourierName.trim().toLowerCase();
+    return todosLosPedidos.filter((p) => String(p.courier || "").trim().toLowerCase() === target);
+  }, [todosLosPedidos, activeCourierName]);
 
   // Clasificación operativa del día (Tu Ruta = solo en_camino; entregadosHoy y novedades solo para KPIs y Cuadre)
   const { enRutaList, entregadosHoyList, novedadesList } = useMemo(() => {
@@ -913,7 +1018,7 @@ export function ConfirmarEntregaPage() {
 
   const handleCopyCuadre = async () => {
     const labelCourier =
-      courierSeleccionado === "Todos los Couriers" ? "Todos los Motoristas" : courierSeleccionado;
+      activeCourierName === "Todos los Couriers" ? "Todos los Motoristas" : activeCourierName;
     const lines = [
       `🛵 *CUADRE DE RUTA — ${todaySv}*`,
       `Motorista: *${labelCourier}*`,
@@ -943,7 +1048,6 @@ export function ConfirmarEntregaPage() {
     }
   };
 
-  const telefonoWaPedido = formatSvWaPhone(pedido?.telefono);
   const telHrefPedido = formatTelHref(pedido?.telefono);
   const direccionCodificada = encodeURIComponent(`${pedido?.direccion || ""}, El Salvador`);
   const urlWaze = `https://waze.com/ul?q=${direccionCodificada}`;
@@ -951,7 +1055,7 @@ export function ConfirmarEntregaPage() {
   const mensajeWa = renderWhatsappTemplate(driverTemplate, pedido, {
     tiempo: tiempoEstimado,
   });
-  const urlWa = telefonoWaPedido ? `https://wa.me/${telefonoWaPedido}?text=${encodeURIComponent(mensajeWa)}` : undefined;
+  const urlWa = buildDriverWaUrl(pedido);
 
   if (cargando) {
     return (
@@ -1328,16 +1432,17 @@ export function ConfirmarEntregaPage() {
 
                     <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
                       {!entregado && p.telefono && (
-                        <button
-                          type="button"
-                          disabled={sendingWaId === p.id}
+                        <a
+                          href={buildDriverWaUrl(p)}
+                          target="_blank"
+                          rel="noreferrer"
                           onClick={() => handleAvisarLlegadaEvolution(p)}
                           className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 transition-colors ${
                             avisado
                               ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
                               : "bg-slate-800 border-slate-700 hover:bg-emerald-600 hover:border-emerald-500 text-slate-200 hover:text-white"
                           }`}
-                          title="Enviar aviso automático de llegada por WhatsApp"
+                          title="Notifica por Evolution y abre tu WhatsApp listo para enviar"
                         >
                           {sendingWaId === p.id ? (
                             <Loader2 size={11} className="animate-spin" />
@@ -1347,7 +1452,7 @@ export function ConfirmarEntregaPage() {
                             <Send size={11} />
                           )}
                           {avisado ? "Avisado" : "Voy llegando"}
-                        </button>
+                        </a>
                       )}
 
                       {!entregado && p.direccion && (
@@ -1866,10 +1971,11 @@ export function ConfirmarEntregaPage() {
                   </div>
                 )}
 
-                {pedido.telefono ? (
-                  <button
-                    type="button"
-                    disabled={sendingWaId === pedido.id}
+                {urlWa ? (
+                  <a
+                    href={urlWa}
+                    target="_blank"
+                    rel="noreferrer"
                     onClick={() => handleAvisarLlegadaEvolution(pedido)}
                     className={`py-3 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 shadow transition-colors ${
                       yaAvisado
@@ -1882,10 +1988,10 @@ export function ConfirmarEntregaPage() {
                     ) : yaAvisado ? (
                       <Check size={15} />
                     ) : (
-                      <Send size={15} />
+                      <MessageCircle size={15} />
                     )}
                     {yaAvisado ? "Volver a Avisar" : "Avisar Llegada"}
-                  </button>
+                  </a>
                 ) : (
                   <div className="py-3 px-3 rounded-2xl bg-slate-800/50 text-slate-500 font-bold text-xs text-center border border-slate-800">
                     Sin WhatsApp
@@ -1894,14 +2000,9 @@ export function ConfirmarEntregaPage() {
               </div>
 
               {urlWa && (
-                <a
-                  href={urlWa}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-full py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold text-[11px] flex items-center justify-center gap-1.5 border border-slate-800 transition-colors"
-                >
-                  <MessageCircle size={13} className="text-emerald-400" /> Abrir en mi WhatsApp (manual)
-                </a>
+                <p className="text-[10px] text-slate-500 text-center leading-snug">
+                  Envía aviso desde el número de tienda (Evolution) y abre tu WhatsApp listo con los datos.
+                </p>
               )}
             </div>
 
