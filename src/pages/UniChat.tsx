@@ -1101,6 +1101,31 @@ export function UniChatPage() {
               }
               setSubView('chats');
             }}
+            onOpenConversation={(convId, prefillText) => {
+              const target = conversations.find(c => c.id === convId);
+              setModeFilter('all');
+              setSearch('');
+              setMobileShowContext(false);
+              if (target) {
+                if (isLegacyConversation(target)) setHideLegacy(false);
+                setSelectedConv(target);
+              }
+              if (typeof prefillText === 'string' && prefillText.trim()) {
+                setInputText(prefillText);
+              }
+              setSubView('chats');
+            }}
+            onFollowUpSent={(convId, text) => {
+              const nowIso = new Date().toISOString();
+              setLastMsgFromMeMap(prev => ({ ...prev, [convId]: true }));
+              setConversations(prev =>
+                prev.map(c =>
+                  c.id === convId
+                    ? { ...c, last_message: text, updated_at: nowIso, status: 'human' }
+                    : c
+                )
+              );
+            }}
             onRefreshAll={() => loadConversations(true)}
           />
         ) : (

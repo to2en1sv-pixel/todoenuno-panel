@@ -5,16 +5,24 @@ import {
   ArrowRight,
   BarChart3,
   Bot,
+  Check,
+  CheckCircle2,
+  ChevronRight,
   Clock,
   Eye,
   EyeOff,
+  Loader2,
   Megaphone,
   MessageSquare,
   Package,
+  Phone,
   RefreshCw,
+  Search,
+  Send,
   ShoppingBag,
   TrendingUp,
   User,
+  X,
 } from 'lucide-react';
 
 export type StatsPeriod = 'today' | '7d' | '30d' | 'all';
@@ -35,6 +43,9 @@ type WhatsappStateLite = {
   last_nombre?: string | null;
   last_precio?: number | null;
   last_detalle?: string | null;
+  nombre_cliente?: string | null;
+  direccion?: string | null;
+  metodo_pago?: string | null;
   paso_actual?: string | null;
   updated_at?: string | null;
 };
@@ -55,6 +66,8 @@ interface UniChatStatsProps {
   legacyCount: number;
   onToggleHideLegacy: () => void;
   onBackToChats: (filter?: 'all' | 'unread' | 'bot' | 'human') => void;
+  onOpenConversation: (convId: string, prefillText?: string) => void;
+  onFollowUpSent?: (convId: string, text: string) => void;
   onRefreshAll: () => Promise<void>;
 }
 
@@ -117,6 +130,72 @@ function formatMoney(n: number): string {
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function formatRelativeAgo(iso?: string | null): string {
+  if (!iso) return 'Reciente';
+  const ts = new Date(iso).getTime();
+  if (Number.isNaN(ts)) return 'Reciente';
+  const diffMins = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (diffMins < 1) return 'Ahora';
+  if (diffMins < 60) return `Hace ${diffMins} min`;
+  const hours = diffMins / 60;
+  if (hours < 24) return `Hace ${hours.toFixed(hours >= 10 ? 0 : 1)} h`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? 'Hace 1 día' : `Hace ${days} días`;
+}
+
+function buildStageFollowUpTemplate(params: {
+  stepKey: string;
+  customerName?: string | null;
+  productName?: string | null;
+}): string {
+  const firstName = String(params.customerName || '')
+    .trim()
+    .split(/\s+/)[0];
+  const hasRealName =
+    Boolean(firstName) &&
+    !/^\d+$/.test(firstName) &&
+    !firstName.includes('@') &&
+    firstName.toLowerCase() !== 'cliente';
+  const namePart = hasRealName ? ` ${firstName}` : '';
+  const prod = String(params.productName || '').trim();
+  const prodPhrase = prod ? `el/la *${prod}*` : 'el producto que consultaste';
+
+  switch (params.stepKey) {
+    case 'inicio':
+      return `¡Hola${namePart}! 👋 Vi que nos escribiste hace un momento. ¿Te puedo ayudar con información, precios o fotos de alguno de nuestros productos?`;
+    case 'cotizando':
+      return `¡Hola${namePart}! 👋 Vi que estuviste consultando por ${prodPhrase}. ¿Te gustaría que te lo apartemos con pago contra entrega? Hacemos envíos a todo el país 🚚`;
+    case 'esperando_nombre':
+      return `¡Hola${namePart}! 📦 Quedó pendiente tu nombre completo para apartarte ${prodPhrase}. ¿A nombre de quién preparamos el envío? 🙌`;
+    case 'esperando_direccion':
+      return `¡Hola${namePart}! 🚚 Ya casi queda listo tu pedido de ${prodPhrase}. Solo nos falta tu dirección exacta o punto de referencia para coordinar la entrega.`;
+    case 'esperando_pago':
+      return `¡Hola${namePart}! 🙌 Solo confirmando si prefieres tu pedido de ${prodPhrase} contra entrega en efectivo al recibir o por transferencia para dejártelo programado.`;
+    case 'completado':
+      return `¡Hola${namePart}! 👋 Te escribimos para confirmar que todo esté en orden con tu pedido de ${prodPhrase}. Cualquier duda estoy atento 🙌`;
+    default:
+      return `¡Hola${namePart}! 👋 Dando seguimiento a tu consulta sobre ${prodPhrase}. ¿En qué te podemos ayudar hoy?`;
+  }
+}
+
+type StageDrilldownEntry = {
+  id: string;
+  state: WhatsappStateLite;
+  conv: ConversationLite | null;
+  displayName: string;
+  displayPhone: string;
+  phone8: string;
+  productLabel: string;
+  productPrice: number;
+  lastMessage: string;
+  lastActivityIso: string;
+  lastMsgFromMe: boolean | null;
+  hasOrder: boolean;
+  orderTotal: number;
+  orderCount: number;
+  mode: 'bot' | 'human';
+};
+
 export function UniChatStats({
   conversations,
   allOrders,
@@ -125,6 +204,8 @@ export function UniChatStats({
   legacyCount,
   onToggleHideLegacy,
   onBackToChats,
+  onOpenConversation,
+  onFollowUpSent,
   onRefreshAll,
 }: UniChatStatsProps) {
   const [period, setPeriod] = useState<StatsPeriod>('7d');
@@ -134,6 +215,16 @@ export function UniChatStats({
   const [statsError, setStatsError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [hoveredHour, setHoveredHour] = useState<number | null>(null);
+
+  // Drill-down de etapa del Embudo de Bot Todd
+  const [selectedStageKey, setSelectedStageKey] = useState<string | null>(null);
+  const [stageFilter, setStageFilter] = useState<'all' | 'no_order' | 'awaiting_reply'>('all');
+  const [stageSearch, setStageSearch] = useState('');
+  const [activeComposerId, setActiveComposerId] = useState<string | null>(null);
+  const [draftMessages, setDraftMessages] = useState<Record<string, string>>({});
+  const [sendingEntryId, setSendingEntryId] = useState<string | null>(null);
+  const [sentEntryIds, setSentEntryIds] = useState<Record<string, boolean>>({});
+  const [sendFeedback, setSendFeedback] = useState<{ entryId: string; type: 'ok' | 'err'; text: string } | null>(null);
 
   const loadStatsData = useCallback(async (selectedPeriod: StatsPeriod, isManual = false) => {
     if (isManual) setRefreshing(true);
@@ -145,7 +236,7 @@ export function UniChatStats({
 
       let stateQuery = supabase
         .from('whatsapp_state')
-        .select('telefono,last_sku,last_nombre,last_precio,last_detalle,paso_actual,updated_at')
+        .select('telefono,last_sku,last_nombre,last_precio,last_detalle,nombre_cliente,direccion,metodo_pago,paso_actual,updated_at')
         .order('updated_at', { ascending: false })
         .limit(2000);
 
@@ -306,14 +397,101 @@ export function UniChatStats({
     };
   }, [baseConversations, lastMsgFromMeMap, ordersByPhone, messages, hideLegacy, convIndex]);
 
-  // 2. Embudo de Bot Todd (whatsapp_state)
+  // Índice para empatar filas de whatsapp_state con conversaciones reales (incluso @lid)
+  const convLookup = useMemo(() => {
+    const byKey = new Map<string, ConversationLite>();
+    for (const c of conversations) {
+      if (hideLegacy && isLegacyConv(c)) continue;
+      const rawId = c.id.split('@')[0];
+      const p8 = cleanDigits8(c.contact_phone || c.id);
+      const keys = [c.id, rawId, c.contact_phone || '', p8, p8 ? `503${p8}` : ''].filter(Boolean);
+      for (const k of keys) {
+        if (!byKey.has(k)) byKey.set(k, c);
+      }
+    }
+    for (const m of messages) {
+      if (!m.telefono_real || !m.conversation_id) continue;
+      const conv = convIndex.get(m.conversation_id);
+      if (!conv || (hideLegacy && isLegacyConv(conv))) continue;
+      const tr = String(m.telefono_real).trim();
+      const trRaw = tr.split('@')[0];
+      const p8 = cleanDigits8(tr);
+      for (const k of [tr, trRaw, p8, p8 ? `503${p8}` : ''].filter(Boolean)) {
+        if (!byKey.has(k)) byKey.set(k, conv);
+      }
+    }
+    return byKey;
+  }, [conversations, messages, convIndex, hideLegacy]);
+
+  // 2. Embudo de Bot Todd (whatsapp_state) + agrupación por etapa para drill-down
   const funnelData = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const s of FUNNEL_STEPS) counts[s.key] = 0;
+    const entriesByStep: Record<string, StageDrilldownEntry[]> = {};
+    for (const s of FUNNEL_STEPS) {
+      counts[s.key] = 0;
+      entriesByStep[s.key] = [];
+    }
 
     for (const st of states) {
       const rawStep = String(st.paso_actual || 'inicio').toLowerCase().trim();
-      if (rawStep in counts) counts[rawStep] += 1;
+      if (!(rawStep in counts)) continue;
+      counts[rawStep] += 1;
+
+      const rawTel = String(st.telefono || '').trim();
+      const rawTelBase = rawTel.split('@')[0];
+      const p8 = cleanDigits8(rawTel);
+      const conv =
+        convLookup.get(rawTel) ||
+        convLookup.get(rawTelBase) ||
+        (p8 ? convLookup.get(p8) || convLookup.get(`503${p8}`) : undefined) ||
+        null;
+
+      const resolvedPhone8 = p8 || cleanDigits8(conv?.contact_phone || conv?.id);
+      const ord = resolvedPhone8 ? ordersByPhone.get(resolvedPhone8) : undefined;
+      const displayName =
+        (conv?.contact_name && !conv.contact_name.includes('@') ? conv.contact_name : '') ||
+        String(st.nombre_cliente || '').trim() ||
+        (resolvedPhone8 ? `+503 ${resolvedPhone8}` : rawTelBase || 'Cliente');
+
+      const displayPhone = resolvedPhone8
+        ? `+503 ${resolvedPhone8}`
+        : conv?.contact_phone || rawTelBase || 'Sin teléfono';
+
+      const productLabel = String(st.last_nombre || st.last_sku || '').trim();
+      const lastActivityIso =
+        conv?.updated_at && st.updated_at
+          ? new Date(conv.updated_at).getTime() >= new Date(st.updated_at).getTime()
+            ? conv.updated_at
+            : st.updated_at
+          : conv?.updated_at || st.updated_at || '';
+
+      const lastMsgFromMe = conv ? lastMsgFromMeMap[conv.id] ?? null : null;
+
+      entriesByStep[rawStep].push({
+        id: `${rawStep}:${rawTel || conv?.id || Math.random()}`,
+        state: st,
+        conv,
+        displayName,
+        displayPhone,
+        phone8: resolvedPhone8,
+        productLabel,
+        productPrice: Number(st.last_precio || 0),
+        lastMessage: String(conv?.last_message || st.last_detalle || '').trim(),
+        lastActivityIso,
+        lastMsgFromMe,
+        hasOrder: Boolean(ord && ord.count > 0),
+        orderTotal: ord?.total || 0,
+        orderCount: ord?.count || 0,
+        mode: conv?.status === 'human' ? 'human' : 'bot',
+      });
+    }
+
+    for (const key of Object.keys(entriesByStep)) {
+      entriesByStep[key].sort((a, b) => {
+        const ta = a.lastActivityIso ? new Date(a.lastActivityIso).getTime() : 0;
+        const tb = b.lastActivityIso ? new Date(b.lastActivityIso).getTime() : 0;
+        return tb - ta;
+      });
     }
 
     const total = states.length;
@@ -327,8 +505,142 @@ export function UniChatStats({
       }
     }
 
-    return { counts, total, maxStepCount, bottleneck };
-  }, [states]);
+    return { counts, entriesByStep, total, maxStepCount, bottleneck };
+  }, [states, convLookup, ordersByPhone, lastMsgFromMeMap]);
+
+  useEffect(() => {
+    if (!selectedStageKey) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedStageKey(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedStageKey]);
+
+  const selectedStageMeta = useMemo(
+    () => (selectedStageKey ? FUNNEL_STEPS.find(s => s.key === selectedStageKey) || null : null),
+    [selectedStageKey]
+  );
+
+  const selectedStageEntries = useMemo(() => {
+    if (!selectedStageKey) return [];
+    return funnelData.entriesByStep[selectedStageKey] || [];
+  }, [selectedStageKey, funnelData.entriesByStep]);
+
+  const filteredStageEntries = useMemo(() => {
+    const q = stageSearch.trim().toLowerCase();
+    return selectedStageEntries.filter(entry => {
+      if (stageFilter === 'no_order' && entry.hasOrder) return false;
+      if (stageFilter === 'awaiting_reply' && entry.lastMsgFromMe !== false) return false;
+      if (!q) return true;
+      const hay = [
+        entry.displayName,
+        entry.displayPhone,
+        entry.productLabel,
+        entry.lastMessage,
+        entry.state.last_sku || '',
+        entry.state.direccion || '',
+      ]
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [selectedStageEntries, stageFilter, stageSearch]);
+
+  const handleOpenStage = (stepKey: string) => {
+    setSelectedStageKey(stepKey);
+    setStageFilter(stepKey === 'completado' ? 'all' : 'no_order');
+    setStageSearch('');
+    setActiveComposerId(null);
+    setSendFeedback(null);
+  };
+
+  const handleToggleFollowUpComposer = (entry: StageDrilldownEntry) => {
+    if (activeComposerId === entry.id) {
+      setActiveComposerId(null);
+      return;
+    }
+    setActiveComposerId(entry.id);
+    setSendFeedback(null);
+    setDraftMessages(prev => {
+      if (prev[entry.id]) return prev;
+      return {
+        ...prev,
+        [entry.id]: buildStageFollowUpTemplate({
+          stepKey: selectedStageKey || 'cotizando',
+          customerName: entry.displayName,
+          productName: entry.productLabel,
+        }),
+      };
+    });
+  };
+
+  const handleSendQuickFollowUp = async (entry: StageDrilldownEntry) => {
+    const text = (draftMessages[entry.id] || '').trim();
+    if (!text || sendingEntryId) return;
+
+    const targetConvId =
+      entry.conv?.id || (entry.phone8 ? `503${entry.phone8}@s.whatsapp.net` : entry.state.telefono);
+    const targetPhone =
+      entry.conv?.contact_phone || (entry.phone8 ? `503${entry.phone8}` : entry.state.telefono);
+
+    if (!targetConvId && !targetPhone) {
+      setSendFeedback({
+        entryId: entry.id,
+        type: 'err',
+        text: 'Este registro no tiene teléfono ni chat válido vinculado.',
+      });
+      return;
+    }
+
+    setSendingEntryId(entry.id);
+    setSendFeedback(null);
+
+    try {
+      const res = await fetch('/api/send-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: targetConvId,
+          text,
+          instanceId: entry.conv?.instance_id || 'eee',
+          contactPhone: targetPhone,
+          pauseBot: true,
+        }),
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(
+          'El envío directo requiere el entorno con /api/send-message activo (Vercel). Usa "Abrir en chat" para redactar desde UniChat.'
+        );
+      }
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.details || data.error || 'Error enviando mensaje por WhatsApp');
+      }
+
+      setSentEntryIds(prev => ({ ...prev, [entry.id]: true }));
+      setActiveComposerId(null);
+      setSendFeedback({
+        entryId: entry.id,
+        type: 'ok',
+        text: `Seguimiento enviado a ${entry.displayName}`,
+      });
+      if (entry.conv?.id && onFollowUpSent) {
+        onFollowUpSent(entry.conv.id, text);
+      }
+    } catch (err: any) {
+      setSendFeedback({
+        entryId: entry.id,
+        type: 'err',
+        text: err?.message || 'No se pudo enviar el seguimiento.',
+      });
+    } finally {
+      setSendingEntryId(null);
+    }
+  };
 
   // 3. Horarios pico de mensajes entrantes (0h - 23h)
   const hourlyActivity = useMemo(() => {
@@ -786,7 +1098,7 @@ export function UniChatStats({
                         <h2 className="text-sm font-semibold">Embudo de Bot Todd</h2>
                       </div>
                       <p className="text-xs tx-mu mt-0.5 tabular-nums">
-                        Distribución de {funnelData.total} clientes según su paso actual
+                        Distribución de {funnelData.total} clientes · Toca una etapa para ver chats y dar seguimiento
                       </p>
                     </div>
                     {funnelData.bottleneck && (
@@ -804,7 +1116,7 @@ export function UniChatStats({
                       No hay estados de conversación de Todd registrados en este período.
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-1.5">
                       {FUNNEL_STEPS.map((step, idx) => {
                         const count = funnelData.counts[step.key] || 0;
                         const pct =
@@ -812,22 +1124,36 @@ export function UniChatStats({
                         const widthPct = Math.round((count / funnelData.maxStepCount) * 100);
                         const isDone = step.key === 'completado';
                         const isFirst = step.key === 'inicio';
+                        const isSelected = selectedStageKey === step.key;
 
                         return (
-                          <div key={step.key} className="space-y-1.5">
+                          <button
+                            key={step.key}
+                            type="button"
+                            onClick={() => handleOpenStage(step.key)}
+                            className={`w-full text-left space-y-1.5 px-2.5 py-2 -mx-2.5 rounded-lg transition-colors cursor-pointer group ${
+                              isSelected ? 'bg-sf ring-1 ring-[var(--bd)]' : 'hover:bg-sf/70'
+                            }`}
+                          >
                             <div className="flex items-center justify-between gap-2 text-xs">
                               <div className="min-w-0 truncate flex items-center gap-2">
                                 <span className="mono text-[11px] tx-mu w-4 shrink-0">
                                   0{idx + 1}
                                 </span>
-                                <span className="font-semibold text-[var(--tx)]">{step.label}</span>
+                                <span className="font-semibold text-[var(--tx)] group-hover:underline">
+                                  {step.label}
+                                </span>
                                 <span className="tx-mu hidden sm:inline truncate">
                                   · {step.hint}
                                 </span>
                               </div>
-                              <div className="mono tabular-nums shrink-0 text-right">
+                              <div className="mono tabular-nums shrink-0 text-right flex items-center gap-1.5">
                                 <span className="font-semibold text-[var(--tx)]">{count}</span>
-                                <span className="tx-mu ml-1.5">({pct}%)</span>
+                                <span className="tx-mu">({pct}%)</span>
+                                <ChevronRight
+                                  size={13}
+                                  className="tx-mu opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all"
+                                />
                               </div>
                             </div>
                             <div className="h-2 w-full rounded-full bg-sf overflow-hidden">
@@ -844,7 +1170,7 @@ export function UniChatStats({
                                 }}
                               />
                             </div>
-                          </div>
+                          </button>
                         );
                       })}
                     </div>
@@ -1147,6 +1473,317 @@ export function UniChatStats({
           )}
         </div>
       </div>
+
+      {/* Modal Drill-Down de Etapa del Embudo de Bot Todd */}
+      {selectedStageMeta && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[1px] flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => setSelectedStageKey(null)}
+        >
+          <div
+            className="w-full sm:max-w-3xl max-h-[88dvh] bg-cd border border-[var(--bd)] rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header del modal */}
+            <div className="px-4 py-3.5 sm:px-5 border-b border-[var(--bd)] flex items-start justify-between gap-3 shrink-0">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Bot size={16} style={{ color: 'var(--ac)' }} />
+                  <h3 className="text-sm sm:text-base font-bold truncate">
+                    Etapa: {selectedStageMeta.label}
+                  </h3>
+                  <span className="text-xs font-mono tabular-nums px-2 py-0.5 rounded-md bg-sf bd tx-mu">
+                    {selectedStageEntries.length}{' '}
+                    {selectedStageEntries.length === 1 ? 'cliente' : 'clientes'}
+                  </span>
+                </div>
+                <p className="text-xs tx-mu mt-0.5">
+                  {selectedStageMeta.hint} · Revisa cada conversación y decide si enviar seguimiento
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedStageKey(null)}
+                className="p-1.5 rounded-lg hover:bg-sf tx-mu hover:text-[var(--tx)] transition-colors cursor-pointer shrink-0"
+                aria-label="Cerrar panel de etapa"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Filtros y buscador */}
+            <div className="px-4 py-2.5 sm:px-5 border-b border-[var(--bd)] bg-sf/40 flex flex-wrap items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center p-0.5 rounded-lg bg-sf bd text-xs">
+                {[
+                  {
+                    id: 'no_order' as const,
+                    label: `Sin pedido (${selectedStageEntries.filter(e => !e.hasOrder).length})`,
+                  },
+                  {
+                    id: 'awaiting_reply' as const,
+                    label: `Por responder (${
+                      selectedStageEntries.filter(e => e.lastMsgFromMe === false).length
+                    })`,
+                  },
+                  { id: 'all' as const, label: `Todos (${selectedStageEntries.length})` },
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setStageFilter(tab.id)}
+                    className={`px-2.5 py-1 rounded-md whitespace-nowrap transition-colors cursor-pointer ${
+                      stageFilter === tab.id
+                        ? 'bg-[var(--tx)] text-[var(--cd)] font-semibold'
+                        : 'tx-mu hover:text-[var(--tx)] font-medium'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative flex-1 min-w-[180px] sm:max-w-[240px]">
+                <Search
+                  size={13}
+                  className="tx-mu absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                />
+                <input
+                  type="text"
+                  value={stageSearch}
+                  onChange={e => setStageSearch(e.target.value)}
+                  placeholder="Buscar cliente, SKU o msg..."
+                  className="w-full pl-8 pr-2.5 py-1.5 rounded-lg bg-cd bd text-xs focus:outline-none focus:ring-1 focus:ring-[var(--ac)]"
+                />
+              </div>
+            </div>
+
+            {/* Lista de chats de esta etapa */}
+            <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 space-y-2.5">
+              {filteredStageEntries.length === 0 ? (
+                <div className="py-10 px-4 text-center bg-sf bd rounded-xl space-y-1.5">
+                  <p className="text-xs font-semibold">No hay chats en este filtro</p>
+                  <p className="text-[11px] tx-mu">
+                    {stageFilter !== 'all'
+                      ? 'Prueba cambiando el filtro a "Todos" para ver los clientes que ya cerraron pedido o fueron atendidos.'
+                      : 'No hay conversaciones registradas en esta etapa en el período actual.'}
+                  </p>
+                  {stageFilter !== 'all' && selectedStageEntries.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setStageFilter('all')}
+                      className="mt-2 px-3 py-1.5 rounded-lg bg-cd bd text-xs font-medium cursor-pointer"
+                    >
+                      Ver todos ({selectedStageEntries.length})
+                    </button>
+                  )}
+                </div>
+              ) : (
+                filteredStageEntries.map(entry => {
+                  const isComposing = activeComposerId === entry.id;
+                  const isSent = Boolean(sentEntryIds[entry.id]);
+                  const isSendingThis = sendingEntryId === entry.id;
+                  const rowFeedback =
+                    sendFeedback && sendFeedback.entryId === entry.id ? sendFeedback : null;
+                  const draftVal = draftMessages[entry.id] ?? '';
+
+                  return (
+                    <div
+                      key={entry.id}
+                      className="p-3.5 rounded-xl bg-sf/50 border border-[var(--bd)] space-y-2.5"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5">
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs sm:text-sm font-bold text-[var(--tx)] truncate">
+                              {entry.displayName}
+                            </span>
+                            <span className="inline-flex items-center gap-1 text-[11px] font-mono tx-mu">
+                              <Phone size={10} />
+                              {entry.displayPhone}
+                            </span>
+                            <span className="text-[11px] font-mono tx-mu">
+                              · {formatRelativeAgo(entry.lastActivityIso)}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                            {entry.productLabel && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cd bd font-medium text-[var(--tx)]">
+                                <Package size={10} style={{ color: 'var(--ac)' }} />
+                                {entry.productLabel}
+                                {entry.productPrice > 0 && (
+                                  <span className="tx-mu font-mono">
+                                    · {formatMoney(entry.productPrice)}
+                                  </span>
+                                )}
+                              </span>
+                            )}
+
+                            {entry.hasOrder ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 font-semibold">
+                                <CheckCircle2 size={10} />
+                                Ya compró ({formatMoney(entry.orderTotal)})
+                              </span>
+                            ) : entry.lastMsgFromMe === false ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/25 text-rose-600 dark:text-rose-400 font-semibold">
+                                <Clock size={10} />
+                                Cliente escribió último · Sin responder
+                              </span>
+                            ) : entry.lastMsgFromMe === true ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cd bd tx-mu">
+                                Último msg enviado · Sin respuesta aún
+                              </span>
+                            ) : null}
+
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-cd bd tx-mu">
+                              {entry.mode === 'human' ? <User size={10} /> : <Bot size={10} />}
+                              {entry.mode === 'human' ? 'Humano' : 'Todd'}
+                            </span>
+
+                            {isSent && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 font-semibold">
+                                <Check size={10} />
+                                Seguimiento enviado
+                              </span>
+                            )}
+                          </div>
+
+                          {entry.lastMessage && (
+                            <p className="text-xs tx-mu line-clamp-2 pt-0.5">
+                              “{entry.lastMessage}”
+                            </p>
+                          )}
+
+                          {entry.state.direccion && (
+                            <p className="text-[11px] tx-mu">
+                              📍 Dirección registrada: <span className="text-[var(--tx)]">{entry.state.direccion}</span>
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Acciones por chat */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {entry.conv && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const convId = entry.conv!.id;
+                                setSelectedStageKey(null);
+                                onOpenConversation(convId);
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-cd bd text-xs font-medium hover:bg-sf transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                            >
+                              <MessageSquare size={12} />
+                              Ver chat
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleFollowUpComposer(entry)}
+                            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                              isComposing
+                                ? 'bg-sf bd text-[var(--tx)]'
+                                : 'bg-[var(--tx)] text-[var(--cd)] hover:opacity-90'
+                            }`}
+                          >
+                            <Send size={12} />
+                            {isComposing ? 'Ocultar' : 'Seguimiento'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {rowFeedback && (
+                        <div
+                          className={`px-3 py-2 rounded-lg text-xs font-medium ${
+                            rowFeedback.type === 'ok'
+                              ? 'bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-rose-500/10 border border-rose-500/25 text-rose-500'
+                          }`}
+                        >
+                          {rowFeedback.text}
+                        </div>
+                      )}
+
+                      {/* Compositor rápido de seguimiento */}
+                      {isComposing && (
+                        <div className="pt-2 border-t border-[var(--bd)] space-y-2">
+                          <div className="flex items-center justify-between text-[11px] tx-mu">
+                            <span>Mensaje sugerido para etapa «{selectedStageMeta.label}» (editable)</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDraftMessages(prev => ({
+                                  ...prev,
+                                  [entry.id]: buildStageFollowUpTemplate({
+                                    stepKey: selectedStageKey || 'cotizando',
+                                    customerName: entry.displayName,
+                                    productName: entry.productLabel,
+                                  }),
+                                }))
+                              }
+                              className="hover:underline cursor-pointer"
+                            >
+                              Restaurar plantilla
+                            </button>
+                          </div>
+
+                          <textarea
+                            rows={2}
+                            value={draftVal}
+                            onChange={e =>
+                              setDraftMessages(prev => ({
+                                ...prev,
+                                [entry.id]: e.target.value,
+                              }))
+                            }
+                            className="w-full p-2.5 rounded-lg bg-cd bd text-xs resize-y focus:outline-none focus:ring-1 focus:ring-[var(--ac)]"
+                            placeholder="Escribe el mensaje de seguimiento por WhatsApp..."
+                          />
+
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-[11px] tx-mu">
+                              Al enviar se pausará Bot Todd en este chat para que respondas tú si contesta.
+                            </span>
+                            <div className="flex items-center gap-2">
+                              {entry.conv && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const convId = entry.conv!.id;
+                                    setSelectedStageKey(null);
+                                    onOpenConversation(convId, draftVal);
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-lg bg-cd bd text-xs font-medium hover:bg-sf cursor-pointer"
+                                >
+                                  Editar dentro del chat
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                disabled={!draftVal.trim() || isSendingThis}
+                                onClick={() => handleSendQuickFollowUp(entry)}
+                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                              >
+                                {isSendingThis ? (
+                                  <Loader2 size={12} className="animate-spin" />
+                                ) : (
+                                  <Send size={12} />
+                                )}
+                                {isSendingThis ? 'Enviando...' : 'Enviar por WhatsApp'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
