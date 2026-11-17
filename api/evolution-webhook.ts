@@ -518,14 +518,30 @@ export default async function handler(req: any, res: any) {
           }),
           supabase
             .from('inventory_stock')
-            .select('sku, nombre, precio_venta, activo, activo_todd')
+            .select('sku, nombre, precio_venta, activo, activo_todd, template_id')
             .order('nombre')
-            .limit(45),
+            .limit(60),
         ]);
 
         if (media?.base64) {
-          const catalogLines = (stockRes.data || [])
-            .filter((item: any) => item.activo !== false && item.activo_todd !== false)
+          const rawRows = (stockRes.data || []).filter(
+            (item: any) => item.activo !== false && item.activo_todd !== false
+          );
+          const skuSet = new Set(rawRows.map((r: any) => String(r.sku || '').trim().toUpperCase()));
+          const seenTpl = new Set<string>();
+          const parentRows = rawRows.filter((item: any) => {
+            const skuU = String(item.sku || '').trim().toUpperCase();
+            const isPrefixedChild = Array.from(skuSet).some(p => p !== skuU && skuU.startsWith(`${p}-`));
+            if (isPrefixedChild) return false;
+            const tId = item.template_id ? String(item.template_id).trim() : '';
+            if (tId) {
+              if (seenTpl.has(tId)) return false;
+              seenTpl.add(tId);
+            }
+            return true;
+          });
+
+          const catalogLines = parentRows
             .map(
               (item: any) =>
                 `- SKU: ${item.sku} | ${item.nombre} ($${Number(item.precio_venta || 0).toFixed(2)})`

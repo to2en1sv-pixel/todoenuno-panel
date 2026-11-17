@@ -25,7 +25,8 @@ import {
   recordStockEntry,
   adjustStock,
   quickAddStockDelta,
-  resolveOrderInventoryLines
+  resolveOrderInventoryLines,
+  identifyDuplicateVariantStockRows
 } from '@/lib/inventory';
 import { ProductImg } from '@/components/inventory/ProductImg';
 import { Sprint10SqlModal } from '@/components/inventory/Sprint10SqlModal';
@@ -76,6 +77,7 @@ export function InventarioPage() {
   const [entradaTipo, setEntradaTipo] = useState<'inventario_inicial' | 'compra_entrada'>('inventario_inicial');
   const [entradaSku, setEntradaSku] = useState('');
   const [entradaCantidad, setEntradaCantidad] = useState('');
+  const [entradaVariantQtys, setEntradaVariantQtys] = useState<Record<number, string>>({});
   const [entradaCosto, setEntradaCosto] = useState('');
   const [entradaProveedor, setEntradaProveedor] = useState('');
   const [entradaNotas, setEntradaNotas] = useState('');
@@ -153,6 +155,43 @@ export function InventarioPage() {
     return map;
   }, [variantsList]);
 
+  const { duplicateChildSkuSet } = useMemo(
+    () => identifyDuplicateVariantStockRows(stockItems, variantsList),
+    [stockItems, variantsList]
+  );
+
+  const parentStockItems = useMemo(
+    () =>
+      stockItems.filter(
+        i => !i.sku.toLowerCase().includes('fee') && !duplicateChildSkuSet.has(i.sku.toUpperCase())
+      ),
+    [stockItems, duplicateChildSkuSet]
+  );
+
+  const selectedEntradaProduct = useMemo(() => {
+    const clean = entradaSku.trim().toUpperCase();
+    if (!clean) return null;
+    return parentStockItems.find(i => i.sku.toUpperCase() === clean) || null;
+  }, [parentStockItems, entradaSku]);
+
+  const selectedEntradaVariants = useMemo(() => {
+    if (!selectedEntradaProduct?.template_id) return [];
+    return variantsByTemplate.get(String(selectedEntradaProduct.template_id)) || [];
+  }, [selectedEntradaProduct, variantsByTemplate]);
+
+  const totalVariantAllocQty = useMemo(() => {
+    if (selectedEntradaVariants.length === 0) return 0;
+    return selectedEntradaVariants.reduce((sum, v) => {
+      const q = Math.max(parseInt(entradaVariantQtys[v.variante_id] || '0', 10) || 0, 0);
+      return sum + q;
+    }, 0);
+  }, [selectedEntradaVariants, entradaVariantQtys]);
+
+  const effectiveEntradaQty =
+    selectedEntradaVariants.length > 0
+      ? totalVariantAllocQty
+      : Math.max(parseInt(entradaCantidad || '0', 10) || 0, 0);
+
   // Sincronizar si el usuario llega desde Catálogo Visual con ?sku=...
   useEffect(() => {
     const skuParam = searchParams.get('sku');
@@ -161,7 +200,7 @@ export function InventarioPage() {
     if (filterParam === 'criticos') setFilterCriticos(true);
   }, [searchParams]);
 
-  // KPIs de Bodega (excluyen estrictamente productos pausados)
+  // KPIs de Bodega (excluyen estrictamente productos pausados y filas duplicadas de variantes)
   const metrics = useMemo(() => {
     let activeSkus = 0;
     let pausedSkus = 0;
@@ -173,8 +212,7 @@ export function InventarioPage() {
     let valorVentaDisponible = 0;
     let skusCriticos = 0;
 
-    stockItems.forEach(item => {
-      if (item.sku.toLowerCase().includes('fee')) return;
+    parentStockItems.forEach(item => {
       if (item.activo === false) {
         pausedSkus++;
         return;
@@ -213,11 +251,11 @@ export function InventarioPage() {
       utilidadPotencial,
       skusCriticos
     };
-  }, [stockItems]);
+  }, [parentStockItems]);
 
-  // Filtrado de Stock (oculta productos pausados)
+  // Filtrado de Stock (oculta productos pausados y duplicados de variantes)
   const filteredInventory = useMemo(() => {
-    let list = stockItems.filter(i => !i.sku.toLowerCase().includes('fee') && i.activo !== false);
+    let list = parentStockItems.filter(i => i.activo !== false);
 
     if (search.trim()) {
       const q = search.toLowerCase().trim();
@@ -234,7 +272,7 @@ export function InventarioPage() {
     }
 
     return list;
-  }, [stockItems, search, filterCriticos]);
+  }, [parentStockItems, search, filterCriticos]);
 
   // Filtrado de Kárdex
   const filteredKardex = useMemo(() => {
@@ -280,32 +318,65 @@ export function InventarioPage() {
 
   const handleSaveEntrada = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!entradaSku.trim() || !entradaCantidad) return;
+    if (!entradaSku.trim()) return;
+
+    const hasVariants = selectedEntradaVariants.length > 0;
+    const variantAllocations = hasVariants
+      ? selectedEntradaVariants
+          .map(v => ({
+            variante_id: v.variante_id,
+            sku: v.sku,
+            color: v.color || 'Estándar',
+            talla: v.talla || 'Única',
+            cantidad: Math.max(parseInt(entradaVariantQtys[v.variante_id] || '0', 10) || 0, 0)
+          }))
+          .filter(a => a.cantidad > 0)
+      : undefined;
+
+    if (hasVariants && (!variantAllocations || variantAllocations.length === 0)) {
+      showToast('err', 'Asigna al menos 1 unidad a alguna de las variantes del producto.');
+      return;
+    }
+    if (!hasVariants && (!entradaCantidad || parseInt(entradaCantidad, 10) <= 0)) {
+      showToast('err', 'Ingresa una cantidad mayor a 0.');
+      return;
+    }
+
+    const totalUnits = hasVariants
+      ? (variantAllocations || []).reduce((s, a) => s + a.cantidad, 0)
+      : Math.max(parseInt(entradaCantidad || '0', 10) || 0, 0);
+
     setIsSavingEntrada(true);
 
     const res = await recordStockEntry({
       sku: entradaSku.toUpperCase().trim(),
-      cantidad: parseInt(entradaCantidad, 10),
+      cantidad: totalUnits,
       costo_unitario: parseFloat(entradaCosto || '0'),
       tipo_entrada: entradaTipo,
       proveedor: entradaTipo === 'compra_entrada' ? entradaProveedor : undefined,
       notas: entradaNotas,
       asentar_en_finanzas: entradaTipo === 'compra_entrada' ? entradaAsentarFinanzas : false,
-      cuenta_finanzas_id: 'banco_principal'
+      cuenta_finanzas_id: 'banco_principal',
+      variant_allocations: variantAllocations
     });
 
     setIsSavingEntrada(false);
 
     if (res.success) {
+      const breakdownTxt =
+        variantAllocations && variantAllocations.length > 0
+          ? ` (${variantAllocations.map(a => `${a.cantidad} ${a.color}`).join(', ')})`
+          : '';
       showToast(
         'ok',
         entradaTipo === 'compra_entrada'
-          ? `Compra de ${entradaCantidad}x ${entradaSku.toUpperCase()} asentada en bodega.`
-          : `Se sumaron +${entradaCantidad} unidades a ${entradaSku.toUpperCase()} (sin afectar Finanzas).`
+          ? `Compra de ${totalUnits}x ${entradaSku.toUpperCase()}${breakdownTxt} asentada en bodega.`
+          : `Se sumaron +${totalUnits} unidades a ${entradaSku.toUpperCase()}${breakdownTxt} (sin afectar Finanzas).`
       );
       setShowEntradaModal(false);
       setEntradaSku('');
       setEntradaCantidad('');
+      setEntradaVariantQtys({});
       setEntradaCosto('');
       setEntradaProveedor('');
       setEntradaNotas('');
@@ -489,7 +560,7 @@ export function InventarioPage() {
           <button
             type="button"
             onClick={() => {
-              const firstActive = stockItems.find(s => s.activo !== false);
+              const firstActive = parentStockItems.find(s => s.activo !== false);
               setAjusteSku(firstActive?.sku || '');
               setAjusteNuevoStock(firstActive ? String(firstActive.stock_fisico) : '');
               setShowAjusteModal(true);
@@ -502,13 +573,14 @@ export function InventarioPage() {
           <button
             type="button"
             onClick={() => {
-              setEntradaTipo('inventario_inicial');
-              setEntradaAsentarFinanzas(false);
+              setEntradaTipo('compra_entrada');
+              setEntradaAsentarFinanzas(true);
+              setEntradaVariantQtys({});
               setShowEntradaModal(true);
             }}
             className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] rounded-lg text-xs font-semibold flex items-center gap-1.5 hover:opacity-90 transition-opacity"
           >
-            <PackagePlus size={14} /> Ingresar stock
+            <PackagePlus size={14} /> Compra / Ingresar stock
           </button>
         </div>
       </header>
@@ -819,16 +891,18 @@ export function InventarioPage() {
                             <button
                               type="button"
                               onClick={() => {
-                                setEntradaTipo('inventario_inicial');
-                                setEntradaAsentarFinanzas(false);
+                                setEntradaTipo('compra_entrada');
+                                setEntradaAsentarFinanzas(true);
                                 setEntradaSku(item.sku);
+                                setEntradaVariantQtys({});
+                                setEntradaCantidad('');
                                 setEntradaCosto(String(item.costo_unitario || ''));
                                 setShowEntradaModal(true);
                               }}
                               className="px-2.5 py-1 rounded border border-[var(--bd)] bg-cd hover:bg-sf text-[var(--tx)] text-[11px] font-semibold"
-                              title="Ingresar lote"
+                              title="Ingresar compra o lote (permite desglosar por variantes)"
                             >
-                              + Lote
+                              + Compra
                             </button>
                             <button
                               type="button"
@@ -961,18 +1035,26 @@ export function InventarioPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-[var(--mu)] mb-1">SKU del producto *</label>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">Producto / SKU *</label>
                 <input
                   type="text"
                   list="skus-existentes-inv"
                   value={entradaSku}
-                  onChange={e => setEntradaSku(e.target.value.toUpperCase())}
-                  placeholder="Escribe o selecciona un SKU"
+                  onChange={e => {
+                    const nextSku = e.target.value.toUpperCase();
+                    setEntradaSku(nextSku);
+                    setEntradaVariantQtys({});
+                    const matched = parentStockItems.find(s => s.sku.toUpperCase() === nextSku.trim());
+                    if (matched && matched.costo_unitario > 0 && !entradaCosto) {
+                      setEntradaCosto(String(matched.costo_unitario));
+                    }
+                  }}
+                  placeholder="Escribe o selecciona un producto / SKU"
                   className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs uppercase font-mono font-semibold text-[var(--tx)] outline-none focus:border-[var(--tx)]"
                   required
                 />
                 <datalist id="skus-existentes-inv">
-                  {stockItems
+                  {parentStockItems
                     .filter(s => s.activo !== false)
                     .map(s => (
                       <option key={s.sku} value={s.sku}>
@@ -980,20 +1062,106 @@ export function InventarioPage() {
                       </option>
                     ))}
                 </datalist>
+                {selectedEntradaProduct && (
+                  <p className="text-[11px] text-[var(--mu)] mt-1">
+                    {selectedEntradaProduct.nombre} · Stock actual: <strong className="font-mono text-[var(--tx)]">{selectedEntradaProduct.stock_fisico} uds</strong>
+                  </p>
+                )}
               </div>
+
+              {selectedEntradaVariants.length > 0 && (
+                <div className="p-3 rounded-xl bg-sf border border-[var(--bd)] space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-[var(--tx)] flex items-center gap-1.5">
+                      <Layers size={13} /> Repartir cantidad por variante ({selectedEntradaVariants.length})
+                    </span>
+                    <span className="text-[11px] font-mono tabular-nums font-bold text-emerald-600 dark:text-emerald-400">
+                      Total: {totalVariantAllocQty} uds
+                    </span>
+                  </div>
+
+                  <div className="max-h-48 overflow-y-auto divide-y divide-[var(--bd)] rounded-lg border border-[var(--bd)] bg-cd">
+                    {selectedEntradaVariants.map(v => {
+                      const val = entradaVariantQtys[v.variante_id] ?? '';
+                      const numVal = Math.max(parseInt(val || '0', 10) || 0, 0);
+                      return (
+                        <div
+                          key={v.variante_id}
+                          className="px-3 py-2 flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0 flex items-center gap-2">
+                            <span
+                              className="w-3 h-3 rounded-full border border-black/20 shrink-0"
+                              style={{ backgroundColor: getVariantDotColor(v.color) }}
+                            />
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-[var(--tx)] truncate">
+                                {v.color}
+                                {v.talla && v.talla !== 'Única' ? ` · ${v.talla}` : ''}
+                              </div>
+                              <div className="text-[10px] font-mono text-[var(--mu)]">
+                                Actual: {v.stock} uds
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            {[5, 10].map(qBtn => (
+                              <button
+                                key={qBtn}
+                                type="button"
+                                onClick={() =>
+                                  setEntradaVariantQtys(prev => ({
+                                    ...prev,
+                                    [v.variante_id]: String(numVal + qBtn)
+                                  }))
+                                }
+                                className="px-1.5 py-1 rounded border border-[var(--bd)] bg-sf hover:bg-cd text-[10px] font-mono font-semibold text-[var(--mu)] hover:text-[var(--tx)]"
+                              >
+                                +{qBtn}
+                              </button>
+                            ))}
+                            <input
+                              type="number"
+                              min="0"
+                              value={val}
+                              placeholder="0"
+                              onChange={e =>
+                                setEntradaVariantQtys(prev => ({
+                                  ...prev,
+                                  [v.variante_id]: e.target.value
+                                }))
+                              }
+                              className="w-16 p-1.5 text-center rounded-md border border-[var(--bd)] bg-sf text-xs font-mono tabular-nums font-bold text-[var(--tx)] outline-none focus:border-[var(--tx)]"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-[var(--mu)] mb-1">Unidades a sumar *</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={entradaCantidad}
-                    onChange={e => setEntradaCantidad(e.target.value)}
-                    placeholder="25"
-                    className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-sm font-mono tabular-nums font-semibold text-[var(--tx)] outline-none focus:border-[var(--tx)]"
-                    required
-                  />
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1">
+                    {selectedEntradaVariants.length > 0 ? 'Total unidades (suma automática)' : 'Unidades a sumar *'}
+                  </label>
+                  {selectedEntradaVariants.length > 0 ? (
+                    <div className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf/70 text-sm font-mono tabular-nums font-bold text-[var(--tx)]">
+                      {totalVariantAllocQty} uds
+                    </div>
+                  ) : (
+                    <input
+                      type="number"
+                      min="1"
+                      value={entradaCantidad}
+                      onChange={e => setEntradaCantidad(e.target.value)}
+                      placeholder="25"
+                      className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-sm font-mono tabular-nums font-semibold text-[var(--tx)] outline-none focus:border-[var(--tx)]"
+                      required
+                    />
+                  )}
                 </div>
 
                 <div>
@@ -1051,7 +1219,7 @@ export function InventarioPage() {
                       </span>
                       <span className="text-[11px] text-[var(--mu)] block mt-0.5 tabular-nums">
                         Registrará el pago de $
-                        {(parseInt(entradaCantidad || '0', 10) * parseFloat(entradaCosto || '0')).toFixed(2)} en Banco Principal.
+                        {(effectiveEntradaQty * parseFloat(entradaCosto || '0')).toFixed(2)} en Banco Principal.
                       </span>
                     </label>
                   </div>
@@ -1134,7 +1302,7 @@ export function InventarioPage() {
                   required
                 />
                 <datalist id="skus-existentes-ajuste">
-                  {stockItems
+                  {parentStockItems
                     .filter(s => s.activo !== false)
                     .map(s => (
                       <option key={s.sku} value={s.sku}>

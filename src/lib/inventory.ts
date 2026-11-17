@@ -2,11 +2,15 @@ import { supabase } from '@/lib/supabase';
 import { emitOsEvent } from '@/lib/osEvents';
 import { addManualTransaction } from '@/lib/finance';
 import { resolveCatalogSku, getInventoryCutoffDate, isOrderBeforeCutoff } from '@/lib/catalogAliases';
-import { getCachedToddCatalogSettings } from '@/lib/toddSettings';
-import type { 
-  StockItem, 
-  KardexMovement, 
-  EntradaMercaderiaFormData, 
+import {
+  getCachedToddCatalogSettings,
+  fetchToddCatalogSettings,
+  type ToddCatalogSettings
+} from '@/lib/toddSettings';
+import type {
+  StockItem,
+  KardexMovement,
+  EntradaMercaderiaFormData,
   ProductFormData,
   KardexMovementType,
   ProductVariant,
@@ -364,7 +368,25 @@ export async function recordStockEntry(
   entry: EntradaMercaderiaFormData
 ): Promise<{ success: boolean; error?: string; isRealDb?: boolean }> {
   const skuClean = normalizeSku(entry.sku);
-  const cantidad = Math.abs(Math.round(entry.cantidad));
+  const rawAllocations = Array.isArray(entry.variant_allocations) ? entry.variant_allocations : [];
+  const activeAllocations = rawAllocations
+    .map(a => ({
+      ...a,
+      cantidad: Math.max(Math.round(Number(a.cantidad) || 0), 0)
+    }))
+    .filter(a => a.cantidad > 0);
+
+  if (rawAllocations.length > 0 && activeAllocations.length === 0) {
+    return {
+      success: false,
+      error: 'Ingresa al menos 1 unidad en alguna variante para registrar la entrada.'
+    };
+  }
+
+  const cantidad =
+    activeAllocations.length > 0
+      ? activeAllocations.reduce((acc, a) => acc + a.cantidad, 0)
+      : Math.abs(Math.round(entry.cantidad));
   const costo = Math.max(Number(entry.costo_unitario) || 0, 0);
   const tipoEntrada: KardexMovementType = entry.tipo_entrada || 'inventario_inicial';
 
@@ -372,13 +394,29 @@ export async function recordStockEntry(
     return { success: false, error: 'SKU y cantidad mayor a 0 son obligatorios.' };
   }
 
+  const variantBreakdownText =
+    activeAllocations.length > 0
+      ? activeAllocations
+          .map(a => {
+            const label =
+              a.talla && a.talla !== 'Única' && a.talla !== 'Unica'
+                ? `${a.color} (${a.talla})`
+                : a.color;
+            return `${a.cantidad} ${label}`;
+          })
+          .join(', ')
+      : '';
+
   const totalCompra = cantidad * costo;
-  const motivo =
+  const baseMotivo =
     tipoEntrada === 'compra_entrada'
       ? `Compra a proveedor ${entry.proveedor || 'Mercadería'}. ${entry.notas || ''}`.trim()
       : tipoEntrada === 'inventario_inicial'
       ? `Carga de inventario inicial / stock en bodega. ${entry.notas || ''}`.trim()
       : `Ingreso directo de unidades (+${cantidad}). ${entry.notas || ''}`.trim();
+  const motivo = variantBreakdownText
+    ? `${baseMotivo} [${variantBreakdownText}]`.trim()
+    : baseMotivo;
 
   const dbRes = await executeMovementInDb({
     sku: skuClean,
@@ -395,6 +433,65 @@ export async function recordStockEntry(
     return { success: false, error: dbRes.error || 'Error guardando entrada en Supabase', isRealDb: false };
   }
 
+  // Si el ingreso incluye desglose por variantes, actualizar stock de cada variante y resincronizar Bot Todd
+  if (activeAllocations.length > 0) {
+    let resolvedTemplateId: number | null = null;
+    for (const alloc of activeAllocations) {
+      try {
+        const { data: varRow } = await supabase
+          .from('productos_variantes')
+          .select('variante_id, template_id, sku, stock, nombre_completo')
+          .eq('variante_id', alloc.variante_id)
+          .maybeSingle();
+
+        if (!varRow) continue;
+        if (varRow.template_id && !resolvedTemplateId) {
+          resolvedTemplateId = Number(varRow.template_id);
+        }
+        const nextVarStock = Math.max(Number(varRow.stock) || 0, 0) + alloc.cantidad;
+        const nextEstado = nextVarStock > 0 ? 'DISPONIBLE' : 'NO_DISPONIBLE';
+        await supabase
+          .from('productos_variantes')
+          .update({
+            stock: nextVarStock,
+            estado: nextEstado,
+            updated_at: new Date().toISOString()
+          })
+          .eq('variante_id', alloc.variante_id);
+
+        if (varRow.sku) {
+          try {
+            await supabase
+              .from('inventory_cache')
+              .upsert(
+                {
+                  sku: normalizeSku(varRow.sku),
+                  qty: nextVarStock,
+                  state: nextEstado,
+                  updated_at: new Date().toISOString()
+                },
+                { onConflict: 'sku' }
+              );
+          } catch {}
+        }
+      } catch (err) {
+        console.warn('Error actualizando variante en compra:', err);
+      }
+    }
+
+    if (resolvedTemplateId) {
+      try {
+        await syncVariantsToMasterAndTodd({
+          masterSku: skuClean,
+          templateId: resolvedTemplateId,
+          productName: skuClean,
+          syncMasterStock: false, // executeMovementInDb ya sumó el total al SKU maestro
+          syncToddDetails: true
+        });
+      } catch {}
+    }
+  }
+
   // Asentar en Finanzas SOLO si es compra y el usuario marcó asentar_en_finanzas
   if (tipoEntrada === 'compra_entrada' && entry.asentar_en_finanzas && totalCompra > 0) {
     try {
@@ -403,7 +500,7 @@ export async function recordStockEntry(
         tipo: 'expense',
         categoria: 'pago_proveedor',
         monto: totalCompra,
-        descripcion: `Compra ${cantidad}x ${skuClean} (${entry.proveedor || 'Mercadería'})`,
+        descripcion: `Compra ${cantidad}x ${skuClean}${variantBreakdownText ? ` (${variantBreakdownText})` : ''} — ${entry.proveedor || 'Mercadería'}`,
         fecha: new Date().toISOString().slice(0, 10)
       });
     } catch (err) {
@@ -424,7 +521,8 @@ export async function recordStockEntry(
         total_compra: tipoEntrada === 'compra_entrada' ? totalCompra : 0,
         proveedor: entry.proveedor || null,
         tipo: tipoEntrada,
-        saldo_nuevo: dbRes.nuevoFisico
+        saldo_nuevo: dbRes.nuevoFisico,
+        variantes: activeAllocations.length > 0 ? activeAllocations : undefined
       }
     });
   } catch {
@@ -1878,7 +1976,13 @@ export async function syncVariantsToMasterAndTodd(params: {
       const baseInstr = stripVariantToddBlock(
         stockRow?.todd_instrucciones ?? localCfg.todd_instrucciones ?? ''
       );
-      const toddCfg = getCachedToddCatalogSettings();
+      let toddCfg = getCachedToddCatalogSettings();
+      if (params.allowBackorder === undefined || params.hideExactCounts === undefined) {
+        try {
+          const freshSettings = await fetchToddCatalogSettings();
+          toddCfg = freshSettings.settings;
+        } catch {}
+      }
       const allowBackorder =
         params.allowBackorder ??
         (toddCfg.allowBackorderGlobal || toddCfg.backorderSkus.includes(masterSkuClean));
@@ -2181,6 +2285,260 @@ async function applyVariantStockDelta(params: {
       syncMasterStock: false, // El Kárdex del pedido ya ajustó inventory.stock
       syncToddDetails: true
     });
+  }
+}
+
+export interface DuplicateVariantRowMatch {
+  childRow: StockItem;
+  parentRow: StockItem;
+  matchedVariant: ProductVariant | null;
+}
+
+/**
+ * Detecta filas duplicadas en inventory_stock que corresponden a SKUs de variantes
+ * (ej. ASIS-BB-01-ROSADO o PORTA-BEBE-01-VERDE cuando ya existe ASIS-BB-01 o PORTA-BEBE-01).
+ */
+export function identifyDuplicateVariantStockRows(
+  stockItems: StockItem[],
+  variants: ProductVariant[]
+): {
+  duplicateChildSkuSet: Set<string>;
+  duplicates: DuplicateVariantRowMatch[];
+} {
+  const duplicateChildSkuSet = new Set<string>();
+  const duplicates: DuplicateVariantRowMatch[] = [];
+
+  if (!Array.isArray(stockItems) || stockItems.length === 0) {
+    return { duplicateChildSkuSet, duplicates };
+  }
+
+  const variantBySku = new Map<string, ProductVariant>();
+  const variantByTemplateAndSuffix = new Map<string, ProductVariant[]>();
+
+  variants.forEach(v => {
+    const vSku = normalizeSku(v.sku);
+    if (vSku) variantBySku.set(vSku, v);
+    const tId = String(v.template_id || '').trim();
+    if (tId) {
+      const list = variantByTemplateAndSuffix.get(tId) || [];
+      list.push(v);
+      variantByTemplateAndSuffix.set(tId, list);
+    }
+  });
+
+  // 1. Agrupar por template_id para detectar padre vs hijos
+  const rowsByTemplate = new Map<string, StockItem[]>();
+  stockItems.forEach(item => {
+    const tId = item.template_id ? String(item.template_id).trim() : '';
+    if (!tId) return;
+    const arr = rowsByTemplate.get(tId) || [];
+    arr.push(item);
+    rowsByTemplate.set(tId, arr);
+  });
+
+  rowsByTemplate.forEach((rows, tId) => {
+    if (rows.length <= 1) return;
+    // Elegir fila padre: la que NO está en productos_variantes.sku (o la de SKU más corto / prefijo de otras)
+    const sorted = [...rows].sort((a, b) => {
+      const aIsVar = variantBySku.has(normalizeSku(a.sku)) ? 1 : 0;
+      const bIsVar = variantBySku.has(normalizeSku(b.sku)) ? 1 : 0;
+      if (aIsVar !== bIsVar) return aIsVar - bIsVar;
+      const aHasImg = a.image_url ? 0 : 1;
+      const bHasImg = b.image_url ? 0 : 1;
+      if (aHasImg !== bHasImg) return aHasImg - bHasImg;
+      return normalizeSku(a.sku).length - normalizeSku(b.sku).length;
+    });
+
+    const parentRow = sorted[0];
+    const parentSku = normalizeSku(parentRow.sku);
+
+    for (let i = 1; i < sorted.length; i++) {
+      const childRow = sorted[i];
+      const childSku = normalizeSku(childRow.sku);
+      const isKnownVariant = variantBySku.has(childSku);
+      const isPrefixedChild = childSku.startsWith(`${parentSku}-`);
+
+      if (isKnownVariant || isPrefixedChild) {
+        duplicateChildSkuSet.add(childSku);
+        const tplVars = variantByTemplateAndSuffix.get(tId) || [];
+        const matchedVariant =
+          variantBySku.get(childSku) ||
+          tplVars.find(v => childSku.endsWith(`-${slugToken(v.color)}`)) ||
+          null;
+        duplicates.push({ childRow, parentRow, matchedVariant });
+      }
+    }
+  });
+
+  // 2. Segundo pase: si una fila huérfana en inventory_stock coincide exactamente con una variante en productos_variantes
+  //    y ya existe su producto padre (por template_id distinto o prefijo SKU_PADRE-...)
+  const allNonDupBySku = new Map<string, StockItem>();
+  const parentByTemplateId = new Map<string, StockItem>();
+  stockItems.forEach(item => {
+    const sku = normalizeSku(item.sku);
+    if (duplicateChildSkuSet.has(sku)) return;
+    allNonDupBySku.set(sku, item);
+    if (item.template_id) {
+      parentByTemplateId.set(String(item.template_id).trim(), item);
+    }
+  });
+
+  stockItems.forEach(item => {
+    const sku = normalizeSku(item.sku);
+    if (!sku || duplicateChildSkuSet.has(sku)) return;
+
+    const matchedVar = variantBySku.get(sku);
+    if (matchedVar) {
+      const tplParent = parentByTemplateId.get(String(matchedVar.template_id));
+      if (tplParent && normalizeSku(tplParent.sku) !== sku) {
+        duplicateChildSkuSet.add(sku);
+        duplicates.push({ childRow: item, parentRow: tplParent, matchedVariant: matchedVar });
+        return;
+      }
+    }
+
+    // Buscar si existe otro SKU padre tal que sku === `${parentSku}-${colorSlug}`
+    for (const [candidateParentSku, candidateParent] of allNonDupBySku.entries()) {
+      if (candidateParentSku === sku) continue;
+      if (!sku.startsWith(`${candidateParentSku}-`)) continue;
+      const tplVars = candidateParent.template_id
+        ? variantByTemplateAndSuffix.get(String(candidateParent.template_id)) || []
+        : [];
+      const suffixMatchedVar =
+        matchedVar ||
+        tplVars.find(v => normalizeSku(v.sku) === sku || sku === `${candidateParentSku}-${slugToken(v.color)}`) ||
+        null;
+      if (suffixMatchedVar || (item.template_id && item.template_id === candidateParent.template_id)) {
+        duplicateChildSkuSet.add(sku);
+        duplicates.push({ childRow: item, parentRow: candidateParent, matchedVariant: suffixMatchedVar });
+        break;
+      }
+    }
+  });
+
+  return { duplicateChildSkuSet, duplicates };
+}
+
+/**
+ * Fusiona filas duplicadas de variantes en inventory_stock hacia su producto padre y variante,
+ * eliminando únicamente la fila hija redundante de inventory_stock sin borrar pedidos ni Kárdex.
+ */
+export async function consolidateDuplicateVariantStockRows(
+  duplicates: DuplicateVariantRowMatch[]
+): Promise<{ success: boolean; mergedCount: number; error?: string }> {
+  if (!duplicates || duplicates.length === 0) {
+    return { success: true, mergedCount: 0 };
+  }
+
+  let mergedCount = 0;
+  const touchedParents = new Map<string, { sku: string; templateId: number; nombre: string; basePrice: number }>();
+
+  try {
+    for (const dup of duplicates) {
+      const childSku = normalizeSku(dup.childRow.sku);
+      const parentSku = normalizeSku(dup.parentRow.sku);
+      const templateIdNum = Number(dup.parentRow.template_id || dup.matchedVariant?.template_id || 0);
+
+      // Si la fila duplicada tenía unidades registradas y la variante estaba en 0, rescatar ese stock
+      if (dup.matchedVariant && dup.childRow.stock_fisico > 0 && dup.matchedVariant.stock === 0) {
+        await supabase
+          .from('productos_variantes')
+          .update({
+            stock: dup.childRow.stock_fisico,
+            estado: 'DISPONIBLE',
+            updated_at: new Date().toISOString()
+          })
+          .eq('variante_id', dup.matchedVariant.variante_id);
+      }
+
+      // Rescatar reservas si la fila duplicada llegó a tener unidades reservadas
+      if (dup.childRow.stock_reservado > 0) {
+        const nextReserved = (Number(dup.parentRow.stock_reservado) || 0) + dup.childRow.stock_reservado;
+        await upsertInventoryStockRow(parentSku, { stock_reservado: nextReserved });
+      }
+
+      // Eliminar únicamente la fila duplicada en inventory_stock (public.inventory_stock es vista sobre inventory.stock)
+      const { error: delErr } = await supabase
+        .from('inventory_stock')
+        .delete()
+        .eq('sku', childSku);
+
+      if (delErr) {
+        return {
+          success: false,
+          mergedCount,
+          error: `No se pudo fusionar ${childSku}: ${delErr.message}`
+        };
+      }
+
+      localStock = localStock.filter(i => normalizeSku(i.sku) !== childSku);
+      mergedCount++;
+
+      if (templateIdNum > 0) {
+        touchedParents.set(parentSku, {
+          sku: parentSku,
+          templateId: templateIdNum,
+          nombre: dup.parentRow.nombre || parentSku,
+          basePrice: Number(dup.parentRow.precio_venta) || 0
+        });
+      }
+    }
+
+    for (const parent of touchedParents.values()) {
+      await syncVariantsToMasterAndTodd({
+        masterSku: parent.sku,
+        templateId: parent.templateId,
+        productName: parent.nombre,
+        basePrice: parent.basePrice,
+        syncMasterStock: true,
+        syncToddDetails: true
+      });
+    }
+
+    return { success: true, mergedCount };
+  } catch (err: any) {
+    return { success: false, mergedCount, error: err?.message || 'Error fusionando duplicados.' };
+  }
+}
+
+/**
+ * Re-sincroniza el resumen de variantes en todd_instrucciones cuando cambia una regla global
+ * (ej. activar Vender sin stock Global o Privacidad de stock).
+ */
+export async function syncAllToddVariantInstructions(
+  settings: ToddCatalogSettings,
+  stockItemsInput?: StockItem[]
+): Promise<void> {
+  try {
+    const items = stockItemsInput && stockItemsInput.length > 0
+      ? stockItemsInput
+      : (await fetchStockItems()).items;
+    const allVariants = await fetchProductVariants();
+    if (allVariants.length === 0 || items.length === 0) return;
+
+    const { duplicateChildSkuSet } = identifyDuplicateVariantStockRows(items, allVariants);
+    const backorderSet = new Set(settings.backorderSkus.map(s => normalizeSku(s)));
+    const templateIdsWithVariants = new Set(allVariants.map(v => String(v.template_id)));
+
+    for (const item of items) {
+      const skuClean = normalizeSku(item.sku);
+      if (duplicateChildSkuSet.has(skuClean)) continue;
+      if (!item.template_id || !templateIdsWithVariants.has(String(item.template_id))) continue;
+
+      const allowBackorder = settings.allowBackorderGlobal || backorderSet.has(skuClean);
+      await syncVariantsToMasterAndTodd({
+        masterSku: skuClean,
+        templateId: Number(item.template_id),
+        productName: item.nombre || skuClean,
+        basePrice: Number(item.precio_venta) || 0,
+        syncMasterStock: false,
+        syncToddDetails: true,
+        allowBackorder,
+        hideExactCounts: settings.hideExactStockCounts
+      });
+    }
+  } catch (err) {
+    console.warn('Error resincronizando variantes para Todd:', err);
   }
 }
 

@@ -67,6 +67,14 @@ export interface ProductFormData {
   todd_keywords?: string;
 }
 
+export interface VariantStockAllocation {
+  variante_id: number;
+  sku?: string;
+  color: string;
+  talla?: string;
+  cantidad: number;
+}
+
 export interface EntradaMercaderiaFormData {
   sku: string;
   cantidad: number;
@@ -76,6 +84,7 @@ export interface EntradaMercaderiaFormData {
   notas?: string;
   asentar_en_finanzas: boolean;
   cuenta_finanzas_id?: string;
+  variant_allocations?: VariantStockAllocation[];
 }
 
 export interface ProductVariant {

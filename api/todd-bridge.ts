@@ -98,7 +98,9 @@ const catalogLines = (ctx.catalog || []).map((p, idx) => {
         const label = \`\${v.color}\${v.talla && v.talla !== 'Única' ? ' Talla ' + v.talla : ''}\`;
         const stLabel = v.disponible === false
           ? 'Agotado'
-          : (hideCounts ? 'Disponible' : \`\${v.stock} uds\`);
+          : (hideCounts
+              ? (v.bajoPedido ? 'Disponible (bajo pedido)' : 'Disponible')
+              : \`\${v.stock} uds\${v.bajoPedido ? ' (bajo pedido)' : ''}\`);
         return \`\${label}: \${stLabel} ($\${Number(v.precio || p.precio).toFixed(2)})\`;
       }).join(' | ')
     : (p.disponible === false
@@ -108,7 +110,7 @@ const catalogLines = (ctx.catalog || []).map((p, idx) => {
             : \`Stock general: \${p.stockDisponible} uds\`));
   return [
     \`\${idx + 1}. SKU: \${p.sku} | Nombre: \${p.nombre} | Precio: $\${Number(p.precio || 0).toFixed(2)} | TieneFoto: \${p.tieneFoto ? 'SI' : 'NO'} | TieneVideo: \${p.tieneVideo ? 'SI (' + p.videoUrl + ')' : 'NO'}\`,
-    \`   Disponibilidad: \${vars}\`,
+    \`   Disponibilidad y Opciones: \${vars}\`,
     p.pitch ? \`   Pitch: \${p.pitch}\` : '',
     p.instrucciones ? \`   Reglas/Detalles: \${p.instrucciones}\` : '',
     p.keywords ? \`   Keywords: \${p.keywords}\` : '',
@@ -140,7 +142,8 @@ Tu objetivo es HÍBRIDO:
 REGLAS CRÍTICAS:
 - NUNCA inventes productos, precios, colores ni stock fuera del catálogo.
 - PRIVACIDAD DE INVENTARIO: NUNCA digas al cliente cuántas unidades hay disponibles (prohibido decir "quedan 2", "solo tenemos 1", "hay 3 disponibles", etc.). Confirma únicamente si está disponible y qué colores o tallas hay.
-- VENTA SIN STOCK / BAJO PEDIDO: Si un producto o variante aparece marcado como "Disponible" (incluyendo venta sin stock / bajo pedido habilitada), véndelo y cierra el pedido con normalidad. NUNCA pauses el bot ("escalate_to_human": false) ni rechaces la venta por stock 0 cuando aparezca disponible.
+- VARIANTES Y COLORES COMPLETOS: Cuando un producto tenga múltiples colores o tallas marcados como "Disponible" o "Disponible (bajo pedido)" en "Disponibilidad y Opciones", SIEMPRE enumera y ofrece TODAS las opciones disponibles al cliente (ej. Rosado y Amarillo). NUNCA omitas una variante disponible ni te limites solo a la que tiene stock físico.
+- VENTA SIN STOCK / BAJO PEDIDO: Si un producto o variante aparece marcado como "Disponible" o "Disponible (bajo pedido)", véndelo y cierra el pedido con normalidad. NUNCA pauses el bot ("escalate_to_human": false) ni rechaces la venta por stock 0 cuando aparezca disponible.
 - Si un producto aparece marcado como "Agotado" o "Agotado temporalmente", indica amablemente que por el momento no está disponible y sugiere opciones similares del catálogo.
 - Si existe un AVISO TEMPORAL / DÍA FESTIVO ACTIVO en las reglas operativas, respétalo y comunícalo con prioridad cuando aplique a fechas de entrega o despacho.
 - Si el cliente pide ver fotos o pregunta por un producto por primera vez y TieneFoto = SI, pon "send_product_image": true y "product_sku" con el SKU exacto.
@@ -812,10 +815,13 @@ export default async function handler(req: any, res: any) {
       const backorderSkuSet = new Set(toddSettings.backorderSkus);
       const videoMap = toddSettings.productVideos;
 
-      const scrubStockNumbers = (txt?: string | null) => {
+      const stripVariantBlockAndScrub = (txt?: string | null) => {
         if (!txt) return '';
-        if (!hideExact) return txt;
-        return txt
+        const markerIdx = txt.indexOf('[VARIANTES_DISPONIBLES]:');
+        const cleaned = (markerIdx === -1 ? txt : txt.slice(0, markerIdx)).trim();
+        if (!cleaned) return '';
+        if (!hideExact) return cleaned;
+        return cleaned
           .replace(/:\s*\d+\s*uds\b/gi, ': Disponible')
           .replace(/\b\d+\s*uds\b/gi, 'Disponible');
       };
@@ -825,9 +831,61 @@ export default async function handler(req: any, res: any) {
       const state = Array.isArray(stateRes.data) && stateRes.data.length > 0 ? stateRes.data[0] : null;
       const recentMessages = Array.isArray(msgsRes.data) ? [...msgsRes.data].reverse() : [];
 
-      const activeVariants = (varsRes.data || []).filter((v: any) => v.estado !== 'PAUSADO');
-      const catalog = (stockRes.data || [])
-        .filter((item: any) => item.activo !== false && item.activo_todd !== false)
+      const allVariants = Array.isArray(varsRes.data) ? varsRes.data : [];
+      const activeVariants = allVariants.filter((v: any) => v.estado !== 'PAUSADO');
+      const variantSkuSet = new Set(
+        allVariants.map((v: any) => String(v.sku || '').trim().toUpperCase()).filter(Boolean)
+      );
+
+      // Deduplicar filas hijas de variantes en inventory_stock para que Todd lea solo productos padre
+      const allStockRows = Array.isArray(stockRes.data) ? stockRes.data : [];
+      const duplicateChildSkuSet = new Set<string>();
+      const rowsByTemplate = new Map<string, any[]>();
+
+      allStockRows.forEach((row: any) => {
+        const tId = row.template_id ? String(row.template_id).trim() : '';
+        if (!tId) return;
+        const arr = rowsByTemplate.get(tId) || [];
+        arr.push(row);
+        rowsByTemplate.set(tId, arr);
+      });
+
+      rowsByTemplate.forEach(rows => {
+        if (rows.length <= 1) return;
+        const sorted = [...rows].sort((a, b) => {
+          const aIsVar = variantSkuSet.has(String(a.sku || '').trim().toUpperCase()) ? 1 : 0;
+          const bIsVar = variantSkuSet.has(String(b.sku || '').trim().toUpperCase()) ? 1 : 0;
+          if (aIsVar !== bIsVar) return aIsVar - bIsVar;
+          return String(a.sku || '').length - String(b.sku || '').length;
+        });
+        const parentSku = String(sorted[0].sku || '').trim().toUpperCase();
+        for (let i = 1; i < sorted.length; i++) {
+          const childSku = String(sorted[i].sku || '').trim().toUpperCase();
+          if (variantSkuSet.has(childSku) || childSku.startsWith(`${parentSku}-`)) {
+            duplicateChildSkuSet.add(childSku);
+          }
+        }
+      });
+
+      const nonDupStockSkus = allStockRows
+        .map((r: any) => String(r.sku || '').trim().toUpperCase())
+        .filter(s => s && !duplicateChildSkuSet.has(s));
+
+      allStockRows.forEach((row: any) => {
+        const skuU = String(row.sku || '').trim().toUpperCase();
+        if (!skuU || duplicateChildSkuSet.has(skuU)) return;
+        if (variantSkuSet.has(skuU)) {
+          const hasParentPrefix = nonDupStockSkus.some(p => p !== skuU && skuU.startsWith(`${p}-`));
+          if (hasParentPrefix) duplicateChildSkuSet.add(skuU);
+        }
+      });
+
+      const catalog = allStockRows
+        .filter((item: any) => {
+          const skuUpper = String(item.sku || '').trim().toUpperCase();
+          if (duplicateChildSkuSet.has(skuUpper)) return false;
+          return item.activo !== false && item.activo_todd !== false;
+        })
         .map((item: any) => {
           const skuUpper = String(item.sku || '').trim().toUpperCase();
           const allowBackorder = allowGlobal || backorderSkuSet.has(skuUpper);
@@ -839,29 +897,34 @@ export default async function handler(req: any, res: any) {
                 .map((v: any) => {
                   const varRealStock = Number(v.stock || 0);
                   const varDisponible = varRealStock > 0 || allowBackorder;
+                  const varBajoPedido = varRealStock <= 0 && allowBackorder;
                   return {
                     sku: v.sku,
                     color: v.color,
                     talla: v.talla,
                     disponible: varDisponible,
-                    stock: hideExact ? (varDisponible ? 'Disponible' : 'Agotado') : varRealStock,
+                    bajoPedido: varBajoPedido,
+                    stock: hideExact
+                      ? (varDisponible ? (varBajoPedido ? 'Disponible (bajo pedido)' : 'Disponible') : 'Agotado')
+                      : varRealStock,
                     precio: Number(v.precio || item.precio_venta || 0),
                   };
                 })
             : [];
 
           const hasAvailableVar = itemVars.some((v: any) => v.disponible);
+          const hasBackorderVar = itemVars.some((v: any) => v.bajoPedido);
           const prodDisponible = rawStock > 0 || hasAvailableVar || allowBackorder;
-          const isBackorderActive = allowBackorder && rawStock <= 0;
+          const isBackorderActive = allowBackorder && (rawStock <= 0 || hasBackorderVar);
 
-          const baseInstr = scrubStockNumbers(item.todd_instrucciones);
+          const baseInstr = stripVariantBlockAndScrub(item.todd_instrucciones);
           const videoUrl = videoMap[skuUpper] || null;
           const extraDirectives: string[] = [];
           if (hideExact) {
             extraDirectives.push('NUNCA digas al cliente cuántas unidades disponibles hay.');
           }
           if (isBackorderActive) {
-            extraDirectives.push('VENTA SIN STOCK HABILITADA: disponible bajo pedido, toma la orden sin pausar ni escalar.');
+            extraDirectives.push('VENTA SIN STOCK HABILITADA: incluye todas las variantes marcadas como disponibles o bajo pedido; toma la orden sin pausar ni escalar.');
           }
           if (videoUrl) {
             extraDirectives.push(
@@ -1059,6 +1122,9 @@ export default async function handler(req: any, res: any) {
       const cleanCatalogSku = catalogo_sku ? String(catalogo_sku).trim().toUpperCase() : null;
 
       let stockProduct: any = null;
+      let resolvedParentSku: string | null = cleanCatalogSku;
+      let directVariantBySku: any = null;
+
       if (cleanCatalogSku) {
         const { data } = await supabase
           .from('inventory_stock')
@@ -1066,10 +1132,31 @@ export default async function handler(req: any, res: any) {
           .eq('sku', cleanCatalogSku)
           .maybeSingle();
         stockProduct = data;
+
+        // Si llegó un SKU de variante (ej. ASIS-BB-01-ROSADO), resolver al producto padre real
+        const { data: varDirect } = await supabase
+          .from('productos_variantes')
+          .select('variante_id, template_id, sku, color, talla, precio')
+          .eq('sku', cleanCatalogSku)
+          .maybeSingle();
+        if (varDirect?.template_id) {
+          directVariantBySku = varDirect;
+          const { data: parentRows } = await supabase
+            .from('inventory_stock')
+            .select('sku, nombre, precio_venta, template_id')
+            .eq('template_id', String(varDirect.template_id));
+          const realParent =
+            (parentRows || []).find((r: any) => String(r.sku || '').toUpperCase() !== cleanCatalogSku) ||
+            (parentRows || [])[0];
+          if (realParent) {
+            stockProduct = realParent;
+            resolvedParentSku = String(realParent.sku || cleanCatalogSku).trim().toUpperCase();
+          }
+        }
       }
 
-      let matchedVariant: any = null;
-      if (stockProduct?.template_id && (color || talla)) {
+      let matchedVariant: any = directVariantBySku || null;
+      if (!matchedVariant && stockProduct?.template_id && (color || talla)) {
         const { data: vars } = await supabase
           .from('productos_variantes')
           .select('variante_id, sku, color, talla, precio')
@@ -1146,8 +1233,8 @@ export default async function handler(req: any, res: any) {
 
       const itemsPayload = [
         {
-          sku: cleanCatalogSku || productDisplayName,
-          catalogo_sku: cleanCatalogSku,
+          sku: resolvedParentSku || productDisplayName,
+          catalogo_sku: resolvedParentSku,
           nombre: productDisplayName,
           cantidad: qty,
           precio: computedTotal,
@@ -1176,7 +1263,7 @@ export default async function handler(req: any, res: any) {
 
       const fullOrder = {
         ...baseOrder,
-        catalogo_sku: cleanCatalogSku,
+        catalogo_sku: resolvedParentSku,
         items: itemsPayload,
         departamento: String(departamento || 'San Salvador').trim(),
       };

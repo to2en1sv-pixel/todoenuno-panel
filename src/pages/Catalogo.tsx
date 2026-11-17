@@ -40,7 +40,10 @@ import {
   deleteProductVariant,
   syncVariantsToMasterAndTodd,
   formatVariantsForTodd,
-  sanitizeToddInstructionsForPrivacy
+  sanitizeToddInstructionsForPrivacy,
+  identifyDuplicateVariantStockRows,
+  consolidateDuplicateVariantStockRows,
+  syncAllToddVariantInstructions
 } from '@/lib/inventory';
 import {
   fetchToddCatalogSettings,
@@ -133,6 +136,8 @@ export function CatalogoPage() {
 
   const [search, setSearch] = useState('');
   const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>('activos');
+  const [showVariantsView, setShowVariantsView] = useState(false);
+  const [isMergingDuplicates, setIsMergingDuplicates] = useState(false);
   const [selectedItem, setSelectedItem] = useState<UnifiedCatalogItem | null>(null);
   const [drawerTab, setDrawerTab] = useState<'info' | 'todd' | 'variantes'>('info');
 
@@ -235,16 +240,37 @@ export function CatalogoPage() {
     });
   }, []);
 
-  // UNIFICAR CATÁLOGO VISUAL: inventory_stock + public.productos sin duplicados
+  const allNormalizedVariants = useMemo<ProductVariant[]>(() => {
+    return (variantes.data ?? []).map((v: any) => ({
+      variante_id: Number(v.variante_id),
+      template_id: Number(v.template_id),
+      sku: String(v.sku || '').trim().toUpperCase(),
+      nombre_completo: v.nombre_completo || v.sku || '',
+      color: v.color || '',
+      talla: v.talla || 'Única',
+      stock: Number(v.stock) || 0,
+      precio: Number(v.precio) || 0,
+      estado: v.estado || 'DISPONIBLE',
+      image_url: v.image_url || null
+    }));
+  }, [variantes.data]);
+
+  const { duplicateChildSkuSet, duplicates: duplicateVariantMatches } = useMemo(
+    () => identifyDuplicateVariantStockRows(stockItems, allNormalizedVariants),
+    [stockItems, allNormalizedVariants]
+  );
+
+  // UNIFICAR CATÁLOGO VISUAL: inventory_stock + public.productos sin duplicados ni filas hijas de variantes
   const unifiedCatalog = useMemo<UnifiedCatalogItem[]>(() => {
     const result: UnifiedCatalogItem[] = [];
     const seenTemplateIds = new Set<string>();
     const seenSkus = new Set<string>();
 
-    // 1. Items nativos de inventory_stock
+    // 1. Items nativos de inventory_stock (excluyendo filas duplicadas de variantes)
     stockItems.forEach(s => {
       const skuClean = (s.sku || '').trim().toUpperCase();
       if (!skuClean || skuClean.includes('FEE')) return;
+      if (duplicateChildSkuSet.has(skuClean)) return;
 
       const tId = s.template_id ? String(s.template_id) : null;
       if (tId) seenTemplateIds.add(tId);
@@ -334,9 +360,12 @@ export function CatalogoPage() {
     });
 
     return result.sort((a, b) => a.nombre.localeCompare(b.nombre));
-  }, [stockItems, productos.data, variantes.data, inv.data]);
+  }, [stockItems, productos.data, variantes.data, inv.data, duplicateChildSkuSet]);
 
-  const handleOpenItem = (item: UnifiedCatalogItem) => {
+  const handleOpenItem = (
+    item: UnifiedCatalogItem,
+    initialTab: 'info' | 'todd' | 'variantes' = 'info'
+  ) => {
     setSelectedItem(item);
     setEditNombre(item.nombre);
     setEditCategoria(item.categoria || 'General');
@@ -351,7 +380,7 @@ export function CatalogoPage() {
     setEditToddKeywords(item.todd_keywords || '');
     setEditActivoTodd(item.activo_todd);
     setEditVideoUrl(toddSettings.productVideos[item.sku.toUpperCase()] || '');
-    setDrawerTab('info');
+    setDrawerTab(initialTab);
     setSimRespuesta('');
     setShowUrlInput(false);
     setDeleteErrorBanner(null);
@@ -435,25 +464,54 @@ export function CatalogoPage() {
   // Mapa rápido template_id -> variantes para pintar badges en tarjetas del catálogo
   const variantsByTemplateId = useMemo(() => {
     const map = new Map<string, ProductVariant[]>();
-    (variantes.data ?? []).forEach((v: any) => {
+    allNormalizedVariants.forEach(v => {
       const k = String(v.template_id || '').trim();
       if (!k) return;
       if (!map.has(k)) map.set(k, []);
-      map.get(k)!.push({
-        variante_id: Number(v.variante_id),
-        template_id: Number(v.template_id),
-        sku: String(v.sku || '').toUpperCase(),
-        nombre_completo: v.nombre_completo || v.sku || '',
-        color: v.color || '',
-        talla: v.talla || 'Única',
-        stock: Number(v.stock) || 0,
-        precio: Number(v.precio) || 0,
-        estado: v.estado || 'DISPONIBLE',
-        image_url: v.image_url || null
-      });
+      map.get(k)!.push(v);
     });
     return map;
-  }, [variantes.data]);
+  }, [allNormalizedVariants]);
+
+  type CatalogDisplayCard = {
+    cardKey: string;
+    item: UnifiedCatalogItem;
+    variant: ProductVariant | null;
+  };
+
+  const displayCards = useMemo<CatalogDisplayCard[]>(() => {
+    if (!showVariantsView) {
+      return filteredCatalog.map(item => ({
+        cardKey: item.key,
+        item,
+        variant: null
+      }));
+    }
+
+    const cards: CatalogDisplayCard[] = [];
+    filteredCatalog.forEach(item => {
+      const itemVars = item.template_id
+        ? (variantsByTemplateId.get(String(item.template_id)) || []).filter(v => v.estado !== 'PAUSADO')
+        : [];
+      if (itemVars.length === 0) {
+        cards.push({ cardKey: item.key, item, variant: null });
+      } else {
+        itemVars.forEach(v => {
+          cards.push({
+            cardKey: `${item.key}-var-${v.variante_id || v.sku}`,
+            item,
+            variant: v
+          });
+        });
+      }
+    });
+    return cards;
+  }, [filteredCatalog, showVariantsView, variantsByTemplateId]);
+
+  const totalVariantsCount = useMemo(
+    () => allNormalizedVariants.filter(v => v.estado !== 'PAUSADO').length,
+    [allNormalizedVariants]
+  );
 
   const productVariants = useMemo<ProductVariant[]>(() => {
     if (!selectedItem || !selectedItem.template_id) return [];
@@ -492,6 +550,8 @@ export function CatalogoPage() {
     setToddSettings(next);
     setSavingToddSettings(true);
     const res = await saveToddCatalogSettings(next);
+    await syncAllToddVariantInstructions(next, stockItems);
+    await loadCatalogData();
     setSavingToddSettings(false);
     if (res.source === 'supabase') {
       showToast('ok', feedbackMsg);
@@ -500,12 +560,28 @@ export function CatalogoPage() {
     }
   };
 
+  const handleConsolidateDuplicates = async () => {
+    if (duplicateVariantMatches.length === 0) return;
+    setIsMergingDuplicates(true);
+    const res = await consolidateDuplicateVariantStockRows(duplicateVariantMatches);
+    setIsMergingDuplicates(false);
+    if (res.success) {
+      showToast(
+        'ok',
+        `Se fusionaron ${res.mergedCount} fila(s) duplicada(s) de variantes en su producto padre.`
+      );
+      await Promise.all([variantes.refetch(), productos.refetch(), loadCatalogData()]);
+    } else {
+      showToast('err', res.error || 'No se pudieron fusionar los duplicados.');
+    }
+  };
+
   const handleToggleGlobalBackorder = async () => {
     const nextVal = !toddSettings.allowBackorderGlobal;
     await persistToddSettings(
       { ...toddSettings, allowBackorderGlobal: nextVal },
       nextVal
-        ? 'Venta sin stock GLOBAL activada: Todd no pausará ni rechazará productos en 0 uds.'
+        ? 'Venta sin stock GLOBAL activada: Todd ofrecerá todas las variantes y no pausará productos en 0 uds.'
         : 'Venta sin stock GLOBAL desactivada (se respetará stock físico salvo productos bajo pedido).'
     );
   };
@@ -1200,23 +1276,52 @@ export function CatalogoPage() {
           )}
         </nav>
 
-        <div className="relative w-full md:w-72 pb-2.5">
-          <Search size={14} className="absolute left-3 top-[13px] tx-mu" />
-          <input
-            type="text"
-            placeholder="Buscar por nombre, SKU o categoría..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-7 py-1.5 bg-cd border border-[var(--bd)] rounded-lg text-xs outline-none focus:border-[var(--tx)]"
-          />
-          {search && (
+        <div className="flex flex-wrap items-center gap-2 pb-2.5">
+          <div className="inline-flex bg-sf p-0.5 rounded-lg border border-[var(--bd)] text-[11px] font-medium shrink-0">
             <button
-              onClick={() => setSearch('')}
-              className="absolute right-2.5 top-[13px] tx-mu hover:text-[var(--tx)]"
+              type="button"
+              onClick={() => setShowVariantsView(false)}
+              className={`px-2.5 py-1 rounded-md transition-colors ${
+                !showVariantsView
+                  ? 'bg-cd text-[var(--tx)] font-semibold border border-[var(--bd)]'
+                  : 'tx-mu hover:text-[var(--tx)]'
+              }`}
+              title="Mostrar una sola tarjeta por producto padre"
             >
-              <X size={13} />
+              Productos ({filteredCatalog.length})
             </button>
-          )}
+            <button
+              type="button"
+              onClick={() => setShowVariantsView(true)}
+              className={`px-2.5 py-1 rounded-md transition-colors flex items-center gap-1 ${
+                showVariantsView
+                  ? 'bg-cd text-[var(--tx)] font-semibold border border-[var(--bd)]'
+                  : 'tx-mu hover:text-[var(--tx)]'
+              }`}
+              title="Desglosar colores y tallas como tarjetas individuales"
+            >
+              <Layers size={11} /> Variantes ({totalVariantsCount})
+            </button>
+          </div>
+
+          <div className="relative flex-1 min-w-[200px] md:w-64">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 tx-mu" />
+            <input
+              type="text"
+              placeholder="Buscar por nombre, SKU o categoría..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-9 pr-7 py-1.5 bg-cd border border-[var(--bd)] rounded-lg text-xs outline-none focus:border-[var(--tx)]"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 tx-mu hover:text-[var(--tx)]"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1280,12 +1385,39 @@ export function CatalogoPage() {
         </div>
       </section>
 
+      {/* Aviso de filas duplicadas legacy detectadas en inventario */}
+      {duplicateVariantMatches.length > 0 && (
+        <div className="px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 text-xs">
+            <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold text-[var(--tx)] block">
+                Detectamos {duplicateVariantMatches.length} registro(s) duplicado(s) de variantes en inventario (
+                {duplicateVariantMatches.map(d => d.childRow.sku).slice(0, 3).join(', ')}
+                {duplicateVariantMatches.length > 3 ? '...' : ''})
+              </span>
+              <span className="text-[11px] tx-mu block mt-0.5">
+                Ya quedaron ocultos en la vista de Productos para no duplicar tarjetas. Puedes fusionarlos definitivamente sin perder stock ni pedidos.
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={isMergingDuplicates}
+            onClick={handleConsolidateDuplicates}
+            className="px-3.5 py-1.5 bg-[var(--tx)] text-[var(--cd)] rounded-lg text-xs font-semibold shrink-0 hover:opacity-90 disabled:opacity-50"
+          >
+            {isMergingDuplicates ? 'Fusionando...' : 'Fusionar duplicados'}
+          </button>
+        </div>
+      )}
+
       {/* GRID VISUAL DEL CATÁLOGO */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-        {loadingNative && filteredCatalog.length === 0 && (
+        {loadingNative && displayCards.length === 0 && (
           <div className="col-span-full text-center p-8 text-xs tx-mu">Cargando catálogo visual...</div>
         )}
-        {!loadingNative && filteredCatalog.length === 0 && (
+        {!loadingNative && displayCards.length === 0 && (
           <div className="col-span-full text-center p-10 tx-mu bg-cd rounded-xl border border-[var(--bd)] space-y-3">
             <Package size={24} className="mx-auto tx-mu opacity-60" />
             <div className="font-semibold text-sm text-[var(--tx)]">No hay productos con estos filtros</div>
@@ -1300,14 +1432,20 @@ export function CatalogoPage() {
             </button>
           </div>
         )}
-        {filteredCatalog.map(item => {
+        {displayCards.map(({ cardKey, item, variant }) => {
           const hasToddPitch = Boolean(item.todd_pitch);
-          const margin = item.precio_venta > 0 ? item.precio_venta - item.costo_unitario : null;
+          const cardStock = variant ? variant.stock : item.stock_disponible;
+          const cardPrice = variant && variant.precio > 0 ? variant.precio : item.precio_venta;
+          const cardImage = (variant?.image_url || item.image_url) || null;
+          const cardSku = variant ? variant.sku : item.sku;
+          const margin = cardPrice > 0 ? cardPrice - item.costo_unitario : null;
+          const allowBackorderCard =
+            toddSettings.allowBackorderGlobal || backorderSkuSet.has(item.sku.toUpperCase());
 
           return (
             <div
-              key={item.key}
-              onClick={() => handleOpenItem(item)}
+              key={cardKey}
+              onClick={() => handleOpenItem(item, variant ? 'variantes' : 'info')}
               className={`bg-cd border border-[var(--bd)] rounded-xl p-3 flex flex-col justify-between cursor-pointer hover:border-[var(--tx)]/40 transition-colors group relative ${
                 !item.activo ? 'opacity-65' : ''
               }`}
@@ -1315,7 +1453,7 @@ export function CatalogoPage() {
               <div>
                 <div className="aspect-square bg-sf rounded-lg overflow-hidden relative flex items-center justify-center border border-[var(--bd)]">
                   <ProductImg
-                    src={item.image_url}
+                    src={cardImage}
                     className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
                   />
 
@@ -1323,14 +1461,14 @@ export function CatalogoPage() {
                   <div className="absolute top-2 right-2">
                     <span
                       className={`text-[10px] font-mono tabular-nums font-semibold px-1.5 py-0.5 rounded-md border ${
-                        item.stock_disponible <= 0
+                        cardStock <= 0
                           ? 'bg-rose-600 text-white border-rose-700'
-                          : item.stock_disponible <= item.stock_minimo_alerta
+                          : cardStock <= item.stock_minimo_alerta
                           ? 'bg-amber-500 text-zinc-950 border-amber-600'
                           : 'bg-cd/95 text-[var(--tx)] border-[var(--bd)]'
                       }`}
                     >
-                      {item.stock_disponible} uds
+                      {cardStock} uds
                     </span>
                   </div>
 
@@ -1354,21 +1492,20 @@ export function CatalogoPage() {
                         </span>
                       )}
                     </div>
-                    {item.stock_disponible <= 0 &&
-                      (toddSettings.allowBackorderGlobal || backorderSkuSet.has(item.sku.toUpperCase())) && (
-                        <span
-                          className="px-1.5 py-0.5 rounded-md bg-cd/95 border border-[var(--bd)] text-[var(--tx)] text-[9px] font-semibold"
-                          title="Bot Todd puede vender este producto aunque esté en 0 uds"
-                        >
-                          Bajo pedido
-                        </span>
-                      )}
+                    {cardStock <= 0 && allowBackorderCard && (
+                      <span
+                        className="px-1.5 py-0.5 rounded-md bg-cd/95 border border-[var(--bd)] text-[var(--tx)] text-[9px] font-semibold"
+                        title="Bot Todd puede vender este producto aunque esté en 0 uds"
+                      >
+                        Bajo pedido
+                      </span>
+                    )}
                   </div>
                 </div>
 
                 <div className="mt-3">
-                  <div className="flex items-center justify-between text-[10px] font-mono tx-mu">
-                    <span className="truncate font-medium">{item.sku}</span>
+                  <div className="flex items-center justify-between text-[10px] font-mono tx-mu gap-1">
+                    <span className="truncate font-medium">{cardSku}</span>
                     {!item.activo && (
                       <span className="text-rose-500 font-semibold uppercase text-[9px]">Pausado</span>
                     )}
@@ -1376,38 +1513,55 @@ export function CatalogoPage() {
                   <div className="font-semibold text-xs line-clamp-2 leading-snug mt-0.5 text-[var(--tx)]">
                     {item.nombre}
                   </div>
-                  {(() => {
-                    const cardVars = item.template_id ? (variantsByTemplateId.get(String(item.template_id)) || []) : [];
-                    if (cardVars.length === 0) return null;
-                    return (
-                      <div className="mt-1.5 flex items-center gap-1 flex-wrap">
-                        {cardVars.slice(0, 4).map(cv => (
-                          <span
-                            key={cv.variante_id}
-                            title={`${cv.color}${cv.talla && cv.talla !== 'Única' ? ` (${cv.talla})` : ''}: ${cv.stock} uds`}
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sf border border-[var(--bd)] text-[9px] text-[var(--tx)]"
-                          >
-                            <span
-                              className="w-2 h-2 rounded-full border border-black/20 shrink-0"
-                              style={{ backgroundColor: getColorHex(cv.color) }}
-                            />
-                            <span className="truncate max-w-[48px]">{cv.color}</span>
-                            <span className="font-mono tabular-nums opacity-65">{cv.stock}</span>
-                          </span>
-                        ))}
-                        {cardVars.length > 4 && (
-                          <span className="text-[9px] tx-mu font-mono">+{cardVars.length - 4}</span>
+                  {variant ? (
+                    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sf border border-[var(--bd)] text-[10px] font-medium text-[var(--tx)]">
+                        <span
+                          className="w-2 h-2 rounded-full border border-black/20 shrink-0"
+                          style={{ backgroundColor: getColorHex(variant.color) }}
+                        />
+                        <span>{variant.color || 'Estándar'}</span>
+                        {variant.talla && variant.talla !== 'Única' && (
+                          <span className="opacity-70">· {variant.talla}</span>
                         )}
-                      </div>
-                    );
-                  })()}
+                      </span>
+                    </div>
+                  ) : (
+                    (() => {
+                      const cardVars = item.template_id
+                        ? (variantsByTemplateId.get(String(item.template_id)) || [])
+                        : [];
+                      if (cardVars.length === 0) return null;
+                      return (
+                        <div className="mt-1.5 flex items-center gap-1 flex-wrap">
+                          {cardVars.slice(0, 4).map(cv => (
+                            <span
+                              key={cv.variante_id}
+                              title={`${cv.color}${cv.talla && cv.talla !== 'Única' ? ` (${cv.talla})` : ''}: ${cv.stock} uds`}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sf border border-[var(--bd)] text-[9px] text-[var(--tx)]"
+                            >
+                              <span
+                                className="w-2 h-2 rounded-full border border-black/20 shrink-0"
+                                style={{ backgroundColor: getColorHex(cv.color) }}
+                              />
+                              <span className="truncate max-w-[48px]">{cv.color}</span>
+                              <span className="font-mono tabular-nums opacity-65">{cv.stock}</span>
+                            </span>
+                          ))}
+                          {cardVars.length > 4 && (
+                            <span className="text-[9px] tx-mu font-mono">+{cardVars.length - 4}</span>
+                          )}
+                        </div>
+                      );
+                    })()
+                  )}
                 </div>
               </div>
 
               <div className="mt-3 pt-2 border-t border-[var(--bd)] flex items-center justify-between text-[11px]">
                 <div>
                   <span className="font-mono tabular-nums font-semibold text-[var(--tx)] block">
-                    {item.precio_venta > 0 ? `$${item.precio_venta.toFixed(2)}` : 'Sin precio'}
+                    {cardPrice > 0 ? `$${cardPrice.toFixed(2)}` : 'Sin precio'}
                   </span>
                   {margin !== null && item.costo_unitario > 0 && (
                     <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">
@@ -1416,7 +1570,7 @@ export function CatalogoPage() {
                   )}
                 </div>
                 <span className="tx-mu group-hover:text-[var(--tx)] font-medium">
-                  Editar →
+                  {variant ? 'Variante →' : 'Editar →'}
                 </span>
               </div>
             </div>
