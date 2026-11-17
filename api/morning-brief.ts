@@ -1027,12 +1027,27 @@ const TIME_ZONE = 'America/El_Salvador';
 const DRAFTS_DOC_TITLE = '__SYSTEM_TELEGRAM_PURCHASE_DRAFTS_V1__';
 const DEFAULT_ALLOWED_CHAT_ID = '9087238722';
 
-interface DraftItem {
+interface TelegramCatalogVariant {
+  variante_id: number;
+  template_id: number;
   sku: string;
+  color: string;
+  talla: string;
+  stock: number;
+  precio: number;
+  estado: string;
+}
+
+interface DraftItem {
+  sku: string; // Siempre el SKU padre en inventory_stock
   nombre: string;
   cantidad: number;
   costo_unitario: number;
   subtotal: number;
+  variante_id?: number;
+  variant_sku?: string;
+  color?: string;
+  talla?: string;
 }
 
 type TelegramDraft =
@@ -1257,17 +1272,150 @@ async function saveDraft(supabase: any, draft: TelegramDraft) {
   await writeDocJson(supabase, DRAFTS_DOC_TITLE, nextDrafts, draftsDoc.id);
 }
 
-async function fetchActiveStockCatalog(supabase: any) {
-  const { data, error } = await supabase
-    .from('inventory_stock')
-    .select('sku,nombre,stock_fisico,stock_reservado,stock_disponible,costo_unitario,precio_venta,activo')
-    .order('nombre');
+const TODD_VARIANTS_MARKER = '[VARIANTES_DISPONIBLES]:';
+const SYSTEM_TODD_SETTINGS_DOC_TITLE = '__SYSTEM_TODD_CATALOG_SETTINGS_V1__';
 
-  if (error || !Array.isArray(data)) return [];
-  return data.filter(
+function formatVariantLabel(color?: string | null, talla?: string | null): string {
+  const c = String(color || '').trim();
+  const t = String(talla || '').trim();
+  const parts = [
+    c,
+    t && t.toLowerCase() !== 'única' && t.toLowerCase() !== 'unica' && t.toLowerCase() !== 'estándar'
+      ? `Talla ${t}`
+      : '',
+  ].filter(Boolean);
+  return parts.join(' · ') || 'Estándar';
+}
+
+function normalizeVariantToken(raw?: string | null): string {
+  return String(raw || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function stemSpanishToken(word: string): string {
+  let w = normalizeVariantToken(word);
+  if (w.length > 4 && w.endsWith('es')) w = w.slice(0, -2);
+  else if (w.length > 3 && w.endsWith('s')) w = w.slice(0, -1);
+  if (w.length >= 5 && (w.endsWith('o') || w.endsWith('a'))) w = w.slice(0, -1);
+  return w;
+}
+
+async function fetchActiveStockCatalog(supabase: any) {
+  const [stockRes, varRes] = await Promise.all([
+    supabase
+      .from('inventory_stock')
+      .select(
+        'sku,nombre,template_id,stock_fisico,stock_reservado,stock_disponible,costo_unitario,precio_venta,activo,todd_instrucciones,todd_keywords'
+      )
+      .order('nombre'),
+    supabase
+      .from('productos_variantes')
+      .select('variante_id,template_id,sku,color,talla,stock,precio,estado')
+      .order('color', { ascending: true })
+      .order('talla', { ascending: true }),
+  ]);
+
+  if (stockRes.error || !Array.isArray(stockRes.data)) return [];
+
+  const activeRows = stockRes.data.filter(
     (item: any) =>
       item.activo !== false && !String(item.sku || '').toLowerCase().includes('fee')
   );
+
+  const allVariants: TelegramCatalogVariant[] = Array.isArray(varRes.data)
+    ? varRes.data.map((v: any) => ({
+        variante_id: Number(v.variante_id),
+        template_id: Number(v.template_id),
+        sku: normalizeSku(v.sku),
+        color: String(v.color || '').trim() || 'Estándar',
+        talla: String(v.talla || 'Única').trim() || 'Única',
+        stock: Math.max(Number(v.stock) || 0, 0),
+        precio: Number(v.precio) || 0,
+        estado: String(v.estado || (Number(v.stock) > 0 ? 'DISPONIBLE' : 'NO_DISPONIBLE')),
+      }))
+    : [];
+
+  const variantSkuSet = new Set(allVariants.map((v) => v.sku).filter(Boolean));
+  const variantsByTemplate = new Map<string, TelegramCatalogVariant[]>();
+  for (const v of allVariants) {
+    if (v.estado === 'PAUSADO') continue;
+    const tId = String(v.template_id || '').trim();
+    if (!tId) continue;
+    const arr = variantsByTemplate.get(tId) || [];
+    arr.push(v);
+    variantsByTemplate.set(tId, arr);
+  }
+
+  // Deduplicar filas hijas de variantes que hayan sido sembradas como filas separadas en inventory_stock
+  const duplicateChildSkus = new Set<string>();
+  const rowsByTemplate = new Map<string, any[]>();
+  for (const row of activeRows) {
+    const tId = row.template_id ? String(row.template_id).trim() : '';
+    if (!tId) continue;
+    const arr = rowsByTemplate.get(tId) || [];
+    arr.push(row);
+    rowsByTemplate.set(tId, arr);
+  }
+
+  rowsByTemplate.forEach((rows) => {
+    if (rows.length <= 1) return;
+    const sorted = [...rows].sort((a, b) => {
+      const aVar = variantSkuSet.has(normalizeSku(a.sku)) ? 1 : 0;
+      const bVar = variantSkuSet.has(normalizeSku(b.sku)) ? 1 : 0;
+      if (aVar !== bVar) return aVar - bVar;
+      return normalizeSku(a.sku).length - normalizeSku(b.sku).length;
+    });
+    const parentSku = normalizeSku(sorted[0].sku);
+    for (let i = 1; i < sorted.length; i++) {
+      const childSku = normalizeSku(sorted[i].sku);
+      if (variantSkuSet.has(childSku) || childSku.startsWith(`${parentSku}-`)) {
+        duplicateChildSkus.add(childSku);
+      }
+    }
+  });
+
+  const nonDupSkus = new Set(
+    activeRows
+      .filter((r: any) => !duplicateChildSkus.has(normalizeSku(r.sku)))
+      .map((r: any) => normalizeSku(r.sku))
+  );
+
+  for (const row of activeRows) {
+    const sku = normalizeSku(row.sku);
+    if (!sku || duplicateChildSkus.has(sku)) continue;
+    if (variantSkuSet.has(sku)) {
+      for (const pSku of nonDupSkus) {
+        if (pSku !== sku && sku.startsWith(`${pSku}-`)) {
+          duplicateChildSkus.add(sku);
+          break;
+        }
+      }
+    }
+  }
+
+  return activeRows
+    .filter((row: any) => !duplicateChildSkus.has(normalizeSku(row.sku)))
+    .map((row: any) => {
+      const tId = row.template_id ? String(row.template_id).trim() : '';
+      const skuClean = normalizeSku(row.sku);
+      const byTpl = tId ? variantsByTemplate.get(tId) || [] : [];
+      const variants =
+        byTpl.length > 0
+          ? byTpl
+          : allVariants.filter(
+              (v) => v.estado !== 'PAUSADO' && v.sku.startsWith(`${skuClean}-`)
+            );
+      return {
+        ...row,
+        sku: skuClean,
+        variants,
+      };
+    });
 }
 
 async function fetchCashAccounts(supabase: any) {
@@ -1296,12 +1444,75 @@ async function fetchCashAccounts(supabase: any) {
   ];
 }
 
+function findBestVariantMatch(parentItem: any, rawQuery?: string | null): TelegramCatalogVariant | null {
+  const variants: TelegramCatalogVariant[] = Array.isArray(parentItem?.variants)
+    ? parentItem.variants
+    : [];
+  const qRaw = String(rawQuery || '').trim();
+  if (!qRaw || variants.length === 0) return null;
+
+  const qSku = normalizeSku(qRaw);
+  const bySku = variants.find((v) => normalizeSku(v.sku) === qSku);
+  if (bySku) return bySku;
+
+  const qNorm = normalizeVariantToken(qRaw);
+  if (!qNorm) return null;
+
+  // Coincidencia exacta de color o "color talla"
+  const exactLabel = variants.find((v) => {
+    const cNorm = normalizeVariantToken(v.color);
+    const tNorm = normalizeVariantToken(v.talla);
+    const combined = [cNorm, tNorm !== 'unica' ? tNorm : ''].filter(Boolean).join(' ');
+    return cNorm === qNorm || combined === qNorm;
+  });
+  if (exactLabel) return exactLabel;
+
+  // Coincidencia por tokens con tolerancia de género/plural en español (ej. rosados -> Rosado)
+  const qTokens = qNorm
+    .split(/\s+/)
+    .map((w) => stemSpanishToken(w))
+    .filter((w) => w.length >= 2 && w !== 'talla' && w !== 'color');
+
+  if (qTokens.length === 0) return null;
+
+  let best: { variant: TelegramCatalogVariant; score: number } | null = null;
+  for (const v of variants) {
+    const cStem = stemSpanishToken(v.color);
+    const tNorm = normalizeVariantToken(v.talla);
+    const tStem = tNorm && tNorm !== 'unica' ? stemSpanishToken(tNorm) : '';
+    let score = 0;
+
+    for (const qt of qTokens) {
+      if (cStem && (cStem === qt || (qt.length >= 4 && cStem.startsWith(qt)) || (cStem.length >= 4 && qt.startsWith(cStem)))) {
+        score += 3;
+      }
+      if (tStem && (tStem === qt || tNorm === qt)) {
+        score += 2;
+      }
+    }
+
+    if (score > 0 && (!best || score > best.score)) {
+      best = { variant: v, score };
+    }
+  }
+
+  return best ? best.variant : null;
+}
+
 function findBestSkuMatch(rawQuery: string, catalog: any[]) {
   const clean = normalizeSku(rawQuery);
   if (!clean) return null;
 
   const exact = catalog.find((item) => normalizeSku(item.sku) === clean);
   if (exact) return exact;
+
+  // Buscar coincidencia exacta por SKU de variante (ej. ASIS-BB-01-ROSADO)
+  const byExactVarSku = catalog.find(
+    (item) =>
+      Array.isArray(item.variants) &&
+      item.variants.some((v: TelegramCatalogVariant) => normalizeSku(v.sku) === clean)
+  );
+  if (byExactVarSku) return byExactVarSku;
 
   const lower = rawQuery.trim().toLowerCase();
   const byExactName = catalog.find(
@@ -1315,6 +1526,195 @@ function findBestSkuMatch(rawQuery: string, catalog: any[]) {
       String(item.nombre || '').toLowerCase().includes(lower)
   );
   return byPartial || null;
+}
+
+function findParentAndVariantByQuery(
+  rawQuery: string,
+  catalog: any[]
+): { parent: any | null; variant: TelegramCatalogVariant | null } {
+  const clean = normalizeSku(rawQuery);
+  if (!clean) return { parent: null, variant: null };
+
+  // 1. SKU padre exacto
+  const exactParent = catalog.find((item) => normalizeSku(item.sku) === clean);
+  if (exactParent) return { parent: exactParent, variant: null };
+
+  // 2. SKU de variante exacto (prioritario antes de partial match en padre)
+  for (const item of catalog) {
+    const vars: TelegramCatalogVariant[] = Array.isArray(item.variants) ? item.variants : [];
+    const exactVar = vars.find((v) => normalizeSku(v.sku) === clean);
+    if (exactVar) return { parent: item, variant: exactVar };
+  }
+
+  // 3. Coincidencia por nombre o parcial en padre
+  const parent = findBestSkuMatch(rawQuery, catalog);
+  if (parent) return { parent, variant: null };
+
+  // 4. Coincidencia parcial en SKU de variante
+  for (const item of catalog) {
+    const vars: TelegramCatalogVariant[] = Array.isArray(item.variants) ? item.variants : [];
+    const partialVar = vars.find((v) => normalizeSku(v.sku).includes(clean));
+    if (partialVar) return { parent: item, variant: partialVar };
+  }
+
+  return { parent: null, variant: null };
+}
+
+function stripVariantToddBlockServer(rawText?: string | null): string {
+  const raw = String(rawText || '').trim();
+  const idx = raw.indexOf(TODD_VARIANTS_MARKER);
+  if (idx === -1) return raw;
+  return raw.slice(0, idx).trim();
+}
+
+async function applyVariantPurchaseAndSyncServer(
+  supabase: any,
+  params: {
+    parentSku: string;
+    varianteId: number;
+    addQty: number;
+  }
+): Promise<{ ok: boolean; nuevoStockVariante?: number; templateId?: number }> {
+  try {
+    const { data: varRow, error: readErr } = await supabase
+      .from('productos_variantes')
+      .select('variante_id,template_id,sku,color,talla,stock,precio,estado,image_url')
+      .eq('variante_id', params.varianteId)
+      .maybeSingle();
+
+    if (readErr || !varRow) {
+      return { ok: false };
+    }
+
+    const nextStock = Math.max(Number(varRow.stock || 0) + Math.round(params.addQty), 0);
+    const nextEstado = nextStock > 0 ? 'DISPONIBLE' : 'NO_DISPONIBLE';
+    const nowIso = new Date().toISOString();
+
+    await supabase
+      .from('productos_variantes')
+      .update({ stock: nextStock, estado: nextEstado, updated_at: nowIso })
+      .eq('variante_id', varRow.variante_id);
+
+    if (varRow.sku) {
+      try {
+        await supabase
+          .from('inventory_cache')
+          .upsert(
+            {
+              sku: normalizeSku(varRow.sku),
+              qty: nextStock,
+              state: nextEstado,
+              image_url: varRow.image_url || null,
+              updated_at: nowIso,
+            },
+            { onConflict: 'sku' }
+          );
+      } catch {}
+    }
+
+    return {
+      ok: true,
+      nuevoStockVariante: nextStock,
+      templateId: Number(varRow.template_id) || undefined,
+    };
+  } catch {
+    return { ok: false };
+  }
+}
+
+async function resyncParentToddVariantsServer(
+  supabase: any,
+  params: { parentSku: string; templateId: number }
+) {
+  try {
+    const masterSku = normalizeSku(params.parentSku);
+    const [varRes, stockRes, settingsDoc] = await Promise.all([
+      supabase
+        .from('productos_variantes')
+        .select('variante_id,template_id,sku,color,talla,stock,precio,estado')
+        .eq('template_id', params.templateId)
+        .order('color', { ascending: true })
+        .order('talla', { ascending: true }),
+      supabase
+        .from('inventory_stock')
+        .select('todd_instrucciones,todd_keywords,precio_venta')
+        .eq('sku', masterSku)
+        .maybeSingle(),
+      readDocJson<{
+        allowBackorderGlobal?: boolean;
+        backorderSkus?: string[];
+        hideExactStockCounts?: boolean;
+      }>(supabase, SYSTEM_TODD_SETTINGS_DOC_TITLE, {}),
+    ]);
+
+    const variants = (Array.isArray(varRes.data) ? varRes.data : []).filter(
+      (v: any) => String(v.estado || '') !== 'PAUSADO'
+    );
+    if (variants.length === 0) return;
+
+    const cfg = settingsDoc.data || {};
+    const backorderSet = new Set(
+      (Array.isArray(cfg.backorderSkus) ? cfg.backorderSkus : []).map((s) => normalizeSku(s))
+    );
+    const allowBackorder = Boolean(cfg.allowBackorderGlobal) || backorderSet.has(masterSku);
+    const hideCounts = cfg.hideExactStockCounts !== false;
+    const basePrice = Number(stockRes.data?.precio_venta || 0);
+
+    const kwSet = new Set<string>();
+    const bulletLines = variants.map((v: any) => {
+      const colorTxt = String(v.color || '').trim();
+      const tallaTxt = String(v.talla || '').trim();
+      if (colorTxt) kwSet.add(colorTxt.toLowerCase());
+      if (tallaTxt && tallaTxt.toLowerCase() !== 'única' && tallaTxt.toLowerCase() !== 'unica') {
+        kwSet.add(`talla ${tallaTxt.toLowerCase()}`);
+      }
+      const label = formatVariantLabel(colorTxt, tallaTxt);
+      const qty = Math.max(Number(v.stock) || 0, 0);
+      const price = Number(v.precio) > 0 ? Number(v.precio) : basePrice;
+      const priceTag = price > 0 ? ` ($${price.toFixed(2)})` : '';
+      const isAvailable = qty > 0 || allowBackorder;
+      if (!isAvailable) return `${label}: Agotado`;
+      return hideCounts ? `${label}: Disponible${priceTag}` : `${label}: ${qty} uds${priceTag}`;
+    });
+
+    const summaryBlock = `${TODD_VARIANTS_MARKER} ${bulletLines.join(' | ')}`;
+    const baseInstr = stripVariantToddBlockServer(stockRes.data?.todd_instrucciones);
+    const nextInstrucciones = baseInstr ? `${baseInstr}\n${summaryBlock}` : summaryBlock;
+
+    const existingKw = String(stockRes.data?.todd_keywords || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const existingKwLower = new Set(existingKw.map((k) => k.toLowerCase()));
+    kwSet.forEach((kw) => {
+      if (!existingKwLower.has(kw.toLowerCase())) {
+        existingKw.push(kw);
+        existingKwLower.add(kw.toLowerCase());
+      }
+    });
+    const nextKeywords = existingKw.join(', ');
+
+    await supabase
+      .from('inventory_stock')
+      .update({
+        todd_instrucciones: nextInstrucciones,
+        todd_keywords: nextKeywords,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('sku', masterSku);
+
+    try {
+      await supabase
+        .from('productos')
+        .update({
+          todd_instrucciones: nextInstrucciones,
+          todd_keywords: nextKeywords,
+        })
+        .eq('template_id', params.templateId);
+    } catch {}
+  } catch {
+    // Best effort: nunca bloquear flujo principal de Telegram
+  }
 }
 
 async function downloadTelegramPhotoAsDataUrl(fileId: string): Promise<string> {
@@ -1396,10 +1796,19 @@ async function interpretWithOpenAI(params: {
 
   const catalogLines = params.catalog
     .slice(0, 120)
-    .map(
-      (i: any) =>
-        `- SKU: ${i.sku} | Nombre: ${i.nombre} | Costo: $${Number(i.costo_unitario || 0).toFixed(2)} | Físico: ${Number(i.stock_fisico || 0)} | Disp: ${Number(i.stock_disponible || 0)}`
-    )
+    .map((i: any) => {
+      const vars: TelegramCatalogVariant[] = Array.isArray(i.variants) ? i.variants : [];
+      const varStr =
+        vars.length > 0
+          ? ` | Variantes: [${vars
+              .map(
+                (v) =>
+                  `${formatVariantLabel(v.color, v.talla)} (${Number(v.stock || 0)}u, SKU:${v.sku})`
+              )
+              .join('; ')}]`
+          : '';
+      return `- SKU: ${i.sku} | Nombre: ${i.nombre} | Costo: $${Number(i.costo_unitario || 0).toFixed(2)} | Físico: ${Number(i.stock_fisico || 0)} | Disp: ${Number(i.stock_disponible || 0)}${varStr}`;
+    })
     .join('\n');
 
   const accountLines = params.accounts
@@ -1432,7 +1841,8 @@ REGLAS ESTRICTAS:
    - "otro": saludo o tema ajeno.
 ${params.intentHint ? `\nPISTA DE CONTEXTO: El usuario inició con el comando ${params.intentHint}.\n` : ''}
 2. Detalles por intent:
-   - Si "compra": llena "items" [{ "sku", "raw_name", "cantidad", "costo_unitario" }], "proveedor", "account_id", "asentar_en_finanzas", "notas". (Si en factura viene total de línea, divide entre cantidad para obtener costo_unitario).
+   - Si "compra": llena "items" [{ "sku", "variant_sku", "color", "talla", "raw_name", "cantidad", "costo_unitario" }], "proveedor", "account_id", "asentar_en_finanzas", "notas".
+     REGLA DE VARIANTES: Si el producto tiene variantes en el catálogo (ej. Rosado / Amarillo) y el usuario compra cantidades por variante (ej. "compré 5 rosados y 5 amarillos del asistente de bebé a $3.50"), emite UN objeto en "items" por cada variante poniendo el SKU padre en "sku", el SKU de variante en "variant_sku" si existe en el catálogo, y el color/talla en "color" / "talla". (Si en factura viene total de línea, divide entre cantidad para obtener costo_unitario).
    - Si "gasto_operativo": llena "monto" (>0), "descripcion", "account_id", y "categoria" entre: "flete_envio", "empaque_suministros", "alquiler_servicios", "nomina_sueldos", "suscripciones", "comision_pasarela", "gasto_manual", "otro_gasto".
    - Si "gasto_pauta": llena "monto" (>0), "codigo_anuncio" (en MAYÚSCULAS, ej. "PROMO1", o "GENERAL" si no menciona código), "plataforma" ("Meta"|"TikTok"|"Google"|"WhatsApp"|"Otro"), "account_id", "notas".
    - Si "ajuste_inventario": llena "adjustment_mode": "merma" (daño/pérdida/muestra), "delta_positivo" (sumar), "delta_negativo" (restar), o "conteo_exacto" (fijar stock físico total); llena "sku", "raw_name", "cantidad" (entero >= 0: si es conteo_exacto es la cantidad final observada en bodega, si es merma/delta es las unidades que salen/entran), y "motivo".
@@ -1462,7 +1872,7 @@ ${params.intentHint ? `\nPISTA DE CONTEXTO: El usuario inició con el comando ${
   "motivo": "",
   "notas": "",
   "items": [
-    { "sku": "", "raw_name": "", "cantidad": 0, "costo_unitario": 0 }
+    { "sku": "", "variant_sku": "", "color": "", "talla": "", "raw_name": "", "cantidad": 0, "costo_unitario": 0 }
   ],
   "reply_hint": ""
 }`;
@@ -2143,14 +2553,16 @@ async function sendDraftConfirmationCard(chatId: string | number, draft: Telegra
   lines.push('');
 
   for (const it of compra.items) {
+    const varLabel = it.variante_id ? formatVariantLabel(it.color, it.talla) : '';
+    const varBadge = varLabel ? ` · 🎨 <b>${escapeHtml(varLabel)}</b>` : '';
     lines.push(
-      `• <code>${escapeHtml(it.sku)}</code> (${escapeHtml(it.nombre)})\n  <b>+${it.cantidad} u.</b> × ${fmtMoney(it.costo_unitario)} = <b>${fmtMoney(it.subtotal)}</b>`
+      `• <code>${escapeHtml(it.sku)}</code> (${escapeHtml(it.nombre)})${varBadge}\n  <b>+${it.cantidad} u.</b> × ${fmtMoney(it.costo_unitario)} = <b>${fmtMoney(it.subtotal)}</b>`
     );
   }
 
   if (compra.unmatchedNotes && compra.unmatchedNotes.length > 0) {
     lines.push('');
-    lines.push(`⚠️ <i>No encontré SKU exacto para:</i>`);
+    lines.push(`⚠️ <i>No encontré SKU/variante exacto para:</i>`);
     for (const u of compra.unmatchedNotes) {
       lines.push(`  • ${escapeHtml(u)}`);
     }
@@ -2182,7 +2594,14 @@ async function handleStockQuery(supabase: any, chatId: string | number, searchRa
     ? catalog.filter(
         (i: any) =>
           String(i.sku || '').toLowerCase().includes(q) ||
-          String(i.nombre || '').toLowerCase().includes(q)
+          String(i.nombre || '').toLowerCase().includes(q) ||
+          (Array.isArray(i.variants) &&
+            i.variants.some(
+              (v: TelegramCatalogVariant) =>
+                String(v.sku || '').toLowerCase().includes(q) ||
+                String(v.color || '').toLowerCase().includes(q) ||
+                String(v.talla || '').toLowerCase().includes(q)
+            ))
       )
     : catalog;
 
@@ -2202,7 +2621,14 @@ async function handleStockQuery(supabase: any, chatId: string | number, searchRa
       const fis = Number(i.stock_fisico || 0);
       const res = Number(i.stock_reservado || 0);
       const icon = disp <= 0 ? '🔴' : disp <= 5 ? '🟡' : '🟢';
-      return `${icon} <code>${escapeHtml(i.sku)}</code> · <b>${escapeHtml(i.nombre)}</b>\n   Disp: <b>${disp}</b> (Físico ${fis} · Res ${res}) · Costo ${fmtMoney(i.costo_unitario)}`;
+      const vars: TelegramCatalogVariant[] = Array.isArray(i.variants) ? i.variants : [];
+      const varLine =
+        vars.length > 0
+          ? `\n   🎨 Variantes: ${vars
+              .map((v) => `${escapeHtml(formatVariantLabel(v.color, v.talla))} (<b>${v.stock}</b>)`)
+              .join(' | ')}`
+          : '';
+      return `${icon} <code>${escapeHtml(i.sku)}</code> · <b>${escapeHtml(i.nombre)}</b>\n   Disp: <b>${disp}</b> (Físico ${fis} · Res ${res}) · Costo ${fmtMoney(i.costo_unitario)}${varLine}`;
     }),
   ];
 
@@ -2781,16 +3207,18 @@ async function handleTelegramBotRequest(req: any, res: any) {
           }
         }
       } else {
-        // Compra de mercadería
+        // Compra de mercadería (con soporte por variante sin duplicar filas en inventory_stock)
         const compra = draft as Extract<TelegramDraft, { items: DraftItem[] }>;
         const withFinance = finFlag === '1';
         const resultLines: string[] = [];
+        const touchedTemplates = new Map<string, number>();
         let hadError = false;
 
         for (const item of compra.items) {
+          const varLabel = item.variante_id ? formatVariantLabel(item.color, item.talla) : '';
           const motivo = `Compra Telegram · ${compra.proveedor || 'Proveedor'}${
-            compra.notas ? ` · ${compra.notas}` : ''
-          }`.trim();
+            varLabel ? ` [${varLabel}]` : ''
+          }${compra.notas ? ` · ${compra.notas}` : ''}`.trim();
 
           const movRes = await executeInventoryMovementServer(supabase, {
             sku: item.sku,
@@ -2802,12 +3230,30 @@ async function handleTelegramBotRequest(req: any, res: any) {
           });
 
           if (movRes.ok) {
+            let varStockSuffix = '';
+            if (item.variante_id) {
+              const varSyncRes = await applyVariantPurchaseAndSyncServer(supabase, {
+                parentSku: item.sku,
+                varianteId: item.variante_id,
+                addQty: item.cantidad,
+              });
+              if (varSyncRes.ok) {
+                if (varSyncRes.templateId) {
+                  touchedTemplates.set(normalizeSku(item.sku), varSyncRes.templateId);
+                }
+                if (varSyncRes.nuevoStockVariante !== undefined) {
+                  varStockSuffix = ` · ${escapeHtml(varLabel)}: <b>${varSyncRes.nuevoStockVariante}</b>`;
+                }
+              }
+            }
+
+            const varTitle = varLabel ? ` · 🎨 <b>${escapeHtml(varLabel)}</b>` : '';
             resultLines.push(
-              `• <code>${escapeHtml(item.sku)}</code> +${item.cantidad} u. (${fmtMoney(
+              `• <code>${escapeHtml(item.sku)}</code>${varTitle} +${item.cantidad} u. (${fmtMoney(
                 item.costo_unitario
               )}) → Físico: <b>${movRes.nuevoFisico ?? 'OK'}</b> · Disp: <b>${
                 movRes.nuevoDisponible ?? 'OK'
-              }</b>`
+              }</b>${varStockSuffix}`
             );
 
             await emitBestEffortOsEvent(
@@ -2817,6 +3263,10 @@ async function handleTelegramBotRequest(req: any, res: any) {
               item.sku,
               {
                 sku: item.sku,
+                variante_id: item.variante_id || null,
+                variant_sku: item.variant_sku || null,
+                color: item.color || null,
+                talla: item.talla || null,
                 cantidad: item.cantidad,
                 costo_unitario: item.costo_unitario,
                 total_compra: item.subtotal,
@@ -2832,10 +3282,18 @@ async function handleTelegramBotRequest(req: any, res: any) {
           }
         }
 
+        // Resincronizar [VARIANTES_DISPONIBLES] de Bot Todd una sola vez por producto padre
+        for (const [parentSku, templateId] of touchedTemplates.entries()) {
+          await resyncParentToddVariantsServer(supabase, { parentSku, templateId });
+        }
+
         let financeSummary = 'Finanzas: No descontado (solo entrada de inventario).';
         if (withFinance && compra.total > 0) {
           const desc = `Compra Telegram (${compra.proveedor}): ${compra.items
-            .map((i) => `${i.cantidad}x ${i.sku}`)
+            .map((i) => {
+              const vLbl = i.variante_id ? ` (${formatVariantLabel(i.color, i.talla)})` : '';
+              return `${i.cantidad}x ${i.sku}${vLbl}`;
+            })
             .join(', ')}`;
           const finRes = await recordFinanceExpenseServer(supabase, {
             account_id: compra.account_id,
@@ -2950,9 +3408,10 @@ async function handleTelegramBotRequest(req: any, res: any) {
           '',
           `Puedes escribir natural, mandar <b>nota de voz 🎙️</b> o enviar <b>foto de recibo/factura 📸</b>:`,
           '',
-          `📦 <b>Compras e Inventario:</b>`,
-          `• <i>"Compré 10 cascos negros a $12.50 en MotoParts pagado de banco"</i>`,
+          `📦 <b>Compras e Inventario (con variantes):</b>`,
+          `• <i>"Compré 5 rosados y 5 amarillos de asistente de bebé a $3.50"</i>`,
           `• <code>/compra SKU CANTIDAD COSTO [PROVEEDOR]</code>`,
+          `• <code>/compra SKU color:CANT [color:CANT] COSTO [PROVEEDOR]</code>`,
           `• <code>/merma SKU CANT [MOTIVO]</code> o <i>"Se dañaron 2 cascos"</i>`,
           `• <code>/ajuste SKU NUEVO_CONTEO [MOTIVO]</code> o <i>"En bodega solo quedan 8 cascos"</i>`,
           '',
@@ -3015,57 +3474,208 @@ async function handleTelegramBotRequest(req: any, res: any) {
       fetchCashAccounts(supabase),
     ]);
 
-    // Comando rápido determinístico: /compra SKU CANTIDAD COSTO [PROVEEDOR...]
+    // Comando rápido determinístico:
+    // 1) /compra SKU COLOR:CANT [COLOR:CANT...] COSTO [PROVEEDOR...]
+    // 2) /compra SKU COLOR CANT COSTO [PROVEEDOR...]
+    // 3) /compra SKU_O_SKU_VARIANTE CANT COSTO [PROVEEDOR...]
     let intentHint = '';
     if (lowerText.startsWith('/compra')) {
       intentHint = '/compra';
       const rest = rawText.replace(/^\/compra(@\S+)?/i, '').trim();
       const parts = rest.split(/\s+/).filter(Boolean);
-      if (parts.length >= 3 && !Number.isNaN(Number(parts[1])) && !Number.isNaN(Number(parts[2]))) {
-        const skuQuery = parts[0];
-        const qty = Math.max(1, Math.round(Number(parts[1])));
-        const cost = Math.max(0, Number(parts[2]));
-        const proveedor = parts.slice(3).join(' ') || 'Proveedor';
-        const matched = findBestSkuMatch(skuQuery, catalog);
 
-        if (!matched) {
-          await sendTgMessage(
+      if (parts.length >= 3) {
+        const defaultAcc = accounts[0] || { id: 'banco_principal', nombre: 'Banco Principal' };
+        const pairTokens: Array<{ color: string; qty: number }> = [];
+        let cursor = 1;
+        while (cursor < parts.length) {
+          const m = parts[cursor].match(/^([^:\s]+):(\d+)$/);
+          if (!m) break;
+          pairTokens.push({ color: m[1], qty: Math.max(1, Math.round(Number(m[2]))) });
+          cursor++;
+        }
+
+        if (pairTokens.length > 0 && cursor < parts.length && !Number.isNaN(Number(parts[cursor]))) {
+          const cost = Math.max(0, Number(parts[cursor]));
+          const proveedor = parts.slice(cursor + 1).join(' ') || 'Proveedor';
+          const { parent } = findParentAndVariantByQuery(parts[0], catalog);
+
+          if (!parent) {
+            await sendTgMessage(
+              chatId,
+              `⚠️ No encontré ningún SKU activo que coincida con <code>${escapeHtml(parts[0])}</code>.`
+            );
+            return res.status(200).json({ ok: true });
+          }
+
+          const draftItems: DraftItem[] = [];
+          const unmatchedNotes: string[] = [];
+          for (const pt of pairTokens) {
+            const matchedVar = findBestVariantMatch(parent, pt.color);
+            if (!matchedVar) {
+              unmatchedNotes.push(`${parent.sku} · variante "${pt.color}" no encontrada`);
+              continue;
+            }
+            draftItems.push({
+              sku: parent.sku,
+              nombre: parent.nombre || parent.sku,
+              cantidad: pt.qty,
+              costo_unitario: cost,
+              subtotal: Math.round(pt.qty * cost * 100) / 100,
+              variante_id: matchedVar.variante_id,
+              variant_sku: matchedVar.sku,
+              color: matchedVar.color,
+              talla: matchedVar.talla,
+            });
+          }
+
+          if (draftItems.length === 0) {
+            await sendTgMessage(
+              chatId,
+              `⚠️ No encontré esas variantes en <code>${escapeHtml(parent.sku)}</code>.\nUsa <code>/stock ${escapeHtml(parent.sku)}</code> para ver los colores/tallas exactos.`
+            );
+            return res.status(200).json({ ok: true });
+          }
+
+          const totalCompra =
+            Math.round(draftItems.reduce((s, it) => s + it.subtotal, 0) * 100) / 100;
+          const draft: TelegramDraft = {
+            id: `p_${Date.now().toString(36)}`,
+            kind: 'compra',
             chatId,
-            `⚠️ No encontré ningún SKU activo que coincida con <code>${escapeHtml(
-              skuQuery
-            )}</code>.\nUsa <code>/stock palabra</code> para ver el código exacto o escríbelo en lenguaje natural.`
-          );
+            status: 'pending',
+            createdAt: new Date().toISOString(),
+            proveedor,
+            notas: 'Comando rápido /compra por variante',
+            account_id: defaultAcc.id,
+            account_nombre: defaultAcc.nombre,
+            asentar_en_finanzas_sugerido: cost > 0,
+            items: draftItems,
+            total: totalCompra,
+            unmatchedNotes: unmatchedNotes.length > 0 ? unmatchedNotes : undefined,
+            rawInput: rawText,
+          };
+
+          await saveDraft(supabase, draft);
+          await sendDraftConfirmationCard(chatId, draft);
           return res.status(200).json({ ok: true });
         }
 
-        const defaultAcc = accounts[0] || { id: 'banco_principal', nombre: 'Banco Principal' };
-        const draft: TelegramDraft = {
-          id: `p_${Date.now().toString(36)}`,
-          kind: 'compra',
-          chatId,
-          status: 'pending',
-          createdAt: new Date().toISOString(),
-          proveedor,
-          notas: 'Comando rápido /compra',
-          account_id: defaultAcc.id,
-          account_nombre: defaultAcc.nombre,
-          asentar_en_finanzas_sugerido: cost > 0,
-          items: [
-            {
-              sku: matched.sku,
-              nombre: matched.nombre || matched.sku,
-              cantidad: qty,
-              costo_unitario: cost,
-              subtotal: Math.round(qty * cost * 100) / 100,
-            },
-          ],
-          total: Math.round(qty * cost * 100) / 100,
-          rawInput: rawText,
-        };
+        // Caso /compra SKU COLOR CANTIDAD COSTO [PROVEEDOR...]
+        if (
+          parts.length >= 4 &&
+          Number.isNaN(Number(parts[1])) &&
+          !Number.isNaN(Number(parts[2])) &&
+          !Number.isNaN(Number(parts[3]))
+        ) {
+          const skuQuery = parts[0];
+          const varQuery = parts[1];
+          const qty = Math.max(1, Math.round(Number(parts[2])));
+          const cost = Math.max(0, Number(parts[3]));
+          const proveedor = parts.slice(4).join(' ') || 'Proveedor';
+          const { parent } = findParentAndVariantByQuery(skuQuery, catalog);
 
-        await saveDraft(supabase, draft);
-        await sendDraftConfirmationCard(chatId, draft);
-        return res.status(200).json({ ok: true });
+          if (parent) {
+            const matchedVar = findBestVariantMatch(parent, varQuery);
+            if (!matchedVar) {
+              await sendTgMessage(
+                chatId,
+                `⚠️ El producto <code>${escapeHtml(parent.sku)}</code> no tiene una variante que coincida con "${escapeHtml(varQuery)}".\nUsa <code>/stock ${escapeHtml(parent.sku)}</code> para ver variantes disponibles.`
+              );
+              return res.status(200).json({ ok: true });
+            }
+
+            const draft: TelegramDraft = {
+              id: `p_${Date.now().toString(36)}`,
+              kind: 'compra',
+              chatId,
+              status: 'pending',
+              createdAt: new Date().toISOString(),
+              proveedor,
+              notas: 'Comando rápido /compra por variante',
+              account_id: defaultAcc.id,
+              account_nombre: defaultAcc.nombre,
+              asentar_en_finanzas_sugerido: cost > 0,
+              items: [
+                {
+                  sku: parent.sku,
+                  nombre: parent.nombre || parent.sku,
+                  cantidad: qty,
+                  costo_unitario: cost,
+                  subtotal: Math.round(qty * cost * 100) / 100,
+                  variante_id: matchedVar.variante_id,
+                  variant_sku: matchedVar.sku,
+                  color: matchedVar.color,
+                  talla: matchedVar.talla,
+                },
+              ],
+              total: Math.round(qty * cost * 100) / 100,
+              rawInput: rawText,
+            };
+
+            await saveDraft(supabase, draft);
+            await sendDraftConfirmationCard(chatId, draft);
+            return res.status(200).json({ ok: true });
+          }
+        }
+
+        // Caso clásico /compra SKU CANTIDAD COSTO [PROVEEDOR...] (también acepta SKU_VARIANTE directo)
+        if (!Number.isNaN(Number(parts[1])) && !Number.isNaN(Number(parts[2]))) {
+          const skuQuery = parts[0];
+          const qty = Math.max(1, Math.round(Number(parts[1])));
+          const cost = Math.max(0, Number(parts[2]));
+          const proveedor = parts.slice(3).join(' ') || 'Proveedor';
+          const { parent: matched, variant: directVar } = findParentAndVariantByQuery(
+            skuQuery,
+            catalog
+          );
+
+          if (!matched) {
+            await sendTgMessage(
+              chatId,
+              `⚠️ No encontré ningún SKU activo que coincida con <code>${escapeHtml(
+                skuQuery
+              )}</code>.\nUsa <code>/stock palabra</code> para ver el código exacto o escríbelo en lenguaje natural.`
+            );
+            return res.status(200).json({ ok: true });
+          }
+
+          const draft: TelegramDraft = {
+            id: `p_${Date.now().toString(36)}`,
+            kind: 'compra',
+            chatId,
+            status: 'pending',
+            createdAt: new Date().toISOString(),
+            proveedor,
+            notas: directVar ? 'Comando rápido /compra (SKU variante)' : 'Comando rápido /compra',
+            account_id: defaultAcc.id,
+            account_nombre: defaultAcc.nombre,
+            asentar_en_finanzas_sugerido: cost > 0,
+            items: [
+              {
+                sku: matched.sku,
+                nombre: matched.nombre || matched.sku,
+                cantidad: qty,
+                costo_unitario: cost,
+                subtotal: Math.round(qty * cost * 100) / 100,
+                ...(directVar
+                  ? {
+                      variante_id: directVar.variante_id,
+                      variant_sku: directVar.sku,
+                      color: directVar.color,
+                      talla: directVar.talla,
+                    }
+                  : {}),
+              },
+            ],
+            total: Math.round(qty * cost * 100) / 100,
+            rawInput: rawText,
+          };
+
+          await saveDraft(supabase, draft);
+          await sendDraftConfirmationCard(chatId, draft);
+          return res.status(200).json({ ok: true });
+        }
       }
     } else if (lowerText.startsWith('/merma') || lowerText.startsWith('/ajuste')) {
       const isMerma = lowerText.startsWith('/merma');
@@ -3459,15 +4069,36 @@ async function handleTelegramBotRequest(req: any, res: any) {
       const qty = Math.round(Number(rawItem?.cantidad || 0));
       if (qty <= 0) continue;
 
-      const candidate =
-        findBestSkuMatch(String(rawItem?.sku || ''), catalog) ||
-        findBestSkuMatch(String(rawItem?.raw_name || ''), catalog);
+      const byVarSku = findParentAndVariantByQuery(String(rawItem?.variant_sku || ''), catalog);
+      const bySku = findParentAndVariantByQuery(String(rawItem?.sku || ''), catalog);
+      const byName = findParentAndVariantByQuery(String(rawItem?.raw_name || ''), catalog);
+
+      const candidate = byVarSku.parent || bySku.parent || byName.parent;
+      const directVariant = byVarSku.variant || bySku.variant || byName.variant;
 
       if (!candidate) {
         unmatchedNotes.push(
           `${rawItem?.raw_name || rawItem?.sku || 'Producto'} (${qty} u. × ${fmtMoney(
             Number(rawItem?.costo_unitario || 0)
           )})`
+        );
+        continue;
+      }
+
+      const variantQuery = [rawItem?.color, rawItem?.talla].filter(Boolean).join(' ').trim();
+      const matchedVariant =
+        directVariant ||
+        findBestVariantMatch(candidate, String(rawItem?.variant_sku || '')) ||
+        findBestVariantMatch(candidate, variantQuery) ||
+        findBestVariantMatch(candidate, String(rawItem?.raw_name || ''));
+
+      // Si el usuario especificó explícitamente un color/variante y el producto tiene variantes pero no coincide ninguna, avisar en notas
+      if (variantQuery && Array.isArray(candidate.variants) && candidate.variants.length > 0 && !matchedVariant) {
+        const dispList = candidate.variants
+          .map((v: TelegramCatalogVariant) => formatVariantLabel(v.color, v.talla))
+          .join(', ');
+        unmatchedNotes.push(
+          `${candidate.sku} · variante "${variantQuery}" no existe (activas: ${dispList})`
         );
         continue;
       }
@@ -3483,6 +4114,14 @@ async function handleTelegramBotRequest(req: any, res: any) {
         cantidad: qty,
         costo_unitario: Math.round(unitCost * 100) / 100,
         subtotal: Math.round(qty * unitCost * 100) / 100,
+        ...(matchedVariant
+          ? {
+              variante_id: matchedVariant.variante_id,
+              variant_sku: matchedVariant.sku,
+              color: matchedVariant.color,
+              talla: matchedVariant.talla,
+            }
+          : {}),
       });
     }
 
