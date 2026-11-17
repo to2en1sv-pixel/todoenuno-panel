@@ -601,10 +601,13 @@ export function SistemaToddConfig() {
           <section className="bg-cd bd rounded-xl p-5 space-y-2.5">
             <h3 className="text-xs font-bold flex items-center gap-2" style={{ color: 'var(--ac)' }}>
               <Bot size={14} />
-              Conexión automática con n8n
+              Conexión automática con n8n · Visión &amp; Audio GPT
             </h3>
             <p className="text-xs tx-mu leading-relaxed">
-              Una vez actualizado el flujo de Todd con soporte para reglas operativas (<code className="mono">/api/todd-bridge?action=workflow</code>), cualquier cambio que guardes aquí aplica al instante sin volver a editar n8n.
+              Una vez actualizado el flujo de Todd (<code className="mono">/api/todd-bridge?action=workflow</code>), cualquier cambio que guardes aquí aplica al instante sin volver a editar n8n.
+            </p>
+            <p className="text-xs tx-mu leading-relaxed">
+              Las <strong>imágenes</strong> (productos, capturas o comprobantes) y <strong>notas de voz</strong> que llegan a UniChat se analizan automáticamente con GPT Vision + Whisper antes de pasar a Todd, y su interpretación también queda visible en la burbuja del chat.
             </p>
           </section>
         </aside>
