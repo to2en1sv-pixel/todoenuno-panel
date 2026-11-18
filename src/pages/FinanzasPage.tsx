@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Plus,
@@ -14,10 +14,13 @@ import {
   Trash2,
   RotateCcw,
   AlertCircle,
+  AlertTriangle,
+  ShieldCheck,
   ExternalLink,
   Calendar,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   CheckCircle2,
   Truck,
 } from 'lucide-react';
@@ -42,13 +45,30 @@ import {
   clearLegacyDeliveredPending,
   type PendingStreetOrder,
 } from '@/lib/finance';
-import { syncOrderInventoryOnStatusChange } from '@/lib/inventory';
+import {
+  fetchStockItems,
+  fetchProductVariants,
+  syncOrderInventoryOnStatusChange,
+} from '@/lib/inventory';
+import {
+  resolveFinancePeriodRange,
+  filterTransactionsByDateRange,
+  computePeriodMetrics,
+  computeRealBusinessValue,
+  computeFinancialHealth,
+  extractTxYmd,
+  getSvTodayStr,
+  getCategoryDisplayLabel,
+  isBalanceAdjustmentCategory,
+  type FinancePeriodPreset,
+} from '@/lib/financeAnalytics';
 import type {
   CashAccount,
   MoneyTransaction,
   Budget,
   TransactionType,
 } from '@/types/finance';
+import type { StockItem, ProductVariant } from '@/types/inventory';
 
 type PagoFijo = {
   id: string;
@@ -312,9 +332,19 @@ export function FinanzasPage() {
   const [transactions, setTransactions] = useState<MoneyTransaction[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingStreetOrder[]>([]);
   const [pagosFijos, setPagosFijos] = useState<PagoFijo[]>([]);
+  const [stockItems, setStockItems] = useState<StockItem[]>([]);
+  const [variantsList, setVariantsList] = useState<ProductVariant[]>([]);
   const [financeCutoff, setFinanceCutoff] = useState<string | null>(() => getFinanceCutoffDate());
   const [loading, setLoading] = useState(true);
   const [statusNotice, setStatusNotice] = useState<{ tipo: 'ok' | 'warn'; msg: string } | null>(null);
+
+  // Selector de período (por defecto: Mes actual)
+  const [periodPreset, setPeriodPreset] = useState<FinancePeriodPreset>('mes_actual');
+  const [customStartDate, setCustomStartDate] = useState<string>(() => `${getSvTodayStr().slice(0, 8)}01`);
+  const [customEndDate, setCustomEndDate] = useState<string>(() => getSvTodayStr());
+  const [syncLedgerWithPeriod, setSyncLedgerWithPeriod] = useState<boolean>(true);
+  const [filterCategoria, setFilterCategoria] = useState<string>('all');
+  const streetSectionRef = useRef<HTMLDivElement | null>(null);
 
   // Auditoría y liquidación directa en calle
   const [streetDetailFilter, setStreetDetailFilter] = useState<'none' | 'todos' | 'entregado' | 'en_camino'>('none');
@@ -403,19 +433,24 @@ export function FinanzasPage() {
   const loadFinanceData = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [cutoff, accData, budData, txData, pendingRes, pagosRes] = await Promise.all([
-        hydrateFinanceCutoffFromOsEvents(supabase),
-        fetchCashAccounts(),
-        fetchBudgets(),
-        fetchMoneyTransactions(5000),
-        fetchPendingStreetOrders(),
-        supabase.from('panel_pagos').select('*').order('fecha_vencimiento', { ascending: true }),
-      ]);
+      const [cutoff, accData, budData, txData, pendingRes, pagosRes, stockRes, varsRes] =
+        await Promise.all([
+          hydrateFinanceCutoffFromOsEvents(supabase),
+          fetchCashAccounts(),
+          fetchBudgets(),
+          fetchMoneyTransactions(5000),
+          fetchPendingStreetOrders(),
+          supabase.from('panel_pagos').select('*').order('fecha_vencimiento', { ascending: true }),
+          fetchStockItems().catch(() => ({ items: [] as StockItem[], isRealDb: false })),
+          fetchProductVariants().catch(() => [] as ProductVariant[]),
+        ]);
 
       setFinanceCutoff(cutoff);
       setAccounts(accData.accounts);
       setBudgets(budData.budgets);
       setTransactions(txData.transactions);
+      setStockItems(stockRes.items || []);
+      setVariantsList(Array.isArray(varsRes) ? varsRes : []);
       if (!pendingRes.error) {
         setPendingOrders(pendingRes.orders);
       } else {
@@ -441,27 +476,36 @@ export function FinanzasPage() {
     );
   }, [transactions, financeCutoff]);
 
-  const saldoTotalCuentas = useMemo(
-    () => accounts.reduce((sum, a) => sum + (Number(a.saldo_actual) || 0), 0),
-    [accounts]
+  const periodRange = useMemo(
+    () => resolveFinancePeriodRange(periodPreset, customStartDate, customEndDate),
+    [periodPreset, customStartDate, customEndDate]
   );
 
-  const metricasPeriodo = useMemo(() => {
-    let ingresos = 0;
-    let egresos = 0;
-    activeTransactions.forEach(tx => {
-      if (tx.tipo === 'income') ingresos += Number(tx.monto) || 0;
-      if (tx.tipo === 'expense') egresos += Number(tx.monto) || 0;
-    });
-    const utilidadNeta = ingresos - egresos;
-    const margen = ingresos > 0 ? (utilidadNeta / ingresos) * 100 : 0;
-    return { ingresos, egresos, utilidadNeta, margen };
-  }, [activeTransactions]);
+  const periodTransactions = useMemo(
+    () => filterTransactionsByDateRange(activeTransactions, periodRange.startDate, periodRange.endDate),
+    [activeTransactions, periodRange]
+  );
+
+  const periodMetrics = useMemo(
+    () => computePeriodMetrics(activeTransactions, periodRange),
+    [activeTransactions, periodRange]
+  );
 
   // Estimado en calle / pendiente de liquidar (fuente única unificada, sin amputar por created_at)
   const estimadoPorEntrar = useMemo(
     () => computeStreetCollectionsSummary(pendingOrders),
     [pendingOrders]
+  );
+
+  const businessValue = useMemo(
+    () =>
+      computeRealBusinessValue({
+        accounts,
+        stockItems,
+        variantsList,
+        streetSummary: estimadoPorEntrar,
+      }),
+    [accounts, stockItems, variantsList, estimadoPorEntrar]
   );
 
   // Cobros automáticos viejos (venta_pedido) para pedidos todavía sin liquidar
@@ -482,9 +526,12 @@ export function FinanzasPage() {
     [prematureAutoTxs]
   );
 
-  // Presupuestos con gasto real calculado desde activeTransactions
+  // Presupuestos mensuales calculados sobre el mes del presupuesto (o mes actual) sin ajustes de saldo
+  const currentSvMonth = useMemo(() => getSvTodayStr().slice(0, 7), []);
+
   const budgetsWithRealSpent = useMemo(() => {
     return budgets.map(b => {
+      const targetMonth = /^\d{4}-\d{2}/.test(b.periodo || '') ? b.periodo.slice(0, 7) : currentSvMonth;
       const catLower = b.categoria.toLowerCase();
       const isMarketing = catLower.includes('marketing') || catLower.includes('pauta');
       const isEnvios = catLower.includes('envio') || catLower.includes('logist');
@@ -494,6 +541,9 @@ export function FinanzasPage() {
       let gastoReal = 0;
       activeTransactions.forEach(t => {
         if (t.tipo !== 'expense') return;
+        if (isBalanceAdjustmentCategory(t.categoria)) return;
+        if (extractTxYmd(t).slice(0, 7) !== targetMonth) return;
+
         const tCat = (t.categoria || '').toLowerCase();
         if (isMarketing && (tCat.includes('pauta') || tCat.includes('marketing') || t.account_id === 'tarjeta_pauta')) {
           gastoReal += Number(t.monto) || 0;
@@ -510,7 +560,7 @@ export function FinanzasPage() {
 
       return { ...b, monto_gastado: gastoReal };
     });
-  }, [budgets, activeTransactions]);
+  }, [budgets, activeTransactions, currentSvMonth]);
 
   const presupuestoTotal = useMemo(() => {
     const totalPresupuestado = budgetsWithRealSpent.reduce((sum, b) => sum + (b.monto_presupuestado || 0), 0);
@@ -519,12 +569,36 @@ export function FinanzasPage() {
     return { totalPresupuestado, totalGastado, pct };
   }, [budgetsWithRealSpent]);
 
+  const financialHealth = useMemo(
+    () =>
+      computeFinancialHealth({
+        periodMetrics,
+        activeTransactions,
+        businessValue,
+        pagosFijos,
+        monthlyBudgetsTotal: presupuestoTotal,
+        streetSummary: estimadoPorEntrar,
+      }),
+    [periodMetrics, activeTransactions, businessValue, pagosFijos, presupuestoTotal, estimadoPorEntrar]
+  );
+
+  const ledgerSourceTransactions = useMemo(
+    () => (syncLedgerWithPeriod ? periodTransactions : activeTransactions),
+    [syncLedgerWithPeriod, periodTransactions, activeTransactions]
+  );
+
   const filteredTransactions = useMemo(() => {
-    return activeTransactions.filter(t => {
+    return ledgerSourceTransactions.filter(t => {
       if (filterTipo === 'income' && t.tipo !== 'income') return false;
       if (filterTipo === 'expense' && t.tipo !== 'expense') return false;
       if (filterTipo === 'transfer' && t.tipo !== 'transfer') return false;
       if (filterTipo === 'manual' && !t.es_manual) return false;
+
+      if (filterCategoria !== 'all') {
+        if (String(t.categoria || '').toLowerCase() !== filterCategoria.toLowerCase()) {
+          return false;
+        }
+      }
 
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
@@ -535,7 +609,30 @@ export function FinanzasPage() {
       }
       return true;
     });
-  }, [activeTransactions, filterTipo, searchTerm]);
+  }, [ledgerSourceTransactions, filterTipo, filterCategoria, searchTerm]);
+
+  const jumpToCategoryInLedger = (categoria: string, tipo: 'all' | 'expense' | 'income' = 'expense') => {
+    setSyncLedgerWithPeriod(true);
+    setFilterTipo(tipo);
+    setFilterCategoria(categoria);
+    setSearchTerm('');
+    setActiveTab('movimientos');
+  };
+
+  const handleHealthAction = (
+    actionType: 'liquidate_street' | 'open_planning' | 'go_inventory' | 'open_ledger_ads'
+  ) => {
+    if (actionType === 'liquidate_street') {
+      setStreetDetailFilter('entregado');
+      setTimeout(() => {
+        streetSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 60);
+    } else if (actionType === 'open_planning') {
+      setActiveTab('planificacion');
+    } else if (actionType === 'open_ledger_ads') {
+      jumpToCategoryInLedger('pauta_publicidad', 'expense');
+    }
+  };
 
   /* ------------------------------ Acciones ------------------------------ */
   const handleQuickClearLegacyDelivered = async () => {
@@ -926,7 +1023,10 @@ export function FinanzasPage() {
       <nav className="flex items-center gap-6 border-b border-[var(--bd)] overflow-x-auto">
         {[
           { id: 'resumen', label: 'Resumen' },
-          { id: 'movimientos', label: `Libro diario (${activeTransactions.length})` },
+          {
+            id: 'movimientos',
+            label: `Libro diario (${ledgerSourceTransactions.length})`,
+          },
           { id: 'planificacion', label: 'Presupuestos y fijos' },
         ].map(tab => {
           const active = activeTab === tab.id;
@@ -950,15 +1050,85 @@ export function FinanzasPage() {
       {/* PESTAÑA 1: RESUMEN */}
       {activeTab === 'resumen' && (
         <div className="flex flex-col gap-6">
+          {/* Selector explícito de período para Ingresos, Egresos y Salud */}
+          <section className="flex flex-col gap-2.5">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div className="flex items-center gap-1 p-1 bg-sf border border-[var(--bd)] rounded-lg overflow-x-auto">
+                {[
+                  { id: 'hoy', label: 'Hoy' },
+                  { id: '7d', label: '7 días' },
+                  { id: 'mes_actual', label: 'Mes actual' },
+                  { id: 'mes_anterior', label: 'Mes anterior' },
+                  { id: 'todo', label: 'Todo' },
+                  { id: 'custom', label: 'Personalizado' },
+                ].map(opt => {
+                  const isActive = periodPreset === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setPeriodPreset(opt.id as FinancePeriodPreset)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
+                        isActive
+                          ? 'bg-cd text-[var(--tx)] shadow-sm'
+                          : 'text-[var(--mu)] hover:text-[var(--tx)]'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--mu)] tabular-nums">
+                <Calendar size={13} className="shrink-0" />
+                <span className="font-medium text-[var(--tx)]">{periodRange.label}</span>
+                <span aria-hidden="true">·</span>
+                <span>{periodMetrics.transactionsCount} movimientos</span>
+                {periodRange.comparisonLabel && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>{periodRange.comparisonLabel}</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {periodPreset === 'custom' && (
+              <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 bg-cd border border-[var(--bd)] rounded-xl text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-[var(--mu)]">Desde</span>
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={e => setCustomStartDate(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg border border-[var(--bd)] bg-sf font-mono text-xs outline-none"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[var(--mu)]">Hasta</span>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={e => setCustomEndDate(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg border border-[var(--bd)] bg-sf font-mono text-xs outline-none"
+                  />
+                </div>
+              </div>
+            )}
+          </section>
+
           {/* Franja de 4 métricas unificada por divisores sutiles */}
-          <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
+          <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[var(--bd)]">
             <div className="p-5">
               <div className="text-xs font-medium text-[var(--mu)]">Liquidez disponible</div>
               <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
-                {loading ? '—' : fmtMoney(saldoTotalCuentas)}
+                {loading ? '—' : fmtMoney(businessValue.liquidezNeta)}
               </div>
-              <div className="text-xs text-[var(--mu)] mt-1">
-                Suma en {accounts.length} cuentas
+              <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
+                {businessValue.deudaTarjetaPauta > 0
+                  ? `Caja/Banco ${fmtMoney(businessValue.liquidezPositiva)} · Tarjeta -${fmtMoney(businessValue.deudaTarjetaPauta)}`
+                  : `Suma en ${accounts.length} cuentas`}
               </div>
             </div>
 
@@ -968,29 +1138,484 @@ export function FinanzasPage() {
                 {loading ? '—' : fmtMoney(estimadoPorEntrar.totalAfuera)}
               </div>
               <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
-                {estimadoPorEntrar.entregadosCount} entregados · {estimadoPorEntrar.enCaminoCount} en ruta
+                {estimadoPorEntrar.entregadosCount} entregados ({fmtMoney(estimadoPorEntrar.entregadosTotal)}) ·{' '}
+                {estimadoPorEntrar.enCaminoCount} en ruta
               </div>
             </div>
 
             <div className="p-5">
-              <div className="text-xs font-medium text-[var(--mu)]">Ingresos liquidados</div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[var(--mu)]">Ingresos liquidados</span>
+                {periodMetrics.ingresosDeltaPct !== null && (
+                  <span
+                    className={`text-[11px] font-mono tabular-nums font-semibold ${
+                      periodMetrics.ingresosDeltaPct >= 0
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                    }`}
+                  >
+                    {periodMetrics.ingresosDeltaPct >= 0 ? '+' : ''}
+                    {periodMetrics.ingresosDeltaPct.toFixed(0)}%
+                  </span>
+                )}
+              </div>
               <div className="text-2xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1.5">
-                {loading ? '—' : fmtMoney(metricasPeriodo.ingresos)}
+                {loading ? '—' : fmtMoney(periodMetrics.ingresos)}
               </div>
-              <div className="text-xs text-[var(--mu)] mt-1">
-                Cobros confirmados en caja
+              <div className="text-xs text-[var(--mu)] mt-1 truncate">
+                {periodRange.label}
+                {periodMetrics.ajustesPositivos > 0 &&
+                  ` · +${fmtMoney(periodMetrics.ajustesPositivos)} conciliaciones`}
               </div>
             </div>
 
             <div className="p-5">
-              <div className="text-xs font-medium text-[var(--mu)]">Egresos del período</div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[var(--mu)]">Egresos operativos</span>
+                {periodMetrics.egresosOperativosDeltaPct !== null && (
+                  <span
+                    className={`text-[11px] font-mono tabular-nums font-semibold ${
+                      periodMetrics.egresosOperativosDeltaPct <= 0
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-amber-600 dark:text-amber-400'
+                    }`}
+                  >
+                    {periodMetrics.egresosOperativosDeltaPct >= 0 ? '+' : ''}
+                    {periodMetrics.egresosOperativosDeltaPct.toFixed(0)}%
+                  </span>
+                )}
+              </div>
               <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
-                {loading ? '—' : fmtMoney(metricasPeriodo.egresos)}
+                {loading ? '—' : fmtMoney(periodMetrics.egresosOperativos)}
               </div>
               <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
-                Neto {fmtMoney(metricasPeriodo.utilidadNeta)} · {metricasPeriodo.margen.toFixed(1)}% margen
+                Neto {fmtMoney(periodMetrics.utilidadOperativa)} · {periodMetrics.margenOperativoPct.toFixed(1)}% margen
+                {periodMetrics.comprasInventario > 0 &&
+                  ` · Stock ${fmtMoney(periodMetrics.comprasInventario)}`}
               </div>
             </div>
+          </section>
+
+          {/* Bloque Estratégico: Valor Total Real del Negocio + Salud Financiera */}
+          <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+            {/* Valor Total Real del Negocio */}
+            <div className="lg:col-span-6 bg-cd border border-[var(--bd)] rounded-xl flex flex-col justify-between">
+              <div>
+                <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-[var(--tx)]">
+                      Valor total real del negocio
+                    </h2>
+                    <p className="text-xs text-[var(--mu)] mt-0.5">
+                      Liquidez en cuentas + inventario al costo + entregados sin liquidar
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-5 space-y-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <div className="text-3xl font-bold font-mono tabular-nums text-[var(--tx)] tracking-tight">
+                      {loading ? '—' : fmtMoney(businessValue.valorTotalReal)}
+                    </div>
+                    <div className="text-xs text-[var(--mu)] tabular-nums">
+                      Liquidez inmediata {fmtMoney(businessValue.liquidezPositiva)} · Bodega/calle{' '}
+                      {fmtMoney(businessValue.inventarioCosto + businessValue.entregadosSinLiquidar)}
+                    </div>
+                  </div>
+
+                  {/* Barra de composición proporcional */}
+                  <div
+                    className="w-full h-2 rounded-full bg-sf overflow-hidden flex border border-[var(--bd)]"
+                    aria-label="Composición del valor real del negocio"
+                  >
+                    <div
+                      className="h-full bg-emerald-600 dark:bg-emerald-500 transition-all"
+                      style={{ width: `${businessValue.pctLiquidez}%` }}
+                      title={`Liquidez: ${businessValue.pctLiquidez.toFixed(1)}%`}
+                    />
+                    <div
+                      className="h-full bg-zinc-500 dark:bg-zinc-400 transition-all"
+                      style={{ width: `${businessValue.pctInventario}%` }}
+                      title={`Inventario al costo: ${businessValue.pctInventario.toFixed(1)}%`}
+                    />
+                    <div
+                      className="h-full bg-amber-500 transition-all"
+                      style={{ width: `${businessValue.pctEntregados}%` }}
+                      title={`Entregados sin liquidar: ${businessValue.pctEntregados.toFixed(1)}%`}
+                    />
+                  </div>
+                </div>
+
+                <div className="divide-y divide-[var(--bd)] border-t border-[var(--bd)]">
+                  <div className="px-5 py-3 flex items-center justify-between gap-3 text-xs">
+                    <div className="min-w-0">
+                      <div className="font-medium text-[var(--tx)]">Liquidez neta en cuentas</div>
+                      <div className="text-[var(--mu)] tabular-nums mt-0.5">
+                        {businessValue.pctLiquidez.toFixed(1)}% del valor real · {accounts.length} cuentas
+                      </div>
+                    </div>
+                    <div className="font-mono tabular-nums font-bold text-sm text-emerald-600 dark:text-emerald-400 shrink-0">
+                      {loading ? '—' : fmtMoney(businessValue.liquidezNeta)}
+                    </div>
+                  </div>
+
+                  <div className="px-5 py-3 flex items-center justify-between gap-3 text-xs">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-[var(--tx)]">Inventario al costo</span>
+                        {businessValue.skusSinCostoCount > 0 && (
+                          <Link
+                            to="/inventario"
+                            className="text-amber-600 dark:text-amber-400 hover:underline font-medium whitespace-nowrap"
+                          >
+                            {businessValue.skusSinCostoCount} SKU(s) sin costo
+                          </Link>
+                        )}
+                      </div>
+                      <div className="text-[var(--mu)] tabular-nums mt-0.5">
+                        {businessValue.pctInventario.toFixed(1)}% · {businessValue.unidadesFisicas} uds físicas en{' '}
+                        {businessValue.skusActivosCount} SKUs
+                      </div>
+                    </div>
+                    <div className="font-mono tabular-nums font-bold text-sm text-[var(--tx)] shrink-0">
+                      {loading ? '—' : fmtMoney(businessValue.inventarioCosto)}
+                    </div>
+                  </div>
+
+                  <div className="px-5 py-3 flex items-center justify-between gap-3 text-xs">
+                    <div className="min-w-0">
+                      <div className="font-medium text-[var(--tx)]">Entregados sin liquidar</div>
+                      <div className="text-[var(--mu)] tabular-nums mt-0.5">
+                        {businessValue.pctEntregados.toFixed(1)}% · {estimadoPorEntrar.entregadosCount}{' '}
+                        {estimadoPorEntrar.entregadosCount === 1 ? 'pedido cobrado' : 'pedidos cobrados'} por depositar
+                      </div>
+                    </div>
+                    <div className="font-mono tabular-nums font-bold text-sm text-amber-600 dark:text-amber-400 shrink-0">
+                      {loading ? '—' : fmtMoney(businessValue.entregadosSinLiquidar)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-5 py-3 border-t border-[var(--bd)] bg-sf/50 text-[11px] text-[var(--mu)] flex flex-wrap items-center justify-between gap-2 tabular-nums">
+                <span>
+                  Potencial adicional (no sumado): En ruta {fmtMoney(businessValue.enRutaPotencial)} · Venta bodega{' '}
+                  {fmtMoney(businessValue.inventarioPrecioVenta)}
+                </span>
+                <Link
+                  to="/inventario"
+                  className="font-medium text-[var(--tx)] hover:underline inline-flex items-center gap-1 whitespace-nowrap"
+                >
+                  Ver inventario <ChevronRight size={12} />
+                </Link>
+              </div>
+            </div>
+
+            {/* Indicador de Salud Financiera */}
+            <div className="lg:col-span-6 bg-cd border border-[var(--bd)] rounded-xl flex flex-col justify-between">
+              <div>
+                <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-[var(--tx)]">
+                      Salud financiera del negocio
+                    </h2>
+                    <p className="text-xs text-[var(--mu)] mt-0.5">
+                      Evaluación en tiempo real sobre flujo, liquidez, cobro y presupuestos
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {financialHealth.estado === 'Saludable' ? (
+                      <ShieldCheck size={17} className="text-emerald-600 dark:text-emerald-400" />
+                    ) : financialHealth.estado === 'Atención' ? (
+                      <AlertTriangle size={17} className="text-amber-600 dark:text-amber-400" />
+                    ) : (
+                      <AlertCircle size={17} className="text-rose-600 dark:text-rose-400" />
+                    )}
+                    <div className="text-right">
+                      <div
+                        className={`text-sm font-bold leading-none ${
+                          financialHealth.estado === 'Saludable'
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : financialHealth.estado === 'Atención'
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-rose-600 dark:text-rose-400'
+                        }`}
+                      >
+                        {financialHealth.estado}
+                      </div>
+                      <div className="text-[11px] font-mono tabular-nums text-[var(--mu)] mt-0.5">
+                        {financialHealth.score}/100 pts
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Métricas operativas clave de salud */}
+                <div className="px-5 py-3 border-b border-[var(--bd)] bg-sf/40 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--mu)] tabular-nums">
+                  <span>
+                    Oxígeno de caja:{' '}
+                    <strong className="text-[var(--tx)]">
+                      {financialHealth.runwayDias !== null ? `${financialHealth.runwayDias} días` : 'Sin gasto diario'}
+                    </strong>
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    Capital en bodega/calle:{' '}
+                    <strong className="text-[var(--tx)]">
+                      {financialHealth.pctCapitalAtrapado.toFixed(0)}%
+                    </strong>
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    Compromisos 15d:{' '}
+                    <strong className="text-[var(--tx)]">
+                      {fmtMoney(financialHealth.compromisos15dTotal)}
+                    </strong>
+                  </span>
+                </div>
+
+                {/* Desglose de los pilares */}
+                <div className="p-5 space-y-3">
+                  {financialHealth.pillars.map(p => {
+                    const pct = p.maxScore > 0 ? (p.score / p.maxScore) * 100 : 0;
+                    return (
+                      <div key={p.id} className="space-y-1">
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="font-medium text-[var(--tx)]">{p.label}</span>
+                          <span className="font-mono tabular-nums text-[var(--mu)]">
+                            <strong
+                              className={
+                                p.status === 'ok'
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : p.status === 'warn'
+                                  ? 'text-amber-600 dark:text-amber-400'
+                                  : 'text-rose-600 dark:text-rose-400'
+                              }
+                            >
+                              {p.score}
+                            </strong>
+                            /{p.maxScore}
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 rounded-full bg-sf overflow-hidden">
+                          <div
+                            className={`h-full transition-all ${
+                              p.status === 'ok'
+                                ? 'bg-emerald-500'
+                                : p.status === 'warn'
+                                ? 'bg-amber-500'
+                                : 'bg-rose-500'
+                            }`}
+                            style={{ width: `${Math.min(pct, 100)}%` }}
+                          />
+                        </div>
+                        <div className="text-[11px] text-[var(--mu)] tabular-nums">{p.summary}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Simulador de impacto + hallazgos accionables */}
+              <div className="border-t border-[var(--bd)] divide-y divide-[var(--bd)]">
+                {financialHealth.simulation && (
+                  <div className="px-5 py-3 bg-sf/60 flex items-center justify-between gap-3 text-xs">
+                    <div className="text-[var(--mu)] leading-relaxed">
+                      Si liquidas los{' '}
+                      <strong className="text-[var(--tx)] font-mono tabular-nums">
+                        {fmtMoney(financialHealth.simulation.montoPorLiquidar)}
+                      </strong>{' '}
+                      entregados hoy, tu liquidez sube a{' '}
+                      <strong className="text-[var(--tx)] font-mono tabular-nums">
+                        {fmtMoney(financialHealth.simulation.nuevaLiquidezNeta)}
+                      </strong>{' '}
+                      y tu salud pasa a{' '}
+                      <strong className="text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">
+                        {financialHealth.simulation.nuevoScore}/100 ({financialHealth.simulation.nuevoEstado})
+                      </strong>
+                      .
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleHealthAction('liquidate_street')}
+                      className="px-2.5 py-1.5 rounded-lg border border-[var(--bd)] bg-cd hover:bg-sf text-[11px] font-semibold text-[var(--tx)] whitespace-nowrap shrink-0 transition-colors"
+                    >
+                      Liquidar
+                    </button>
+                  </div>
+                )}
+
+                {financialHealth.findings.length > 0 && (
+                  <div className="px-5 py-3 space-y-2">
+                    {financialHealth.findings.map(item => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div
+                            className={`font-medium truncate ${
+                              item.severity === 'risk'
+                                ? 'text-rose-600 dark:text-rose-400'
+                                : item.severity === 'warn'
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : 'text-[var(--tx)]'
+                            }`}
+                          >
+                            {item.title}
+                          </div>
+                          <div className="text-[11px] text-[var(--mu)] truncate">{item.detail}</div>
+                        </div>
+                        {item.actionType === 'go_inventory' ? (
+                          <Link
+                            to="/inventario"
+                            className="text-[11px] font-semibold text-[var(--tx)] hover:underline whitespace-nowrap shrink-0"
+                          >
+                            {item.actionLabel}
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleHealthAction(item.actionType)}
+                            className="text-[11px] font-semibold text-[var(--tx)] hover:underline whitespace-nowrap shrink-0"
+                          >
+                            {item.actionLabel}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {/* Auditoría de Egresos del Período y Desglose por Categoría */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-semibold text-[var(--tx)]">
+                  Auditoría de flujo y egresos del período
+                </h2>
+                <p className="text-xs text-[var(--mu)] mt-0.5 tabular-nums">
+                  {periodRange.label} · Egresos operativos, inversión en inventario y conciliaciones separados
+                </p>
+              </div>
+              <div className="text-xs text-[var(--mu)] tabular-nums">
+                Flujo neto real:{' '}
+                <strong
+                  className={
+                    periodMetrics.flujoNetoCaja >= 0
+                      ? 'text-emerald-600 dark:text-emerald-400 font-mono'
+                      : 'text-rose-600 dark:text-rose-400 font-mono'
+                  }
+                >
+                  {fmtMoney(periodMetrics.flujoNetoCaja)}
+                </strong>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[var(--bd)] border-b border-[var(--bd)] text-xs">
+              <div className="px-5 py-3.5">
+                <div className="text-[var(--mu)]">Gastos operativos</div>
+                <div className="text-base font-bold font-mono tabular-nums text-[var(--tx)] mt-1">
+                  {fmtMoney(periodMetrics.egresosOperativos)}
+                </div>
+                <div className="text-[11px] text-[var(--mu)] mt-0.5">Pauta, envíos, fijos y generales</div>
+              </div>
+
+              <div className="px-5 py-3.5">
+                <div className="text-[var(--mu)]">Compras inventario</div>
+                <div className="text-base font-bold font-mono tabular-nums text-[var(--tx)] mt-1">
+                  {fmtMoney(periodMetrics.comprasInventario)}
+                </div>
+                <div className="text-[11px] text-[var(--mu)] mt-0.5">Pagos a proveedor (pasa a stock)</div>
+              </div>
+
+              <div className="px-5 py-3.5">
+                <div className="text-[var(--mu)]">Ajustes de conciliación</div>
+                <div className="text-base font-bold font-mono tabular-nums text-[var(--tx)] mt-1">
+                  {periodMetrics.ajustesNegativos > 0 || periodMetrics.ajustesPositivos > 0
+                    ? `${periodMetrics.ajustesNetos >= 0 ? '+' : ''}${fmtMoney(periodMetrics.ajustesNetos)}`
+                    : fmtMoney(0)}
+                </div>
+                <div className="text-[11px] text-[var(--mu)] mt-0.5 tabular-nums">
+                  +{fmtMoney(periodMetrics.ajustesPositivos)} / -{fmtMoney(periodMetrics.ajustesNegativos)} (excluidos)
+                </div>
+              </div>
+
+              <div className="px-5 py-3.5">
+                <div className="text-[var(--mu)]">Transferencias internas</div>
+                <div className="text-base font-bold font-mono tabular-nums text-[var(--tx)] mt-1">
+                  {fmtMoney(periodMetrics.transferenciasTotal)}
+                </div>
+                <div className="text-[11px] text-[var(--mu)] mt-0.5 tabular-nums">
+                  {periodMetrics.transferenciasCount} movimiento(s) · No suman a egresos
+                </div>
+              </div>
+            </div>
+
+            {periodMetrics.duplicateAdGroups.length > 0 && (
+              <div className="px-5 py-3 border-b border-[var(--bd)] bg-amber-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+                  <AlertTriangle size={14} className="shrink-0" />
+                  <span>
+                    Se detectaron <strong>{periodMetrics.duplicateAdGroups.length}</strong> grupo(s) con múltiples
+                    asientos automáticos de pauta en un mismo día (~
+                    <strong className="font-mono tabular-nums">
+                      {fmtMoney(periodMetrics.duplicateAdExcessTotal)}
+                    </strong>{' '}
+                    posible excedente previo al deploy).
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => jumpToCategoryInLedger('pauta_publicidad', 'expense')}
+                  className="text-xs font-semibold text-amber-700 dark:text-amber-300 hover:underline whitespace-nowrap self-start sm:self-auto"
+                >
+                  Inspeccionar pauta →
+                </button>
+              </div>
+            )}
+
+            {periodMetrics.categoryBreakdown.length === 0 ? (
+              <div className="px-5 py-4 text-xs text-[var(--mu)]">
+                No hay egresos reales registrados en el período seleccionado.
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--bd)]">
+                {periodMetrics.categoryBreakdown.slice(0, 6).map(cat => (
+                  <button
+                    key={cat.categoria}
+                    type="button"
+                    onClick={() => jumpToCategoryInLedger(cat.categoria, 'expense')}
+                    className="w-full px-5 py-3 flex items-center justify-between gap-4 hover:bg-sf/50 transition-colors text-left text-xs"
+                  >
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-[var(--tx)] truncate">
+                          {cat.label}
+                          {cat.bucket === 'inventario' ? ' · Stock' : ''}
+                        </span>
+                        <span className="text-[11px] text-[var(--mu)] tabular-nums shrink-0">
+                          {cat.count} mov. · {cat.pct.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="w-full h-1 rounded-full bg-sf overflow-hidden">
+                        <div
+                          className="h-full bg-[var(--tx)]/60"
+                          style={{ width: `${Math.min(cat.pct, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="font-mono tabular-nums font-semibold text-[var(--tx)] shrink-0">
+                      {fmtMoney(cat.monto)}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
 
           {/* Grid principal: Cuentas (izq) + Pendiente por liquidar (der) */}
@@ -1065,7 +1690,10 @@ export function FinanzasPage() {
             </div>
 
             {/* Pendiente por liquidar */}
-            <div className="lg:col-span-5 bg-cd border border-[var(--bd)] rounded-xl flex flex-col justify-between">
+            <div
+              ref={streetSectionRef}
+              className="lg:col-span-5 bg-cd border border-[var(--bd)] rounded-xl flex flex-col justify-between"
+            >
               <div>
                 <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between gap-2">
                   <h2 className="text-sm font-semibold text-[var(--tx)]">Por liquidar en caja</h2>
@@ -1359,15 +1987,19 @@ export function FinanzasPage() {
             </div>
           </section>
 
-          {/* Últimos movimientos */}
+          {/* Últimos movimientos del período */}
           <section className="bg-cd border border-[var(--bd)] rounded-xl overflow-hidden">
-            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-[var(--tx)]">Últimos movimientos</h2>
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-[var(--tx)]">
+                  Últimos movimientos ({periodRange.label})
+                </h2>
+              </div>
               {activeTransactions.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setActiveTab('movimientos')}
-                  className="text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] transition-colors"
+                  className="text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] transition-colors whitespace-nowrap"
                 >
                   Ver libro completo →
                 </button>
@@ -1380,21 +2012,32 @@ export function FinanzasPage() {
                   <div key={i} className="h-9 rounded-lg bg-sf animate-pulse" />
                 ))}
               </div>
-            ) : activeTransactions.length === 0 ? (
+            ) : periodTransactions.length === 0 ? (
               <div className="px-5 py-10 text-center space-y-3">
                 <p className="text-sm text-[var(--mu)]">
-                  Aún no hay movimientos registrados en este período.
+                  No hay movimientos registrados en {periodRange.label}.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setManualTipo('expense');
-                    setShowManualModal(true);
-                  }}
-                  className="px-4 py-2 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd text-xs font-semibold text-[var(--tx)] inline-flex items-center gap-1.5 transition-colors"
-                >
-                  <Plus size={14} /> Registrar primer movimiento
-                </button>
+                <div className="flex items-center justify-center gap-2">
+                  {periodPreset !== 'todo' && activeTransactions.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setPeriodPreset('todo')}
+                      className="px-4 py-2 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd text-xs font-semibold text-[var(--tx)] transition-colors"
+                    >
+                      Ver todo el historial
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualTipo('expense');
+                      setShowManualModal(true);
+                    }}
+                    className="px-4 py-2 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd text-xs font-semibold text-[var(--tx)] inline-flex items-center gap-1.5 transition-colors"
+                  >
+                    <Plus size={14} /> Registrar movimiento
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -1409,7 +2052,7 @@ export function FinanzasPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--bd)]">
-                    {activeTransactions.slice(0, 6).map(tx => (
+                    {periodTransactions.slice(0, 6).map(tx => (
                       <tr key={tx.id} className="hover:bg-sf/40 transition-colors">
                         <td className="py-3 px-5 font-mono tabular-nums text-[var(--mu)] whitespace-nowrap">
                           {tx.fecha}
@@ -1421,7 +2064,7 @@ export function FinanzasPage() {
                           {tx.account_nombre || tx.account_id}
                         </td>
                         <td className="py-3 px-4 text-[var(--mu)] whitespace-nowrap">
-                          {tx.categoria}
+                          {getCategoryDisplayLabel(tx.categoria)}
                         </td>
                         <td
                           className={`py-3 px-5 font-mono tabular-nums font-semibold text-right whitespace-nowrap ${
@@ -1448,31 +2091,56 @@ export function FinanzasPage() {
       {/* PESTAÑA 2: LIBRO DIARIO */}
       {activeTab === 'movimientos' && (
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-1 p-1 bg-sf border border-[var(--bd)] rounded-lg overflow-x-auto">
-              {[
-                { id: 'all', label: 'Todos' },
-                { id: 'income', label: 'Ingresos' },
-                { id: 'expense', label: 'Egresos' },
-                { id: 'transfer', label: 'Transferencias' },
-                { id: 'manual', label: 'Manuales' },
-              ].map(f => (
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1 p-1 bg-sf border border-[var(--bd)] rounded-lg overflow-x-auto">
+                {[
+                  { id: 'all', label: 'Todos' },
+                  { id: 'income', label: 'Ingresos' },
+                  { id: 'expense', label: 'Egresos' },
+                  { id: 'transfer', label: 'Transferencias' },
+                  { id: 'manual', label: 'Manuales' },
+                ].map(f => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setFilterTipo(f.id as any)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
+                      filterTipo === f.id
+                        ? 'bg-cd text-[var(--tx)] shadow-sm'
+                        : 'text-[var(--mu)] hover:text-[var(--tx)]'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSyncLedgerWithPeriod(v => !v)}
+                className={`px-3 py-2 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors ${
+                  syncLedgerWithPeriod
+                    ? 'border-[var(--tx)] bg-cd text-[var(--tx)]'
+                    : 'border-[var(--bd)] bg-sf text-[var(--mu)] hover:text-[var(--tx)]'
+                }`}
+              >
+                {syncLedgerWithPeriod ? `Período: ${periodRange.label}` : 'Mostrando todo el historial'}
+              </button>
+
+              {filterCategoria !== 'all' && (
                 <button
-                  key={f.id}
                   type="button"
-                  onClick={() => setFilterTipo(f.id as any)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
-                    filterTipo === f.id
-                      ? 'bg-cd text-[var(--tx)] shadow-sm'
-                      : 'text-[var(--mu)] hover:text-[var(--tx)]'
-                  }`}
+                  onClick={() => setFilterCategoria('all')}
+                  className="px-3 py-2 rounded-lg border border-[var(--bd)] bg-cd text-xs font-medium text-[var(--tx)] inline-flex items-center gap-1.5 whitespace-nowrap hover:bg-sf"
                 >
-                  {f.label}
+                  <span>Categoría: {getCategoryDisplayLabel(filterCategoria)}</span>
+                  <X size={12} />
                 </button>
-              ))}
+              )}
             </div>
 
-            <div className="relative w-full sm:w-64">
+            <div className="relative w-full lg:w-64">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mu)]" />
               <input
                 type="text"
@@ -1488,11 +2156,11 @@ export function FinanzasPage() {
             {filteredTransactions.length === 0 ? (
               <div className="py-12 px-5 text-center space-y-3">
                 <p className="text-sm text-[var(--mu)]">
-                  {activeTransactions.length === 0
-                    ? 'No hay movimientos registrados todavía.'
+                  {ledgerSourceTransactions.length === 0
+                    ? 'No hay movimientos registrados en este rango.'
                     : 'Ningún movimiento coincide con los filtros.'}
                 </p>
-                {activeTransactions.length === 0 && (
+                {activeTransactions.length === 0 ? (
                   <button
                     type="button"
                     onClick={() => setShowManualModal(true)}
@@ -1500,6 +2168,27 @@ export function FinanzasPage() {
                   >
                     <Plus size={14} /> Registrar movimiento
                   </button>
+                ) : (
+                  <div className="flex items-center justify-center gap-2">
+                    {syncLedgerWithPeriod && (
+                      <button
+                        type="button"
+                        onClick={() => setSyncLedgerWithPeriod(false)}
+                        className="px-3.5 py-2 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd text-xs font-semibold text-[var(--tx)]"
+                      >
+                        Ver todo el historial
+                      </button>
+                    )}
+                    {filterCategoria !== 'all' && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategoria('all')}
+                        className="px-3.5 py-2 rounded-lg border border-[var(--bd)] bg-sf hover:bg-cd text-xs font-semibold text-[var(--tx)]"
+                      >
+                        Quitar filtro de categoría
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             ) : (
@@ -1536,7 +2225,7 @@ export function FinanzasPage() {
                               ? tx.categoria === 'transferencia_salida'
                                 ? 'Salida entre cuentas'
                                 : 'Entrada entre cuentas'
-                              : tx.categoria}
+                              : getCategoryDisplayLabel(tx.categoria)}
                           </td>
                           <td className="py-3 px-4 text-[var(--mu)] whitespace-nowrap">
                             {tx.tipo === 'transfer'
