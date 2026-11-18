@@ -97,6 +97,7 @@ import {
   isOrderBeforeCutoff,
   hydrateCutoffsFromOsEvents
 } from "@/lib/catalogAliases";
+import { emitOsEvent } from "@/lib/osEvents";
 import type { StockItem, KardexMovement } from "@/types/inventory";
 
 /* ------------------------------------------------------------------ */
@@ -839,6 +840,15 @@ export function PedidosPage() {
       .update({ estado: nuevoEstado })
       .in("id", ids);
 
+    const eventTypeByStatus: Record<Estado, string> = {
+      nuevo: 'order.created',
+      programado: 'order.scheduled',
+      por_empacar: 'order.confirmed',
+      en_camino: 'order.shipped',
+      entregado: 'order.delivered',
+      cancelado: 'order.cancelled',
+    };
+
     let movCount = 0;
     for (const ped of seleccionadosList) {
       try {
@@ -852,6 +862,28 @@ export function PedidosPage() {
         if (!invRes.skipped && invRes.actions.length > 0) movCount++;
       } catch {
         // continuar con el resto
+      }
+
+      if (ped.estado !== nuevoEstado) {
+        await emitOsEvent({
+          type: eventTypeByStatus[nuevoEstado] || 'order.confirmed',
+          source_table: 'whatsapp_orders',
+          source_id: ped.id,
+          idempotency_key: `lote:whatsapp_orders:${ped.id}:${nuevoEstado}:${Date.now()}`,
+          payload: {
+            order_id: ped.id,
+            pedido_codigo: ped.pedido_codigo || `PED-${ped.id.slice(0, 8)}`,
+            nombre_cliente: ped.nombre_cliente,
+            telefono: ped.telefono,
+            sku: ped.sku,
+            catalogo_sku: ped.catalogo_sku,
+            total: Number(ped.total || 0),
+            estado_anterior: ped.estado,
+            estado: nuevoEstado,
+            codigo_anuncio: ped.codigo_anuncio,
+            origen: 'pedidos_lote',
+          },
+        });
       }
     }
 

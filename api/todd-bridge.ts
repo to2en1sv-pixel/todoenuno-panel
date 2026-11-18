@@ -1,5 +1,45 @@
 import { createClient } from '@supabase/supabase-js';
 
+async function emitServerOsEvent(
+  supabase: any,
+  type: string,
+  sourceTable: string,
+  sourceId: string,
+  payload: Record<string, any>,
+  idempotencyKey?: string
+) {
+  const key = idempotencyKey || `${sourceTable}:${sourceId}:${type}:${Date.now()}`;
+  try {
+    const rpc = await supabase.rpc('emit_os_event', {
+      p_type: type,
+      p_source_table: sourceTable,
+      p_source_id: sourceId,
+      p_idempotency_key: key,
+      p_payload: payload,
+    });
+    if (!rpc.error) return;
+  } catch {}
+  try {
+    const res = await supabase.schema('os').from('events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+    if (!res.error) return;
+  } catch {}
+  try {
+    await supabase.from('os_events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+  } catch {}
+}
+
 function cleanDigits8(raw?: string | null): string {
   const base = String(raw || '').split('@')[0].replace(/\D/g, '');
   if (base.length === 11 && base.startsWith('503')) return base.slice(3);
@@ -1088,6 +1128,25 @@ export default async function handler(req: any, res: any) {
         } catch {}
       }
 
+      await emitServerOsEvent(
+        supabase,
+        'chat.funnel.progressed',
+        'whatsapp_state',
+        keyPhone,
+        {
+          telefono: keyPhone,
+          conversation_id: conversationId || null,
+          paso_actual: patch.paso_actual || 'inicio',
+          sku: patch.last_sku || null,
+          nombre_producto: patch.last_nombre || null,
+          precio: patch.last_precio || null,
+          detalle: patch.last_detalle || null,
+          order_note: rawNote || null,
+          origen: 'bot_todd_n8n',
+        },
+        `todd:funnel:${keyPhone}:${patch.paso_actual || 'step'}:${patch.last_sku || 'na'}:${Math.floor(Date.now() / 60000)}`
+      );
+
       return res.status(200).json({
         ok: true,
         telefono: keyPhone,
@@ -1312,26 +1371,30 @@ export default async function handler(req: any, res: any) {
         } catch {}
       }
 
-      try {
-        await (supabase as any)
-          .schema('os')
-          .from('events')
-          .insert({
-            type: 'order.created',
-            source_table: 'whatsapp_orders',
-            source_id: String(insertRes.data?.id || keyPhone),
-            idempotency_key: `todd:order.created:${insertRes.data?.id || Date.now()}`,
-            payload: {
-              order_id: insertRes.data?.id,
-              nombre_cliente: baseOrder.nombre_cliente,
-              telefono: keyPhone,
-              total: computedTotal,
-              sku: cleanCatalogSku || productDisplayName,
-              estado: 'nuevo',
-              origen: 'bot_todd_n8n',
-            },
-          });
-      } catch {}
+      await emitServerOsEvent(
+        supabase,
+        'order.created',
+        'whatsapp_orders',
+        String(insertRes.data?.id || keyPhone),
+        {
+          order_id: insertRes.data?.id,
+          pedido_codigo: insertRes.data?.pedido_codigo || null,
+          nombre_cliente: baseOrder.nombre_cliente,
+          telefono: keyPhone,
+          total: computedTotal,
+          cantidad: qty,
+          sku: productDisplayName,
+          catalogo_sku: resolvedParentSku || cleanCatalogSku || null,
+          variante_sku: matchedVariant?.sku || null,
+          color: matchedVariant?.color || color || null,
+          talla: matchedVariant?.talla || talla || null,
+          departamento: fullOrder.departamento,
+          codigo_anuncio: baseOrder.codigo_anuncio,
+          estado: 'nuevo',
+          origen: 'bot_todd_n8n',
+        },
+        `whatsapp_orders:${insertRes.data?.id || keyPhone}:order.created`
+      );
 
       return res.status(200).json({
         ok: true,

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { fetchStockItems } from '@/lib/inventory';
+import { emitOsEvent } from '@/lib/osEvents';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { fmtAgo } from '@/lib/format';
 import type { StockItem } from '@/types/inventory';
@@ -306,6 +307,20 @@ export function ColaPage() {
       if (error) {
         showNotice('err', `No se pudo actualizar: ${error.message}`);
       } else {
+        if (nextStatus === 'posted') {
+          await emitOsEvent({
+            type: 'marketing.post.published',
+            source_table: 'post_queue',
+            source_id: item.id,
+            payload: {
+              item_id: item.id,
+              nombre: item.nombre,
+              sku: item.sku,
+              fb_post_id: item.fb_post_id,
+              origen: 'cola_manual',
+            },
+          });
+        }
         showNotice(
           'ok',
           nextStatus === 'pending'
@@ -421,6 +436,16 @@ export function ColaPage() {
       if (error) {
         showNotice('err', `Error al encolar: ${error.message}`);
       } else {
+        await emitOsEvent({
+          type: 'marketing.post.created',
+          source_table: 'post_queue',
+          source_id: `batch:${Date.now()}`,
+          payload: {
+            count: rows.length,
+            skus: rows.map((r) => r.sku).filter(Boolean),
+            origen: 'cola_catalogo',
+          },
+        });
         showNotice('ok', `${rows.length} producto(s) agregados a la cola.`);
         setSelectedSkusToAdd(new Set());
         setShowAddModal(false);
@@ -453,6 +478,16 @@ export function ColaPage() {
       if (error) {
         showNotice('err', `No se pudo agregar: ${error.message}`);
       } else {
+        await emitOsEvent({
+          type: 'marketing.post.created',
+          source_table: 'post_queue',
+          source_id: manualSku.trim().toUpperCase() || `manual:${Date.now()}`,
+          payload: {
+            nombre: manualNombre.trim(),
+            sku: manualSku.trim().toUpperCase() || null,
+            origen: 'cola_manual',
+          },
+        });
         showNotice('ok', `"${manualNombre.trim()}" agregado a la cola.`);
         setManualNombre('');
         setManualSku('');

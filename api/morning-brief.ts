@@ -2,6 +2,341 @@ import { createClient } from '@supabase/supabase-js';
 
 type BriefType = 'morning' | 'evening' | 'full';
 
+async function fetchWithTimeoutLocal(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function emitBestEffortOsEvent(
+  supabase: any,
+  type: string,
+  sourceTable: string,
+  sourceId: string,
+  payload: Record<string, any>,
+  idempotencyKey?: string
+) {
+  const key = idempotencyKey || `${sourceTable}:${sourceId}:${type}:${Date.now()}`;
+  try {
+    const rpc = await supabase.rpc('emit_os_event', {
+      p_type: type,
+      p_source_table: sourceTable,
+      p_source_id: sourceId,
+      p_idempotency_key: key,
+      p_payload: payload,
+    });
+    if (!rpc.error) return;
+  } catch {}
+  try {
+    const res = await supabase.schema('os').from('events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+    if (!res.error) return;
+  } catch {}
+  try {
+    await supabase.from('os_events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+  } catch {}
+}
+
+interface OsMemorySnapshot {
+  daysLoaded: number;
+  eventsLoaded: number;
+  orders7d: number;
+  ordersPrev7d: number;
+  delivered7d: number;
+  cancelled7d: number;
+  revenue7d: number;
+  adSpend7d: number;
+  chatsIn7d: number;
+  chatsOut7d: number;
+  closeRate7d: number | null;
+  cancelRate7d: number | null;
+  roas7d: number | null;
+  topInquiredNoClose: Array<{ sku: string; inquiries: number; orders: number }>;
+  topCancelReasons: Array<{ reason: string; count: number }>;
+  recentChanges: string[];
+  dailyLines: string[];
+  recentEventLines: string[];
+  deterministicInsight: string;
+}
+
+async function loadOsMemorySnapshotServer(
+  supabase: any,
+  svTodayIso: string,
+  daysWindow = 30
+): Promise<OsMemorySnapshot> {
+  try {
+    await supabase.rpc('rebuild_os_memory', { p_days: 14 });
+  } catch {}
+
+  let memoryRows: any[] = [];
+  try {
+    const memPub = await supabase
+      .from('os_daily_memory')
+      .select('*')
+      .order('day', { ascending: false })
+      .limit(daysWindow);
+    if (!memPub.error && Array.isArray(memPub.data)) {
+      memoryRows = memPub.data;
+    } else {
+      const memSch = await supabase
+        .schema('os')
+        .from('daily_memory')
+        .select('*')
+        .order('day', { ascending: false })
+        .limit(daysWindow);
+      if (!memSch.error && Array.isArray(memSch.data)) {
+        memoryRows = memSch.data;
+      }
+    }
+  } catch {}
+
+  let recentEvents: any[] = [];
+  try {
+    const evPub = await supabase
+      .from('os_events')
+      .select('id,type,occurred_at,source_table,source_id,payload')
+      .order('id', { ascending: false })
+      .limit(350);
+    if (!evPub.error && Array.isArray(evPub.data)) {
+      recentEvents = evPub.data;
+    } else {
+      const evSch = await supabase
+        .schema('os')
+        .from('events')
+        .select('id,type,occurred_at,source_table,source_id,payload')
+        .order('id', { ascending: false })
+        .limit(350);
+      if (!evSch.error && Array.isArray(evSch.data)) {
+        recentEvents = evSch.data;
+      }
+    }
+  } catch {}
+
+  const todayDate = new Date(`${svTodayIso}T12:00:00Z`);
+  const d7Cutoff = new Date(todayDate.getTime() - 6 * 86400000).toISOString().slice(0, 10);
+  const d14Cutoff = new Date(todayDate.getTime() - 13 * 86400000).toISOString().slice(0, 10);
+
+  let orders7d = 0;
+  let ordersPrev7d = 0;
+  let delivered7d = 0;
+  let cancelled7d = 0;
+  let revenue7d = 0;
+  let adSpend7d = 0;
+  let chatsIn7d = 0;
+  let chatsOut7d = 0;
+
+  if (memoryRows.length > 0) {
+    for (const m of memoryRows) {
+      const d = String(m.day || '').slice(0, 10);
+      if (d >= d7Cutoff) {
+        orders7d += Number(m.orders_created || 0);
+        delivered7d += Number(m.orders_delivered || 0);
+        cancelled7d += Number(m.orders_cancelled || 0);
+        revenue7d += Number(m.delivered_revenue || 0);
+        adSpend7d += Number(m.ad_spend || 0);
+        chatsIn7d += Number(m.chats_received || 0);
+        chatsOut7d += Number(m.chats_sent || 0);
+      } else if (d >= d14Cutoff) {
+        ordersPrev7d += Number(m.orders_created || 0);
+      }
+    }
+  } else {
+    // Fallback agregando directamente desde recentEvents si os_daily_memory aún no está poblado
+    for (const ev of recentEvents) {
+      const svDay = new Date(new Date(ev.occurred_at).getTime() - 6 * 3600000).toISOString().slice(0, 10);
+      const p = ev.payload || {};
+      if (svDay >= d7Cutoff) {
+        if (ev.type === 'order.created') orders7d += 1;
+        if (ev.type === 'order.delivered') {
+          delivered7d += 1;
+          revenue7d += Number(p.total || 0);
+        }
+        if (ev.type === 'order.cancelled') cancelled7d += 1;
+        if (ev.type === 'marketing.ad.expense') adSpend7d += Number(p.amount ?? p.monto ?? 0);
+        if (ev.type === 'chat.message.received') chatsIn7d += 1;
+        if (ev.type === 'chat.message.sent') chatsOut7d += 1;
+      } else if (svDay >= d14Cutoff && ev.type === 'order.created') {
+        ordersPrev7d += 1;
+      }
+    }
+  }
+
+  const productStats = new Map<string, { inquiries: number; orders: number }>();
+  const cancelReasons = new Map<string, number>();
+  const recentChanges: string[] = [];
+
+  for (const ev of recentEvents) {
+    const p = ev.payload || {};
+    const skuKey = String(p.catalogo_sku || p.sku || '').trim().toUpperCase();
+    if (skuKey && (ev.type === 'chat.funnel.progressed' || ev.type === 'order.created')) {
+      const cur = productStats.get(skuKey) || { inquiries: 0, orders: 0 };
+      if (ev.type === 'chat.funnel.progressed') cur.inquiries += 1;
+      if (ev.type === 'order.created') cur.orders += 1;
+      productStats.set(skuKey, cur);
+    }
+
+    if (ev.type === 'order.cancelled' || ev.type === 'order.delivery_issue') {
+      const reason = String(p.motivo_cancelacion || p.motivo || p.nota || p.tipo || 'Sin motivo').trim().slice(0, 60);
+      cancelReasons.set(reason, (cancelReasons.get(reason) || 0) + 1);
+    }
+
+    if (
+      recentChanges.length < 6 &&
+      ['product.updated', 'inventory.adjustment', 'marketing.meta.synced', 'customer.blacklisted'].includes(ev.type)
+    ) {
+      const dLabel = new Date(new Date(ev.occurred_at).getTime() - 6 * 3600000).toISOString().slice(5, 16).replace('T', ' ');
+      const detail = p.sku || p.nombre_cliente || p.motivo || p.insights_count || '';
+      recentChanges.push(`${dLabel} ${ev.type}${detail ? ` (${detail})` : ''}`);
+    }
+  }
+
+  const topInquiredNoClose = Array.from(productStats.entries())
+    .map(([sku, st]) => ({ sku, ...st }))
+    .filter((x) => x.inquiries >= 2 && x.orders < x.inquiries)
+    .sort((a, b) => b.inquiries - b.orders - (a.inquiries - a.orders))
+    .slice(0, 3);
+
+  const topCancelReasons = Array.from(cancelReasons.entries())
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
+
+  const resolvedOrders = delivered7d + cancelled7d;
+  const closeRate7d = chatsIn7d > 0 ? Math.round((orders7d / Math.max(chatsIn7d / 3, 1)) * 1000) / 10 : null;
+  const cancelRate7d = resolvedOrders > 0 ? Math.round((cancelled7d / resolvedOrders) * 1000) / 10 : null;
+  const roas7d = adSpend7d > 0 ? Math.round((revenue7d / adSpend7d) * 100) / 100 : null;
+
+  const dailyLines = memoryRows
+    .slice(0, 14)
+    .map((m: any) => m.summary_text || `${m.day}: ${m.orders_created} ped, $${Number(m.delivered_revenue || 0).toFixed(2)} cobrado`);
+
+  const recentEventLines = recentEvents.slice(0, 120).map((ev: any) => {
+    const svTime = new Date(new Date(ev.occurred_at).getTime() - 6 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
+    const p = ev.payload || {};
+    const brief = [
+      p.nombre_cliente || p.nombre,
+      p.sku || p.catalogo_sku,
+      p.total !== undefined ? `$${p.total}` : undefined,
+      p.amount !== undefined ? `$${p.amount}` : undefined,
+      p.codigo_anuncio ? `ad:${p.codigo_anuncio}` : undefined,
+      p.paso_actual ? `paso:${p.paso_actual}` : undefined,
+      p.motivo_cancelacion || p.motivo,
+    ]
+      .filter(Boolean)
+      .join(' | ');
+    return `[${svTime}] ${ev.type} (${ev.source_table}) ${brief}`;
+  });
+
+  const deltaTxt =
+    ordersPrev7d > 0
+      ? `${orders7d >= ordersPrev7d ? '+' : ''}${Math.round(((orders7d - ordersPrev7d) / ordersPrev7d) * 100)}% vs 7d previos`
+      : orders7d > 0
+        ? `${orders7d} pedidos en últimos 7d`
+        : 'sin historial 7d aún';
+
+  const gapTxt =
+    topInquiredNoClose.length > 0
+      ? `Mayor brecha consulta→cierre: ${topInquiredNoClose[0].sku} (${topInquiredNoClose[0].inquiries} consultas vs ${topInquiredNoClose[0].orders} cierres).`
+      : '';
+
+  const cancelTxt =
+    cancelRate7d !== null && cancelRate7d >= 20 && topCancelReasons.length > 0
+      ? `Alerta cancelaciones (${cancelRate7d}%): motivo principal "${topCancelReasons[0].reason}".`
+      : '';
+
+  const deterministicInsight = [deltaTxt, gapTxt, cancelTxt].filter(Boolean).join(' · ');
+
+  return {
+    daysLoaded: memoryRows.length,
+    eventsLoaded: recentEvents.length,
+    orders7d,
+    ordersPrev7d,
+    delivered7d,
+    cancelled7d,
+    revenue7d: Math.round(revenue7d * 100) / 100,
+    adSpend7d: Math.round(adSpend7d * 100) / 100,
+    chatsIn7d,
+    chatsOut7d,
+    closeRate7d,
+    cancelRate7d,
+    roas7d,
+    topInquiredNoClose,
+    topCancelReasons,
+    recentChanges,
+    dailyLines,
+    recentEventLines,
+    deterministicInsight,
+  };
+}
+
+async function generateBriefAiSynthesis(params: {
+  briefType: BriefType;
+  svTodayIso: string;
+  memory: OsMemorySnapshot;
+  ventasHoyMonto: number;
+  ventasHoyCount: number;
+  porDespacharCount: number;
+  enRutaCount: number;
+  sinResponderCount: number;
+  outOfStockCount: number;
+}): Promise<string | null> {
+  const apiKey = (process.env.OPENAI_API_KEY || '').trim();
+  if (!apiKey || (params.memory.eventsLoaded === 0 && params.memory.daysLoaded === 0)) {
+    return null;
+  }
+
+  try {
+    const res = await fetchWithTimeoutLocal(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          temperature: 0.3,
+          max_tokens: 130,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Eres el analista ejecutivo de TODOENUNO OS (tienda COD en El Salvador). Con los datos reales de memoria histórica y estado actual, redacta UNA recomendación o patrón accionable de máximo 22 palabras en español plano (sin HTML, sin markdown, sin inventar cifras).',
+            },
+            {
+              role: 'user',
+              content: `Fecha: ${params.svTodayIso} (${params.briefType}). Hoy: ${params.ventasHoyCount} ped ($${params.ventasHoyMonto.toFixed(2)}), ${params.porDespacharCount} por despachar, ${params.enRutaCount} en ruta, ${params.sinResponderCount} chats sin resp, ${params.outOfStockCount} agotados. Memoria 7d: ${params.memory.orders7d} pedidos (prev 7d: ${params.memory.ordersPrev7d}), ${params.memory.delivered7d} entregados ($${params.memory.revenue7d}), ${params.memory.cancelled7d} cancelados, pauta $${params.memory.adSpend7d} (ROAS ${params.memory.roas7d ?? 'n/a'}x). Resumen días: ${params.memory.dailyLines.slice(0, 5).join(' ; ')}. Brechas: ${JSON.stringify(params.memory.topInquiredNoClose)}. Motivos cancel: ${JSON.stringify(params.memory.topCancelReasons)}.`,
+            },
+          ],
+        }),
+      },
+      2300
+    );
+    if (!res.ok) return null;
+    const json: any = await res.json().catch(() => ({}));
+    const txt = String(json?.choices?.[0]?.message?.content || '').trim();
+    return txt ? txt.slice(0, 220) : null;
+  } catch {
+    return null;
+  }
+}
+
 function getSalvadorDateInfo(now = new Date()) {
   // El Salvador es UTC-6 todo el año (sin horario de verano)
   const svNowMs = now.getTime() - 6 * 60 * 60 * 1000;
@@ -368,6 +703,8 @@ export default async function handler(req: any, res: any) {
         .select('tipo,categoria,monto,fecha')
         .eq('fecha', dateInfo.svTodayIso),
     ]);
+
+    const osMemory = await loadOsMemorySnapshotServer(supabase, dateInfo.svTodayIso, 14);
 
     const normalizeOrderStatusLocal = (rawEstado?: string | null) => {
       const raw = String(rawEstado || '').trim().toLowerCase();
@@ -1089,7 +1426,68 @@ export default async function handler(req: any, res: any) {
       );
     }
 
+    // Bloque unificado de Memoria OS & Aprendizaje IA (7D vs previos)
+    const aiPatternTip = await generateBriefAiSynthesis({
+      briefType,
+      svTodayIso: dateInfo.svTodayIso,
+      memory: osMemory,
+      ventasHoyMonto,
+      ventasHoyCount: ventasHoyOrders.length,
+      porDespacharCount: porDespachar.length,
+      enRutaCount: enRuta.length,
+      sinResponderCount: sinResponderConvs.length,
+      outOfStockCount: outOfStock.length,
+    });
+
+    if (osMemory.eventsLoaded > 0 || osMemory.daysLoaded > 0) {
+      const insertAt = Math.max(lines.length - 2, 0);
+      const memLines: string[] = [
+        '',
+        `🧠 <b>MEMORIA OS &amp; PATRONES (7D)</b>`,
+        `• Pulso 7d: <b>${osMemory.orders7d} ped.</b> (${
+          osMemory.ordersPrev7d > 0
+            ? `${osMemory.orders7d >= osMemory.ordersPrev7d ? '+' : ''}${Math.round(((osMemory.orders7d - osMemory.ordersPrev7d) / osMemory.ordersPrev7d) * 100)}% vs 7d ant.`
+            : `${osMemory.delivered7d} entr.`
+        }) · Cobrado <code>${fmtMoney(osMemory.revenue7d)}</code>${
+          osMemory.roas7d !== null ? ` · ROAS <b>${osMemory.roas7d.toFixed(2)}x</b>` : ''
+        }${osMemory.cancelRate7d !== null ? ` · Canc. ${osMemory.cancelRate7d}%` : ''}`,
+      ];
+      if (osMemory.topInquiredNoClose.length > 0) {
+        const g = osMemory.topInquiredNoClose[0];
+        memLines.push(
+          `• Demanda sin cierre: <code>${escapeHtml(g.sku)}</code> (${g.inquiries} consultas → ${g.orders} cierres)`
+        );
+      }
+      if (aiPatternTip) {
+        memLines.push(`• 💡 IA: <i>${escapeHtml(aiPatternTip)}</i>`);
+      } else if (osMemory.deterministicInsight) {
+        memLines.push(`• 📌 ${escapeHtml(osMemory.deterministicInsight)}`);
+      }
+      lines.splice(insertAt, 0, ...memLines);
+    }
+
     const mensaje = lines.join('\n');
+
+    await emitBestEffortOsEvent(
+      supabase,
+      'ai.brief.generated',
+      'panel_brief',
+      `${briefType}:${dateInfo.svTodayIso}:${dateInfo.svHour}`,
+      {
+        brief_type: briefType,
+        fecha: dateInfo.svTodayIso,
+        ventas_hoy: ventasHoyMonto,
+        pedidos_hoy: ventasHoyOrders.length,
+        por_despachar: porDespachar.length,
+        en_ruta: enRuta.length,
+        sin_responder: sinResponderConvs.length,
+        orders_7d: osMemory.orders7d,
+        revenue_7d: osMemory.revenue7d,
+        roas_7d: osMemory.roas7d,
+        ai_insight: aiPatternTip || osMemory.deterministicInsight || null,
+      },
+      `ai_brief:${briefType}:${dateInfo.svTodayIso}:${dateInfo.svHour}`
+    );
 
     return res.status(200).json({
       ok: true,
@@ -1954,7 +2352,8 @@ REGLAS ESTRICTAS:
    - "consulta_pendientes": pregunta qué hay pendiente por empacar, en ruta, encargos o por liquidar.
    - "consulta_stock": pregunta cuánto stock hay de uno o más productos.
    - "consulta_brief": pide el brief / resumen de ventas del día.
-   - "otro": saludo o tema ajeno.
+   - "consulta_memoria_ia": pregunta abierta de análisis, tendencias, comparación de días/semanas, por qué bajaron o subieron ventas, ROAS histórico, qué producto preguntan más, motivos de cancelación, recomendaciones o memoria del negocio ("¿qué pasó esta semana?", "¿por qué cancelan?", "¿qué producto preguntan y no compran?", "analiza los últimos días").
+   - "otro": saludo simple sin pregunta operativa ni de negocio.
 ${params.intentHint ? `\nPISTA DE CONTEXTO: El usuario inició con el comando ${params.intentHint}.\n` : ''}
 2. Detalles por intent:
    - Si "compra": llena "items" [{ "sku", "variant_sku", "color", "talla", "raw_name", "cantidad", "costo_unitario" }], "proveedor", "account_id", "asentar_en_finanzas", "notas".
@@ -1963,12 +2362,12 @@ ${params.intentHint ? `\nPISTA DE CONTEXTO: El usuario inició con el comando ${
    - Si "gasto_pauta": llena "monto" (>0), "codigo_anuncio" (en MAYÚSCULAS, ej. "PROMO1", o "GENERAL" si no menciona código), "plataforma" ("Meta"|"TikTok"|"Google"|"WhatsApp"|"Otro"), "account_id", "notas".
    - Si "ajuste_inventario": llena "adjustment_mode": "merma" (daño/pérdida/muestra), "delta_positivo" (sumar), "delta_negativo" (restar), o "conteo_exacto" (fijar stock físico total); llena "sku", "raw_name", "cantidad" (entero >= 0: si es conteo_exacto es la cantidad final observada en bodega, si es merma/delta es las unidades que salen/entran), y "motivo".
    - Si "cambiar_estado_pedido": llena "order_query" (nombre de cliente, teléfono o código del pedido), "next_status" en UNO de: "nuevo" | "programado" | "por_empacar" | "en_camino" | "entregado" | "cancelado" ("empacar"/"empaque" -> "por_empacar", "ruta"/"motorista"/"despachado" -> "en_camino", "encargo" -> "programado"), y "cancel_reason" si es cancelación.
-   - Si "consulta_pedido" o "consulta_stock": pon en "search_query" el nombre, teléfono, código o producto buscado.
+   - Si "consulta_pedido" o "consulta_stock" o "consulta_memoria_ia": pon en "search_query" el término o la pregunta completa.
    - En "account_id": elige el id exacto ("efectivo"/"caja" -> caja_chica, "banco"/"transferencia" -> banco_principal), o "${params.accounts[0]?.id || 'caja_chica'}" si no menciona.
 
 3. Devuelve EXCLUSIVAMENTE JSON válido con esta estructura:
 {
-  "intent": "compra" | "gasto_operativo" | "gasto_pauta" | "ajuste_inventario" | "cambiar_estado_pedido" | "consulta_pedido" | "consulta_pendientes" | "consulta_stock" | "consulta_brief" | "otro",
+  "intent": "compra" | "gasto_operativo" | "gasto_pauta" | "ajuste_inventario" | "cambiar_estado_pedido" | "consulta_pedido" | "consulta_pendientes" | "consulta_stock" | "consulta_brief" | "consulta_memoria_ia" | "otro",
   "search_query": "",
   "order_query": "",
   "next_status": "",
@@ -2513,25 +2912,7 @@ async function recordFinanceExpenseServer(
   }
 }
 
-async function emitBestEffortOsEvent(
-  supabase: any,
-  type: string,
-  sourceTable: string,
-  sourceId: string,
-  payload: Record<string, any>
-) {
-  try {
-    await supabase.schema('os').from('events').insert({
-      type,
-      source_table: sourceTable,
-      source_id: sourceId,
-      idempotency_key: `${sourceTable}:${sourceId}:${type}:${Date.now()}`,
-      payload,
-    });
-  } catch {
-    // No bloquear flujo si os.events no está migrado
-  }
-}
+// emitBestEffortOsEvent consolidado al inicio de api/morning-brief.ts
 
 async function sendDraftConfirmationCard(chatId: string | number, draft: TelegramDraft) {
   const kind = draft.kind || 'compra';
@@ -2957,6 +3338,131 @@ async function handleBriefCommand(req: any, chatId: string | number, argRaw: str
   await sendTgMessage(chatId, data.mensaje);
 }
 
+async function handleAiMemoryQuery(supabase: any, chatId: string | number, questionRaw: string) {
+  const svToday = getElSalvadorDate();
+  const [mem, catalog, accounts, pendingRes] = await Promise.all([
+    loadOsMemorySnapshotServer(supabase, svToday, 30),
+    fetchActiveStockCatalog(supabase),
+    fetchCashAccounts(supabase),
+    supabase
+      .from('whatsapp_orders')
+      .select('estado,total,liquidado')
+      .or('liquidado.is.null,liquidado.eq.false')
+      .limit(400),
+  ]);
+
+  const unliqList = Array.isArray(pendingRes?.data) ? pendingRes.data : [];
+  const deliveredUnliq = unliqList.filter(
+    (o: any) => normalizeEstadoOrder(o.estado) === 'entregado' && o.liquidado !== true
+  );
+  const inRouteList = unliqList.filter((o: any) => normalizeEstadoOrder(o.estado) === 'en_camino');
+  const sumArr = (a: any[]) => a.reduce((s, x) => s + (Number(x.total) || 0), 0);
+
+  const zeroStock = catalog
+    .filter((c: any) => Number(c.stock_disponible || 0) <= 0)
+    .slice(0, 8)
+    .map((c: any) => `${c.sku} (${c.nombre})`);
+
+  const totalCash = accounts.reduce((s: number, a: any) => s + (Number(a.saldo_actual) || 0), 0);
+  const cleanQuestion = questionRaw.trim();
+
+  if (!cleanQuestion) {
+    const summaryLines = [
+      `🧠 <b>MEMORIA HISTÓRICA TODOENUNO OS</b>`,
+      '',
+      `• Días consolidados: <b>${mem.daysLoaded}</b> · Eventos recientes: <b>${mem.eventsLoaded}</b>`,
+      `• Últimos 7d: <b>${mem.orders7d} pedidos</b> (prev 7d: ${mem.ordersPrev7d}) · <b>${mem.delivered7d} entregados</b> · <b>${mem.cancelled7d} cancelados</b>`,
+      `• Cobrado 7d: <b>${fmtMoney(mem.revenue7d)}</b> · Pauta 7d: <b>${fmtMoney(mem.adSpend7d)}</b>${
+        mem.roas7d !== null ? ` · ROAS: <b>${mem.roas7d.toFixed(2)}x</b>` : ''
+      }`,
+      `• Calle hoy: <b>${deliveredUnliq.length} entregados sin depositar</b> (${fmtMoney(sumArr(deliveredUnliq))}) · <b>${inRouteList.length} en ruta</b> (${fmtMoney(sumArr(inRouteList))})`,
+      mem.topInquiredNoClose.length > 0
+        ? `• Consultados sin cierre: ${mem.topInquiredNoClose
+            .map((g) => `<code>${escapeHtml(g.sku)}</code> (${g.inquiries}→${g.orders})`)
+            .join(', ')}`
+        : '',
+      mem.dailyLines.length > 0
+        ? `\n<b>Últimos días:</b>\n${mem.dailyLines
+            .slice(0, 5)
+            .map((l) => `• ${escapeHtml(l)}`)
+            .join('\n')}`
+        : '',
+      `\n<i>Tip: Pregúntame lo que quieras con /ia, ej: "/ia ¿qué producto están preguntando más y por qué no cierra?"</i>`,
+    ].filter(Boolean);
+
+    await sendTgMessage(chatId, summaryLines.join('\n'));
+    return;
+  }
+
+  const apiKey = (process.env.OPENAI_API_KEY || '').trim();
+  if (!apiKey) {
+    await sendTgMessage(
+      chatId,
+      [
+        `🧠 <b>ANÁLISIS DESDE MEMORIA OS (SIN OPENAI)</b>`,
+        `• 7 días: ${mem.orders7d} ped. (${mem.delivered7d} entr., ${mem.cancelled7d} canc.) · Cobrado ${fmtMoney(mem.revenue7d)} · Pauta ${fmtMoney(mem.adSpend7d)}`,
+        mem.deterministicInsight ? `• ${escapeHtml(mem.deterministicInsight)}` : '',
+        mem.dailyLines.slice(0, 4).map((l) => `• ${escapeHtml(l)}`).join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n')
+    );
+    return;
+  }
+
+  const contextBlock = [
+    `Fecha hoy SV: ${svToday}`,
+    `Resumen 7d: pedidos_creados=${mem.orders7d} (7d_prev=${mem.ordersPrev7d}), entregados=${mem.delivered7d}, cancelados=${mem.cancelled7d}, cobrado=$${mem.revenue7d}, pauta=$${mem.adSpend7d}, roas=${mem.roas7d ?? 'N/A'}, chats_entrantes=${mem.chatsIn7d}, chats_salientes=${mem.chatsOut7d}`,
+    `Estado vivo: liquidez_total=$${totalCash.toFixed(2)}, entregados_sin_depositar=${deliveredUnliq.length} ($${sumArr(deliveredUnliq).toFixed(2)}), en_ruta=${inRouteList.length} ($${sumArr(inRouteList).toFixed(2)})`,
+    `Productos sin stock: ${zeroStock.join(', ') || 'ninguno'}`,
+    `Brecha consulta->cierre: ${JSON.stringify(mem.topInquiredNoClose)}`,
+    `Motivos cancelacion/incidencia: ${JSON.stringify(mem.topCancelReasons)}`,
+    `Cambios recientes sistema: ${mem.recentChanges.join(' ; ') || 'ninguno'}`,
+    ``,
+    `MEMORIA DIARIA (os_daily_memory):`,
+    mem.dailyLines.join('\n') || '(sin filas diarias aún)',
+    ``,
+    `EVENTOS RECIENTES (os_events últimos ${mem.recentEventLines.length}):`,
+    mem.recentEventLines.slice(0, 90).join('\n'),
+  ].join('\n');
+
+  const aiRes = await fetchWithTimeoutLocal(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0.25,
+        max_tokens: 650,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Eres el Cerebro Analítico IA de TODOENUNO OS (tienda ecommerce contra entrega en El Salvador). Responde en español usando formato HTML básico válido para Telegram (<b>, <i>, <code>). Usa EXCLUSIVAMENTE los datos reales proporcionados en la Memoria OS y eventos; si falta un dato, dilo honestamente y nunca inventes cifras. Sé claro, directo y da recomendaciones accionables.',
+          },
+          {
+            role: 'user',
+            content: `PREGUNTA DEL DUEÑO: "${cleanQuestion}"\n\nDATOS REALES DE TODOENUNO OS:\n${contextBlock}`,
+          },
+        ],
+      }),
+    },
+    9000
+  );
+
+  const aiJson: any = await aiRes.json().catch(() => ({}));
+  const answer = String(aiJson?.choices?.[0]?.message?.content || '').trim();
+  if (!aiRes.ok || !answer) {
+    throw new Error(aiJson?.error?.message || 'No se pudo consultar la memoria IA en este momento.');
+  }
+
+  await sendTgMessage(chatId, `🧠 <b>MEMORIA OS · IA</b>\n\n${answer}`);
+}
+
 async function handleTelegramBotRequest(req: any, res: any) {
   const action = String(req.query?.telegram_mode || req.query?.action || '')
     .trim()
@@ -3030,6 +3536,8 @@ async function handleTelegramBotRequest(req: any, res: any) {
           { command: 'merma', description: 'Registrar daño o ajuste: /merma SKU CANT' },
           { command: 'stock', description: 'Ver inventario actual: /stock [producto]' },
           { command: 'cajas', description: 'Ver saldos de cajas y bancos' },
+          { command: 'memoria', description: 'Resumen histórico 30d de OS Memory' },
+          { command: 'ia', description: 'Preguntar a la IA sobre tu negocio: /ia PREGUNTA' },
           { command: 'brief', description: 'Pedir el brief operativo (AM/PM)' },
           { command: 'ayuda', description: 'Ver guía de texto, notas de voz y fotos' },
         ],
@@ -3570,9 +4078,23 @@ async function handleTelegramBotRequest(req: any, res: any) {
           `• <code>/pendientes</code> — Cola de empaque, ruta y cobros por liquidar`,
           `• <code>/stock [producto]</code> — Disponible en bodega`,
           `• <code>/cajas</code> — Saldos de cajas y bancos`,
+          `• <code>/memoria</code> — Resumen histórico 30d de OS Memory`,
+          `• <code>/ia [pregunta]</code> — Analizar negocio, ventas, cancelaciones o ROAS con IA`,
           `• <code>/brief [am|pm]</code> — Brief operativo completo`,
         ].join('\n')
       );
+      return res.status(200).json({ ok: true });
+    }
+
+    if (lowerText.startsWith('/memoria')) {
+      const arg = rawText.replace(/^\/memoria(@\S+)?/i, '').trim();
+      await handleAiMemoryQuery(supabase, chatId, arg);
+      return res.status(200).json({ ok: true });
+    }
+
+    if (lowerText.startsWith('/ia')) {
+      const arg = rawText.replace(/^\/ia(@\S+)?/i, '').trim();
+      await handleAiMemoryQuery(supabase, chatId, arg);
       return res.status(200).json({ ok: true });
     }
 
@@ -4059,6 +4581,25 @@ async function handleTelegramBotRequest(req: any, res: any) {
 
     if (parsed.intent === 'consulta_brief') {
       await handleBriefCommand(req, chatId, '');
+      return res.status(200).json({ ok: true });
+    }
+
+    if (parsed.intent === 'consulta_memoria_ia') {
+      await handleAiMemoryQuery(
+        supabase,
+        chatId,
+        String(parsed.search_query || cleanedPromptText || rawText)
+      );
+      return res.status(200).json({ ok: true });
+    }
+
+    // Fallback inteligente si preguntó algo sobre el negocio en lenguaje natural
+    const looksLikeBusinessQuestion =
+      /\?|por\s*qu[eé]|qu[eé]\s+pas[oó]|cu[aá]l|c[oó]mo\s+(va|est[aá]|cerr|rend)|tendencia|roas|pauta|cancel|product|semana|ayer|recomiend|analiz|memoria|negocio|ventas/i.test(
+        rawText
+      );
+    if (parsed.intent === 'otro' && rawText.length >= 10 && looksLikeBusinessQuestion) {
+      await handleAiMemoryQuery(supabase, chatId, rawText);
       return res.status(200).json({ ok: true });
     }
 

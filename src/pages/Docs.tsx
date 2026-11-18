@@ -283,7 +283,8 @@ Orden cronológico de scripts disponibles en la carpeta \`/docs\`:
 10. \`20261110_sprint8_lista_negra_dicom.sql\` — Tabla \`client_blacklist\` y evaluación antifraude.
 11. \`20261111_sprint9_os_events_complete_catalog.sql\` — Catálogo completo de eventos del sistema.
 12. \`20261112_sprint10_catalog_inventory_fix.sql\` — Sincronización de \`productos_variantes\` e \`inventory_stock\`.
-13. \`20261112_sprint11_reset_cero_odoo.sql\` — Limpieza y arranque limpio de inventario sin Odoo.`,
+13. \`20261112_sprint11_reset_cero_odoo.sql\` — Limpieza y arranque limpio de inventario sin Odoo.
+14. \`20261117_sprint12_os_events_ai_memory.sql\` — Catálogo total (48 tipos), triggers de chat/leads, RPC \`emit_os_event\` y capa de memoria diaria para IA (\`os.daily_memory\`).`,
   },
   {
     id: 'starter-cod-playbook',

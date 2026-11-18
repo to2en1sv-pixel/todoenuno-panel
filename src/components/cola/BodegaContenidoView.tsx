@@ -28,6 +28,7 @@ import {
   Zap,
 } from 'lucide-react';
 import type { StockItem } from '@/types/inventory';
+import { emitOsEvent } from '@/lib/osEvents';
 import {
   CONTENT_PILARS,
   DEFAULT_DIST_CONFIG,
@@ -474,6 +475,21 @@ export function BodegaContenidoView({
     const ok = await saveContentVault(nextItems);
     setSavingItem(false);
     if (ok) {
+      if (!editingItemId) {
+        await emitOsEvent({
+          type: 'marketing.post.created',
+          source_table: 'content_vault',
+          source_id: nextItems[0]?.id || `cv:${Date.now()}`,
+          payload: {
+            titulo: formTitulo.trim(),
+            sku: formSku.trim().toUpperCase() || null,
+            pilar: formPilar,
+            media_type: formMediaType,
+            pages_count: cleanedPageIds.length,
+            origen: 'bodega_contenido',
+          },
+        });
+      }
       setItems(nextItems);
       setShowCreateModal(false);
       resetForm();
@@ -531,6 +547,17 @@ export function BodegaContenidoView({
 
     const nextItems = [...created, ...items];
     await saveContentVault(nextItems);
+    await emitOsEvent({
+      type: 'marketing.post.created',
+      source_table: 'content_vault',
+      source_id: `vault-batch:${Date.now()}`,
+      payload: {
+        count: created.length,
+        skus: created.map((c) => c.sku).filter(Boolean),
+        pilar: catalogPilar,
+        origen: 'bodega_contenido_lote',
+      },
+    });
     setItems(nextItems);
     setSelectedCatalogSkus(new Set());
     setShowCreateModal(false);

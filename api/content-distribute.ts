@@ -7,6 +7,46 @@ const CATALOG_CFG_DOC_TITLE = '__SYSTEM_TODD_CATALOG_SETTINGS_V1__';
 const STORAGE_BUCKET = 'content-vault';
 const ALLOWED_BUCKETS = new Set(['content-vault', 'orders-evidence']);
 
+async function emitServerOsEvent(
+  supabase: any,
+  type: string,
+  sourceTable: string,
+  sourceId: string,
+  payload: Record<string, any>,
+  idempotencyKey?: string
+) {
+  const key = idempotencyKey || `${sourceTable}:${sourceId}:${type}:${Date.now()}`;
+  try {
+    const rpc = await supabase.rpc('emit_os_event', {
+      p_type: type,
+      p_source_table: sourceTable,
+      p_source_id: sourceId,
+      p_idempotency_key: key,
+      p_payload: payload,
+    });
+    if (!rpc.error) return;
+  } catch {}
+  try {
+    const res = await supabase.schema('os').from('events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+    if (!res.error) return;
+  } catch {}
+  try {
+    await supabase.from('os_events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+  } catch {}
+}
+
 function resolveAllowedBucket(rawBucket?: unknown): string {
   const clean = String(rawBucket || '').trim().toLowerCase();
   return ALLOWED_BUCKETS.has(clean) ? clean : STORAGE_BUCKET;
@@ -921,6 +961,28 @@ Devuelve EXCLUSIVAMENTE un JSON válido con esta estructura exacta (sin markdown
             ...(firstFbSuccess?.postId ? { fb_post_id: firstFbSuccess.postId } : {}),
           })
           .eq('id', targetItem.legacyQueueId);
+      }
+
+      if (anySuccess) {
+        await emitServerOsEvent(
+          supabase,
+          'marketing.post.published',
+          'content_vault',
+          String(targetItem.id || Date.now()),
+          {
+            item_id: targetItem.id,
+            titulo: targetItem.titulo,
+            sku: targetItem.sku || null,
+            pilar: targetItem.pilar || null,
+            fb_post_id: firstFbSuccess?.postId || null,
+            ig_media_id: igResult?.mediaId || null,
+            pages: Object.values(fbByPage)
+              .filter((x) => x.ok)
+              .map((x) => x.pageName),
+            origen: 'content_distribute',
+          },
+          `content_publish:${String(targetItem.id || 'item')}:${Date.now()}`
+        );
       }
 
       return res.status(anySuccess ? 200 : 400).json({

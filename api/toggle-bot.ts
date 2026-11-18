@@ -1,5 +1,45 @@
 import { createClient } from '@supabase/supabase-js';
 
+async function emitServerOsEvent(
+  supabase: any,
+  type: string,
+  sourceTable: string,
+  sourceId: string,
+  payload: Record<string, any>,
+  idempotencyKey?: string
+) {
+  const key = idempotencyKey || `${sourceTable}:${sourceId}:${type}:${Date.now()}`;
+  try {
+    const rpc = await supabase.rpc('emit_os_event', {
+      p_type: type,
+      p_source_table: sourceTable,
+      p_source_id: sourceId,
+      p_idempotency_key: key,
+      p_payload: payload,
+    });
+    if (!rpc.error) return;
+  } catch {}
+  try {
+    const res = await supabase.schema('os').from('events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+    if (!res.error) return;
+  } catch {}
+  try {
+    await supabase.from('os_events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+  } catch {}
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -58,6 +98,20 @@ export default async function handler(req: any, res: any) {
         }
       }
     }
+
+    await emitServerOsEvent(
+      supabase,
+      'chat.bot.toggled',
+      'bb_conversations',
+      String(conversationId),
+      {
+        conversation_id: String(conversationId),
+        telefono: contactPhone || null,
+        next_status: normalizedStatus,
+        origen: 'unichat_panel',
+      },
+      `bb_conversations:${String(conversationId)}:toggle:${Date.now()}`
+    );
 
     return res.status(200).json({
       success: true,

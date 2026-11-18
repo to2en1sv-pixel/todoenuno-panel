@@ -7,14 +7,28 @@ import type { OsEvent } from '@/types/events';
 export function EventStreamPage() {
   const [activeTab, setActiveTab] = useState<'brain' | 'feed'>('brain');
   const [events, setEvents] = useState<OsEvent[]>([]);
+  const [totalCount, setTotalCount] = useState<number>(0);
 
   useEffect(() => {
-    fetchOsEvents(40).then((res) => {
+    fetchOsEvents(120).then((res) => {
       setEvents(res.events);
+      setTotalCount(res.totalCount);
     });
 
     const unsubscribe = subscribeToOsEvents((newEvent) => {
-      setEvents((prev) => [newEvent, ...prev.slice(0, 50)]);
+      setEvents((prev) => {
+        if (
+          prev.some(
+            (e) =>
+              e.id === newEvent.id ||
+              (newEvent.idempotency_key && e.idempotency_key === newEvent.idempotency_key)
+          )
+        ) {
+          return prev;
+        }
+        setTotalCount((c) => Math.max(c + 1, prev.length + 1));
+        return [newEvent, ...prev.slice(0, 149)];
+      });
     });
 
     return () => unsubscribe();
@@ -29,7 +43,9 @@ export function EventStreamPage() {
           </h1>
           <p className="text-xs text-[var(--mu)] mt-1">
             Flujo en vivo de pedidos COD, antifraude, logística y fidelización ·{' '}
-            <span className="font-mono tabular-nums">{events.length} eventos recientes</span>
+            <span className="font-mono tabular-nums">
+              {totalCount.toLocaleString()} eventos históricos · {events.length} en vivo
+            </span>
           </p>
         </div>
       </header>

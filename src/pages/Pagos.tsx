@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { emitOsEvent } from '@/lib/osEvents';
 import { Plus, Trash2, Calendar as CalendarIcon, DollarSign, AlertCircle, CheckCircle2, Pencil } from 'lucide-react';
 
 type Pago = {
@@ -59,6 +60,19 @@ export function PagosPage() {
     }
 
     if (!error) {
+      await emitOsEvent({
+        type: 'finance.bill.created',
+        source_table: 'panel_pagos',
+        source_id: editingId || `${nombre.trim()}:${fecha}`,
+        payload: {
+          nombre: dataToSave.nombre,
+          monto: dataToSave.monto,
+          fecha_vencimiento: dataToSave.fecha_vencimiento,
+          categoria: dataToSave.categoria,
+          frecuencia: dataToSave.frecuencia,
+          accion: editingId ? 'actualizado' : 'creado',
+        },
+      });
       setShowForm(false);
       setEditingId(null);
       setNombre(''); setMonto(''); setFecha('');
@@ -89,6 +103,19 @@ export function PagosPage() {
       .eq('id', pago.id);
 
     if (!error) {
+      await emitOsEvent({
+        type: 'finance.bill.paid',
+        source_table: 'panel_pagos',
+        source_id: pago.id,
+        payload: {
+          nombre: pago.nombre,
+          amount: Number(pago.monto || 0),
+          monto: Number(pago.monto || 0),
+          categoria: pago.categoria,
+          frecuencia: pago.frecuencia,
+          proximo_vencimiento: nuevaFechaStr,
+        },
+      });
       alert(`✅ ¡Pago de ${pago.nombre} registrado!\nPróximo vencimiento: ${nuevaFecha.toLocaleDateString('es-SV')}`);
       loadPagos();
     }

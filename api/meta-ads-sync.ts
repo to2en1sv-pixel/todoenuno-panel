@@ -4,6 +4,46 @@ const GRAPH_VERSION = 'v19.0';
 const INSIGHTS_DOC_TITLE = '__SYSTEM_META_ADS_INSIGHTS_V1__';
 const TIME_ZONE = 'America/El_Salvador';
 
+async function emitServerOsEvent(
+  supabase: any,
+  type: string,
+  sourceTable: string,
+  sourceId: string,
+  payload: Record<string, any>,
+  idempotencyKey?: string
+) {
+  const key = idempotencyKey || `${sourceTable}:${sourceId}:${type}:${Date.now()}`;
+  try {
+    const rpc = await supabase.rpc('emit_os_event', {
+      p_type: type,
+      p_source_table: sourceTable,
+      p_source_id: sourceId,
+      p_idempotency_key: key,
+      p_payload: payload,
+    });
+    if (!rpc.error) return;
+  } catch {}
+  try {
+    const res = await supabase.schema('os').from('events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+    if (!res.error) return;
+  } catch {}
+  try {
+    await supabase.from('os_events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+  } catch {}
+}
+
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const supabaseKey =
@@ -382,6 +422,43 @@ export default async function handler(req: any, res: any) {
           rows: mergedRows,
         },
         prevDoc.id
+      );
+
+      for (const [, entry] of dailySpendMap.entries()) {
+        if (entry.monto <= 0) continue;
+        await emitServerOsEvent(
+          supabase,
+          'marketing.ad.expense',
+          'gastos_publicidad',
+          `${entry.fecha}:${entry.codigo_anuncio}`,
+          {
+            fecha: entry.fecha,
+            codigo_anuncio: entry.codigo_anuncio,
+            platform: 'meta',
+            amount: entry.monto,
+            detalle: entry.detalle,
+            origen: 'meta_ads_sync',
+          },
+          `meta_sync:${entry.fecha}:${entry.codigo_anuncio}:${Math.round(entry.monto * 100)}`
+        );
+      }
+
+      const totalSyncedSpend = Array.from(dailySpendMap.values()).reduce((s, e) => s + e.monto, 0);
+      await emitServerOsEvent(
+        supabase,
+        'marketing.meta.synced',
+        'meta_ad_accounts',
+        `${since}:${until}`,
+        {
+          since,
+          until,
+          insights_count: syncedInsights.length,
+          synced_spend_rows: upsertedCount,
+          total_spend: Math.round(totalSyncedSpend * 100) / 100,
+          accounts_synced: activeAccounts.length,
+          origen: 'meta_ads_sync',
+        },
+        `meta_sync:summary:${since}:${until}:${Date.now()}`
       );
 
       return res.status(200).json({

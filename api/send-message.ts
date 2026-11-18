@@ -1,5 +1,45 @@
 import { createClient } from '@supabase/supabase-js';
 
+async function emitServerOsEvent(
+  supabase: any,
+  type: string,
+  sourceTable: string,
+  sourceId: string,
+  payload: Record<string, any>,
+  idempotencyKey?: string
+) {
+  const key = idempotencyKey || `${sourceTable}:${sourceId}:${type}:${Date.now()}`;
+  try {
+    const rpc = await supabase.rpc('emit_os_event', {
+      p_type: type,
+      p_source_table: sourceTable,
+      p_source_id: sourceId,
+      p_idempotency_key: key,
+      p_payload: payload,
+    });
+    if (!rpc.error) return;
+  } catch {}
+  try {
+    const res = await supabase.schema('os').from('events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+    if (!res.error) return;
+  } catch {}
+  try {
+    await supabase.from('os_events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+  } catch {}
+}
+
 function resolveEvolutionTarget(rawPhone?: string | null, rawConvId?: string | null): {
   sendTarget: string;
   cleanPhone: string;
@@ -432,6 +472,24 @@ export default async function handler(req: any, res: any) {
       );
     } catch {}
 
+    await emitServerOsEvent(
+      supabase,
+      'chat.message.sent',
+      'bb_messages',
+      String(messageId),
+      {
+        message_id: String(messageId),
+        conversation_id: resolvedConversationId,
+        telefono: cleanPhone,
+        agent_type: 'human',
+        channel: 'whatsapp',
+        has_media: hasMedia,
+        ...(productSku ? { sku: String(productSku).trim().toUpperCase() } : {}),
+        text: (messageText || '[MEDIA]').slice(0, 240),
+      },
+      `bb_messages:${String(messageId)}`
+    );
+
     let followUpVideoMessage: { id: string; body: string; created_at: string } | null = null;
 
     if (hasMedia && sendVideoAfterImage !== false && resolvedVideoUrl) {
@@ -522,6 +580,23 @@ export default async function handler(req: any, res: any) {
               body: videoText,
               created_at: vidIso,
             };
+
+            await emitServerOsEvent(
+              supabase,
+              'chat.message.sent',
+              'bb_messages',
+              vidMsgId,
+              {
+                message_id: vidMsgId,
+                conversation_id: resolvedConversationId,
+                telefono: cleanPhone,
+                agent_type: 'auto_video',
+                channel: 'whatsapp',
+                ...(productSku ? { sku: String(productSku).trim().toUpperCase() } : {}),
+                text: videoText.slice(0, 240),
+              },
+              `bb_messages:${vidMsgId}`
+            );
           }
         }
       } catch (vidErr) {

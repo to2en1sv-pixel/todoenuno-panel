@@ -1,6 +1,46 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
+async function emitServerOsEvent(
+  supabase: any,
+  type: string,
+  sourceTable: string,
+  sourceId: string,
+  payload: Record<string, any>,
+  idempotencyKey?: string
+) {
+  const key = idempotencyKey || `${sourceTable}:${sourceId}:${type}:${Date.now()}`;
+  try {
+    const rpc = await supabase.rpc('emit_os_event', {
+      p_type: type,
+      p_source_table: sourceTable,
+      p_source_id: sourceId,
+      p_idempotency_key: key,
+      p_payload: payload,
+    });
+    if (!rpc.error) return;
+  } catch {}
+  try {
+    const res = await supabase.schema('os').from('events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+    if (!res.error) return;
+  } catch {}
+  try {
+    await supabase.from('os_events').insert({
+      type,
+      source_table: sourceTable,
+      source_id: sourceId,
+      idempotency_key: key,
+      payload,
+    });
+  } catch {}
+}
+
 function unwrapMessageContent(rawMsg: any): any {
   let msg = rawMsg;
   for (let i = 0; i < 4; i++) {
@@ -677,6 +717,43 @@ export default async function handler(req: any, res: any) {
           );
         } catch {}
       }
+    }
+
+    // Emitir eventos OS reales de mensajería y lead nuevo
+    await emitServerOsEvent(
+      supabase,
+      fromMe ? 'chat.message.sent' : 'chat.message.received',
+      'bb_messages',
+      messageId,
+      {
+        message_id: messageId,
+        conversation_id: conversationId,
+        telefono: cleanPhone,
+        nombre_cliente: pushName || existingConv?.contact_name || cleanPhone,
+        text: storedBody.slice(0, 240),
+        channel: 'whatsapp',
+        from_me: fromMe,
+        ...(mediaType ? { media_type: mediaType, media_analyzed: mediaAnalyzed } : {}),
+        ...(adTag ? { codigo_anuncio: adTag } : {}),
+      },
+      `bb_messages:${messageId}`
+    );
+
+    if (!existingConv && !fromMe) {
+      await emitServerOsEvent(
+        supabase,
+        'lead.generated',
+        'bb_conversations',
+        conversationId,
+        {
+          conversation_id: conversationId,
+          nombre: pushName || cleanPhone,
+          telefono: cleanPhone,
+          channel: 'whatsapp',
+          ...(adTag ? { codigo_anuncio: adTag } : {}),
+        },
+        `lead:whatsapp:${conversationId}`
+      );
     }
 
     const convStatus = existingConv?.status ? String(existingConv.status) : 'bot';
