@@ -234,3 +234,119 @@ export function serieDiaria(ordenes: OrdenWhatsapp[], mes: string): PuntoVentas[
     ventas: redondear(punto.ventas),
   }))
 }
+
+/* ------------------ Arranque de medición ROAS ------------------ */
+
+export const ROAS_START_DOC_TITLE = '__SYSTEM_ROAS_START_V1__'
+export const DEFAULT_ROAS_START_DATE = '2026-11-19'
+const ROAS_START_LOCAL_KEY = 'todoenuno_roas_start_v1'
+const ROAS_START_NONE_SENTINEL = '__NONE__'
+
+export function getLocalRoasStartDate(): string | null {
+  try {
+    const raw = localStorage.getItem(ROAS_START_LOCAL_KEY)
+    if (raw === ROAS_START_NONE_SENTINEL) return null
+    if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+    return DEFAULT_ROAS_START_DATE
+  } catch {
+    return DEFAULT_ROAS_START_DATE
+  }
+}
+
+export function setLocalRoasStartDate(startDate: string | null): void {
+  try {
+    if (startDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+      localStorage.setItem(ROAS_START_LOCAL_KEY, startDate)
+    } else if (startDate === null) {
+      localStorage.setItem(ROAS_START_LOCAL_KEY, ROAS_START_NONE_SENTINEL)
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export async function fetchRoasStartDate(supabaseClient: any): Promise<string | null> {
+  try {
+    const { data, error } = await supabaseClient
+      .from('panel_docs')
+      .select('id,contenido')
+      .eq('titulo', ROAS_START_DOC_TITLE)
+      .maybeSingle()
+
+    if (!error && data?.contenido) {
+      const parsed = JSON.parse(data.contenido)
+      if (parsed && 'startDate' in parsed) {
+        const val = typeof parsed.startDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.startDate)
+          ? parsed.startDate
+          : null
+        setLocalRoasStartDate(val)
+        return val
+      }
+    }
+  } catch {
+    // fallback to local/default
+  }
+  return getLocalRoasStartDate()
+}
+
+export async function saveRoasStartDate(
+  supabaseClient: any,
+  startDate: string | null,
+): Promise<{ startDate: string | null; error?: string }> {
+  const clean = startDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? startDate : null
+  setLocalRoasStartDate(clean)
+  const payload = JSON.stringify({
+    startDate: clean,
+    updatedAt: new Date().toISOString(),
+  })
+  const nowIso = new Date().toISOString()
+
+  try {
+    const { data: existing } = await supabaseClient
+      .from('panel_docs')
+      .select('id')
+      .eq('titulo', ROAS_START_DOC_TITLE)
+      .maybeSingle()
+
+    if (existing?.id) {
+      const { error } = await supabaseClient
+        .from('panel_docs')
+        .update({
+          contenido: payload,
+          categoria: 'Sistema',
+          estado: 'Completado',
+          updated_at: nowIso,
+        })
+        .eq('id', existing.id)
+      if (error) return { startDate: clean, error: error.message }
+    } else {
+      const { error } = await supabaseClient
+        .from('panel_docs')
+        .insert({
+          titulo: ROAS_START_DOC_TITLE,
+          contenido: payload,
+          categoria: 'Sistema',
+          estado: 'Completado',
+          updated_at: nowIso,
+        })
+      if (error) return { startDate: clean, error: error.message }
+    }
+    return { startDate: clean }
+  } catch (err: any) {
+    return { startDate: clean, error: err?.message || 'Error guardando arranque ROAS' }
+  }
+}
+
+export function formatRoasDateLabel(ymd: string | null): string {
+  if (!ymd || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return 'Sin corte'
+  try {
+    return new Date(`${ymd}T12:00:00-06:00`).toLocaleDateString('es-SV', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    })
+  } catch {
+    return ymd
+  }
+}
+

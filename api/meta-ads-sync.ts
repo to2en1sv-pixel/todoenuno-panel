@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 
 const GRAPH_VERSION = 'v19.0';
 const INSIGHTS_DOC_TITLE = '__SYSTEM_META_ADS_INSIGHTS_V1__';
+const ROAS_START_DOC_TITLE = '__SYSTEM_ROAS_START_V1__';
+const DEFAULT_ROAS_START_DATE = '2026-11-19';
 const TIME_ZONE = 'America/El_Salvador';
 
 async function emitServerOsEvent(
@@ -268,9 +270,38 @@ export default async function handler(req: any, res: any) {
         });
       }
 
+      const startDoc = await readDocJson<{ startDate?: string | null } | null>(
+        supabase,
+        ROAS_START_DOC_TITLE,
+        null
+      );
+      const roasStartDate =
+        startDoc.data && 'startDate' in startDoc.data
+          ? (typeof startDoc.data.startDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(startDoc.data.startDate)
+              ? startDoc.data.startDate
+              : null)
+          : DEFAULT_ROAS_START_DATE;
+
       const days = Math.min(90, Math.max(1, Number(req.query?.days || req.body?.days || 2)));
-      const since = String(req.query?.since || req.body?.since || getElSalvadorDate(-(days - 1)));
+      const rawSince = String(req.query?.since || req.body?.since || getElSalvadorDate(-(days - 1)));
       const until = String(req.query?.until || req.body?.until || getElSalvadorDate(0));
+      const since = roasStartDate && rawSince < roasStartDate ? roasStartDate : rawSince;
+
+      if (since > until) {
+        return res.status(200).json({
+          ok: true,
+          connected: true,
+          skippedBeforeStart: true,
+          roasStartDate,
+          since,
+          until,
+          insightsCount: 0,
+          syncedSpendRows: 0,
+          accountErrors: [],
+          message: `Arranque ROAS activo desde ${roasStartDate}. Días previos omitidos para no duplicar en Finanzas.`,
+        });
+      }
+
       const timeRange = encodeURIComponent(JSON.stringify({ since, until }));
 
       const syncedInsights: any[] = [];

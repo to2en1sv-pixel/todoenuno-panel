@@ -9,13 +9,17 @@ import { buildCatalogResolutionIndex } from '@/lib/catalogAliases'
 import {
   construirRoas,
   etiquetaMes,
+  fetchRoasStartDate,
   formatCurrency,
   formatNumber,
   formatRoas,
+  formatRoasDateLabel,
+  getLocalRoasStartDate,
   hoyLocal,
   mesActual,
   rangoMes,
   roasColorClass,
+  saveRoasStartDate,
 } from '@/lib/rentabilidad'
 import type { GastoPublicidad, OrdenWhatsapp } from '@/types/rentabilidad'
 import type { StockItem, ProductVariant } from '@/types/inventory'
@@ -46,27 +50,59 @@ export function RentabilidadPage() {
   const [error, setError] = useState<string | null>(null)
   const [exito, setExito] = useState<string | null>(null)
   const [form, setForm] = useState(FORM_INICIAL)
+  const [roasStartDate, setRoasStartDate] = useState<string | null>(() => getLocalRoasStartDate())
+  const [savingRoasStart, setSavingRoasStart] = useState<boolean>(false)
 
   const rango = useMemo(() => rangoMes(mes), [mes])
+
+  const effectiveRange = useMemo(() => {
+    const clippedByStart = Boolean(roasStartDate && roasStartDate > rango.fechaInicio)
+    const fechaInicio = clippedByStart ? roasStartDate! : rango.fechaInicio
+    const isoInicio = clippedByStart
+      ? new Date(`${roasStartDate}T00:00:00-06:00`).toISOString()
+      : rango.isoInicio
+    return {
+      fechaInicio,
+      fechaFin: rango.fechaFin,
+      isoInicio,
+      isoFinExclusivo: rango.isoFinExclusivo,
+      clippedByStart,
+      emptyRange: fechaInicio > rango.fechaFin,
+    }
+  }, [rango, roasStartDate])
+
+  useEffect(() => {
+    let active = true
+    void fetchRoasStartDate(supabase).then((saved) => {
+      if (active) setRoasStartDate(saved)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const cargarDatos = useCallback(async () => {
     setCargando(true)
     setError(null)
 
     const [resGastos, resOrdenes, stockRes, variantsRes, prodRes] = await Promise.all([
-      supabase
-        .from('gastos_publicidad')
-        .select('id,fecha,codigo_anuncio,plataforma,monto,notas,created_at')
-        .gte('fecha', rango.fechaInicio)
-        .lte('fecha', rango.fechaFin)
-        .order('fecha', { ascending: false })
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('whatsapp_orders')
-        .select('id,total,sku,catalogo_sku,items,estado,codigo_anuncio,created_at')
-        .neq('estado', 'cancelado')
-        .gte('created_at', rango.isoInicio)
-        .lt('created_at', rango.isoFinExclusivo),
+      effectiveRange.emptyRange
+        ? Promise.resolve({ data: [], error: null as any })
+        : supabase
+            .from('gastos_publicidad')
+            .select('id,fecha,codigo_anuncio,plataforma,monto,notas,created_at')
+            .gte('fecha', effectiveRange.fechaInicio)
+            .lte('fecha', effectiveRange.fechaFin)
+            .order('fecha', { ascending: false })
+            .order('created_at', { ascending: false }),
+      effectiveRange.emptyRange
+        ? Promise.resolve({ data: [], error: null as any })
+        : supabase
+            .from('whatsapp_orders')
+            .select('id,total,sku,catalogo_sku,items,estado,codigo_anuncio,created_at')
+            .neq('estado', 'cancelado')
+            .gte('created_at', effectiveRange.isoInicio)
+            .lt('created_at', effectiveRange.isoFinExclusivo),
       fetchStockItems(),
       fetchProductVariants(),
       supabase.from('productos').select('*'),
@@ -89,11 +125,27 @@ export function RentabilidadPage() {
     setProductosDb(prodRes.data || [])
 
     setCargando(false)
-  }, [rango])
+  }, [effectiveRange])
 
   useEffect(() => {
     void cargarDatos()
   }, [cargarDatos])
+
+  const handleChangeRoasStart = async (nextDate: string | null) => {
+    setSavingRoasStart(true)
+    setError(null)
+    setExito(null)
+    const res = await saveRoasStartDate(supabase, nextDate)
+    setRoasStartDate(res.startDate)
+    if (res.error) {
+      setError(res.error)
+    } else if (res.startDate) {
+      setExito(`Arranque de medición ROAS fijado desde ${formatRoasDateLabel(res.startDate)}.`)
+    } else {
+      setExito('Corte de arranque ROAS desactivado: mostrando historial completo del mes.')
+    }
+    setSavingRoasStart(false)
+  }
 
   const handleQuickMetaSync = async () => {
     setSyncingMeta(true)
@@ -101,10 +153,16 @@ export function RentabilidadPage() {
     setExito(null)
     try {
       const hoy = hoyLocal()
-      const since = rango.fechaInicio
-      const until = rango.fechaFin < hoy ? rango.fechaFin : hoy
-      if (since > hoy) {
-        setError('No se puede sincronizar un mes futuro.')
+      const since = effectiveRange.fechaInicio
+      const until = effectiveRange.fechaFin < hoy ? effectiveRange.fechaFin : hoy
+      if (since > until) {
+        if (roasStartDate && hoy < roasStartDate) {
+          setExito(
+            `Arranque ROAS programado desde ${formatRoasDateLabel(roasStartDate)}. Los días previos están protegidos para no duplicar en Finanzas.`
+          )
+        } else {
+          setError('No se puede sincronizar un mes futuro.')
+        }
         return
       }
       const qs = new URLSearchParams({ action: 'sync', since, until })
@@ -124,6 +182,10 @@ export function RentabilidadPage() {
           data.message ||
             'Falta configurar tus tokens de System User en Supabase (meta_ad_accounts). Revisa la pestaña Meta Ads Live o Sistema.'
         )
+        return
+      }
+      if (data.skippedBeforeStart && data.message) {
+        setExito(data.message)
         return
       }
       setExito(
@@ -255,6 +317,10 @@ export function RentabilidadPage() {
     }
   }, [filasRoas])
 
+  const periodoLabel = effectiveRange.clippedByStart
+    ? `Desde ${formatRoasDateLabel(effectiveRange.fechaInicio)} · ${etiquetaMes(mes)}`
+    : etiquetaMes(mes)
+
   return (
     <div className="max-w-6xl mx-auto flex flex-col gap-6 pb-16">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2">
@@ -339,6 +405,51 @@ export function RentabilidadPage() {
             </div>
           )}
 
+          {/* Barra de arranque de medición ROAS (protege días previos en Finanzas) */}
+          <section className="bg-cd border border-[var(--bd)] rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-semibold text-[var(--tx)]">Arranque de medición ROAS:</span>
+                <span className="font-mono font-medium text-[var(--tx)]">
+                  {roasStartDate ? `Desde ${formatRoasDateLabel(roasStartDate)}` : 'Mes completo (sin corte)'}
+                </span>
+              </div>
+              <p className="text-[11px] text-[var(--mu)] mt-0.5">
+                {roasStartDate
+                  ? 'Cuenta ventas, gastos y sincronización de Meta Ads desde esta fecha sin reingresar pauta previa a Finanzas.'
+                  : 'Midiendo todo el mes completo sin fecha de corte.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <input
+                type="date"
+                value={roasStartDate || ''}
+                disabled={savingRoasStart}
+                onChange={(e) => void handleChangeRoasStart(e.target.value || null)}
+                aria-label="Fecha de arranque ROAS"
+                className="rounded-lg border border-[var(--bd)] bg-sf px-2.5 py-1.5 text-xs font-mono text-[var(--tx)] outline-none focus:border-[var(--tx)]"
+              />
+              <button
+                type="button"
+                disabled={savingRoasStart}
+                onClick={() => void handleChangeRoasStart(hoyLocal())}
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:bg-[var(--cd)] text-xs font-medium text-[var(--tx)] whitespace-nowrap transition-colors disabled:opacity-50"
+              >
+                Desde hoy
+              </button>
+              {roasStartDate && (
+                <button
+                  type="button"
+                  disabled={savingRoasStart}
+                  onClick={() => void handleChangeRoasStart(null)}
+                  className="px-2.5 py-1.5 rounded-lg border border-[var(--bd)] hover:border-[var(--tx)] text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] whitespace-nowrap transition-colors disabled:opacity-50"
+                >
+                  Sin corte
+                </button>
+              )}
+            </div>
+          </section>
+
           {/* Franja unificada de 4 KPIs ROAS */}
           <section className="bg-cd border border-[var(--bd)] rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-[var(--bd)]">
             <div className="p-5">
@@ -346,7 +457,7 @@ export function RentabilidadPage() {
               <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
                 {formatCurrency(totales.ventas)}
               </div>
-              <div className="text-xs text-[var(--mu)] mt-1">{etiquetaMes(mes)}</div>
+              <div className="text-xs text-[var(--mu)] mt-1">{periodoLabel}</div>
             </div>
             <div className="p-5">
               <div className="text-xs font-medium text-[var(--mu)]">Gasto en Ads</div>
@@ -377,7 +488,7 @@ export function RentabilidadPage() {
               <div>
                 <h2 className="text-sm font-semibold text-[var(--tx)]">ROAS por anuncio</h2>
                 <p className="text-xs text-[var(--mu)] mt-0.5">
-                  Ventas de WhatsApp ÷ inversión publicitaria · {etiquetaMes(mes)}
+                  Ventas de WhatsApp ÷ inversión publicitaria · {periodoLabel}
                 </p>
               </div>
               <span className="text-xs text-[var(--mu)] tabular-nums">{filasRoas.length} campañas</span>
@@ -539,7 +650,7 @@ export function RentabilidadPage() {
               <div className="flex items-center justify-between border-b border-[var(--bd)] px-5 py-4">
                 <div>
                   <h2 className="text-sm font-semibold text-[var(--tx)]">Gastos registrados</h2>
-                  <p className="text-xs text-[var(--mu)] mt-0.5">{etiquetaMes(mes)}</p>
+                  <p className="text-xs text-[var(--mu)] mt-0.5">{periodoLabel}</p>
                 </div>
                 <span className="text-xs text-[var(--mu)] font-mono tabular-nums">{gastos.length}</span>
               </div>

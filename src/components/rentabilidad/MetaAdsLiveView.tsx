@@ -158,6 +158,8 @@ export function MetaAdsLiveView({ onSynced }: Props) {
           type: 'err',
           text: data.message || 'Falta agregar tus tokens de System User en Supabase (meta_ad_accounts).',
         });
+      } else if (data.skippedBeforeStart && data.message) {
+        setNotice({ type: 'ok', text: data.message });
       } else {
         setNotice({
           type: 'ok',
