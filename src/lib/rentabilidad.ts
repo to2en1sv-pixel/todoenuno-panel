@@ -4,12 +4,30 @@ import type {
   PuntoVentas,
   RoasRow,
 } from '@/types/rentabilidad'
-import { resolveCatalogSku } from './catalogAliases'
+import { resolveCatalogSku, type CatalogResolutionIndex } from './catalogAliases'
 
 /** Cambiá acá la moneda si no usás USD. */
 export const MONEDA = 'USD'
 
 /* ----------------------------- Fechas ----------------------------- */
+
+export function toElSalvadorDateKey(isoOrDate: string | Date): string {
+  try {
+    const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate)
+    if (Number.isNaN(d.getTime())) return ''
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/El_Salvador',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d)
+  } catch {
+    const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate)
+    if (Number.isNaN(d.getTime())) return ''
+    const sv = new Date(d.getTime() - 6 * 3600_000)
+    return sv.toISOString().slice(0, 10)
+  }
+}
 
 export function toFechaLocal(fecha: Date): string {
   const y = fecha.getFullYear()
@@ -19,7 +37,7 @@ export function toFechaLocal(fecha: Date): string {
 }
 
 export function hoyLocal(): string {
-  return toFechaLocal(new Date())
+  return toElSalvadorDateKey(new Date())
 }
 
 export function mesActual(): string {
@@ -38,18 +56,25 @@ export interface RangoMes {
 
 export function rangoMes(mes: string): RangoMes {
   const [anio, mesNumero] = mes.split('-').map(Number)
-  const inicio = new Date(anio, mesNumero - 1, 1, 0, 0, 0, 0)
-  const finExclusivo = new Date(anio, mesNumero, 1, 0, 0, 0, 0)
+  const mm = String(mesNumero).padStart(2, '0')
   const ultimoDia = new Date(anio, mesNumero, 0)
+  const lastDd = String(ultimoDia.getDate()).padStart(2, '0')
+  const nextYear = mesNumero === 12 ? anio + 1 : anio
+  const nextMonth = mesNumero === 12 ? 1 : mesNumero + 1
+  const nextMm = String(nextMonth).padStart(2, '0')
+
+  // El Salvador UTC-6 todo el año (sin DST)
+  const isoInicio = new Date(`${anio}-${mm}-01T00:00:00-06:00`).toISOString()
+  const isoFinExclusivo = new Date(`${nextYear}-${nextMm}-01T00:00:00-06:00`).toISOString()
 
   return {
     anio,
     mesNumero,
     diasDelMes: ultimoDia.getDate(),
-    fechaInicio: toFechaLocal(inicio),
-    fechaFin: toFechaLocal(ultimoDia),
-    isoInicio: inicio.toISOString(),
-    isoFinExclusivo: finExclusivo.toISOString(),
+    fechaInicio: `${anio}-${mm}-01`,
+    fechaFin: `${anio}-${mm}-${lastDd}`,
+    isoInicio,
+    isoFinExclusivo,
   }
 }
 
@@ -112,21 +137,23 @@ function redondear(valor: number, decimales = 2): number {
 }
 
 /**
- * JOIN lógico entre whatsapp_orders y gastos_publicidad agrupado por codigo_anuncio,
+ * JOIN lógico entre whatsapp_orders (excluyendo cancelados) y gastos_publicidad agrupado por codigo_anuncio,
  * vinculando automáticamente con el producto maestro del catálogo.
  */
 export function construirRoas(
   ordenes: OrdenWhatsapp[],
   gastos: GastoPublicidad[],
+  catalogIndex?: CatalogResolutionIndex,
 ): RoasRow[] {
   const mapa = new Map<string, RoasRow>()
+  const masterSkus = catalogIndex?.masterSkus || []
 
   const obtener = (codigo: string): RoasRow => {
     const existente = mapa.get(codigo)
     if (existente) return existente
     const nueva: RoasRow = {
       codigo_anuncio: codigo,
-      producto_catalogo: resolveCatalogSku(null, codigo, null),
+      producto_catalogo: resolveCatalogSku(null, codigo, null, masterSkus, { index: catalogIndex }),
       ventas: 0,
       gasto: 0,
       pedidos: 0,
@@ -138,13 +165,20 @@ export function construirRoas(
   }
 
   for (const orden of ordenes) {
+    if (String(orden.estado || '').toLowerCase() === 'cancelado') continue
     const codigo = normalizarCodigo(orden.codigo_anuncio)
     if (!codigo) continue
     const fila = obtener(codigo)
     fila.ventas += Number(orden.total) || 0
     fila.pedidos += 1
     if (!fila.producto_catalogo) {
-      fila.producto_catalogo = resolveCatalogSku(orden.sku, orden.codigo_anuncio, orden.catalogo_sku);
+      fila.producto_catalogo = resolveCatalogSku(
+        orden.sku,
+        orden.codigo_anuncio,
+        orden.catalogo_sku,
+        masterSkus,
+        { items: orden.items, index: catalogIndex },
+      )
     }
   }
 
@@ -165,7 +199,7 @@ export function construirRoas(
     .sort((a, b) => b.ventas - a.ventas)
 }
 
-/** Serie diaria (todos los días del mes, con 0 donde no hubo ventas). */
+/** Serie diaria (todos los días del mes, con 0 donde no hubo ventas; excluye cancelados y usa hora El Salvador). */
 export function serieDiaria(ordenes: OrdenWhatsapp[], mes: string): PuntoVentas[] {
   const { anio, mesNumero, diasDelMes } = rangoMes(mes)
   const porDia = new Map<number, PuntoVentas>()
@@ -182,11 +216,13 @@ export function serieDiaria(ordenes: OrdenWhatsapp[], mes: string): PuntoVentas[
   }
 
   for (const orden of ordenes) {
-    const fecha = new Date(orden.created_at)
-    if (Number.isNaN(fecha.getTime())) continue
-    if (fecha.getFullYear() !== anio || fecha.getMonth() + 1 !== mesNumero) continue
+    if (String(orden.estado || '').toLowerCase() === 'cancelado') continue
+    const svKey = toElSalvadorDateKey(orden.created_at)
+    if (!svKey) continue
+    const [y, m, d] = svKey.split('-').map(Number)
+    if (y !== anio || m !== mesNumero) continue
 
-    const punto = porDia.get(fecha.getDate())
+    const punto = porDia.get(d)
     if (!punto) continue
 
     punto.ventas += Number(orden.total) || 0

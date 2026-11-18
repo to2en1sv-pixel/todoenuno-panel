@@ -53,9 +53,14 @@ import {
 import { cleanPhone, formatPhoneDisplay } from '@/lib/blacklist';
 import { formatCurrency } from '@/lib/rentabilidad';
 import { useProductos } from '@/hooks/useCatalog';
+import { fetchStockItems, fetchProductVariants, identifyDuplicateVariantStockRows } from '@/lib/inventory';
+import { buildCatalogResolutionIndex } from '@/lib/catalogAliases';
+import type { ProductVariant, StockItem } from '@/types/inventory';
 
 export function LtvPage() {
   const [orders, setOrders] = useState<any[]>([]);
+  const [stockItems, setStockItems] = useState<StockItem[]>([]);
+  const [variantsDb, setVariantsDb] = useState<ProductVariant[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [campanas, setCampanas] = useState<CampanaOfertaFlash[]>(() => getCampanasFlash());
@@ -97,14 +102,20 @@ export function LtvPage() {
     else setLoading(true);
 
     try {
-      const { data, error } = await supabase
-        .from('whatsapp_orders')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const [ordersRes, stockRes, variantsRes] = await Promise.all([
+        supabase
+          .from('whatsapp_orders')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        fetchStockItems(),
+        fetchProductVariants()
+      ]);
 
-      if (!error && Array.isArray(data)) {
-        setOrders(data);
+      if (!ordersRes.error && Array.isArray(ordersRes.data)) {
+        setOrders(ordersRes.data);
       }
+      setStockItems(stockRes.items || []);
+      setVariantsDb(Array.isArray(variantsRes) ? variantsRes : []);
     } catch (err) {
       console.warn('Error al cargar órdenes para LTV:', err);
     } finally {
@@ -125,9 +136,19 @@ export function LtvPage() {
   }, []);
 
   /* --------------------------- Procesamiento LTV --------------------------- */
+  const catalogIndex = useMemo(() => {
+    const { duplicateChildSkuSet } = identifyDuplicateVariantStockRows(stockItems, variantsDb);
+    return buildCatalogResolutionIndex({
+      stockItems,
+      variants: variantsDb,
+      productosDb: productosCatalogo || [],
+      duplicateChildSkuSet
+    });
+  }, [stockItems, variantsDb, productosCatalogo]);
+
   const { perfiles, metricas, cohortes } = useMemo(() => {
-    return procesarPerfilesLtv(orders);
-  }, [orders]);
+    return procesarPerfilesLtv(orders, catalogIndex);
+  }, [orders, catalogIndex]);
 
   // Filtrado de perfiles en directorio
   const perfilesFiltrados = useMemo(() => {
@@ -380,7 +401,7 @@ export function LtvPage() {
               <h2 className="text-sm font-semibold text-[var(--tx)] flex flex-wrap items-center gap-2">
                 <span>Inteligencia de necesidad futura por ciclo de vida</span>
                 <span className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                  · Potencial ~${metricas.potencialVentasCrossSell.toFixed(0)} USD
+                  · Base lista: {formatCurrency(metricas.potencialVentasCrossSell)}
                 </span>
               </h2>
               <p className="text-xs tx-mu mt-1">
@@ -844,8 +865,8 @@ export function LtvPage() {
               <p className="text-xs tx-mu leading-relaxed">
                 Envía invitación privada con cupón único y pago contra entrega en puerta, sin costo de adquisición adicional.
               </p>
-              <div className="p-2.5 bg-sf rounded-lg border border-[var(--bd)] text-[11px] font-mono tx-mu">
-                Conv. est. 12%–18% · CAC $0.00
+              <div className="p-2.5 bg-sf rounded-lg border border-[var(--bd)] text-[11px] font-mono tx-mu tabular-nums">
+                {metricas.clientesListosOferta} listos · {metricas.tasaRecompra.toFixed(1)}% recompra real · CAC $0.00
               </div>
             </div>
           </div>

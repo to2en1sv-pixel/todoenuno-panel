@@ -32,18 +32,25 @@ import {
   Check,
   RotateCcw
 } from 'lucide-react';
-import { formatCurrency, formatRoas, roasColorClass } from '@/lib/rentabilidad';
+import { formatCurrency, formatRoas, roasColorClass, toElSalvadorDateKey } from '@/lib/rentabilidad';
 import type { 
   ProductoBovedaRoas, 
   CicloVidaProducto, 
   RendimientoMesProducto,
   GastoPublicidad 
 } from '@/types/rentabilidad';
-import { fetchStockItems } from '@/lib/inventory';
+import {
+  fetchStockItems,
+  fetchProductVariants,
+  identifyDuplicateVariantStockRows,
+} from '@/lib/inventory';
 import { emitOsEvent } from '@/lib/osEvents';
-import type { StockItem } from '@/types/inventory';
+import type { StockItem, ProductVariant } from '@/types/inventory';
 import { 
   resolveCatalogSku, 
+  buildCatalogResolutionIndex,
+  extractOrderUnits,
+  normalizeKey,
   linkRawSkuToProduct, 
   linkAdCodeToProduct, 
   removeAttribution, 
@@ -64,6 +71,7 @@ export function BovedaProductosRoas() {
   const [ordenes, setOrdenes] = useState<any[]>([]);
   const [gastos, setGastos] = useState<GastoPublicidad[]>([]);
   const [productosDb, setProductosDb] = useState<any[]>([]);
+  const [variantsDb, setVariantsDb] = useState<ProductVariant[]>([]);
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [versionAtribucion, setVersionAtribucion] = useState(0); // Para forzar recálculo tras mapeos
 
@@ -101,12 +109,13 @@ export function BovedaProductosRoas() {
   const cargarHistorico = async () => {
     setCargando(true);
     try {
-      const [cutoffs, { items: itemsStock }, resOrdenes, resGastos, resProd] = await Promise.all([
+      const [cutoffs, { items: itemsStock }, allVariants, resOrdenes, resGastos, resProd] = await Promise.all([
         hydrateCutoffsFromOsEvents(supabase),
         fetchStockItems(),
+        fetchProductVariants(),
         supabase
           .from('whatsapp_orders')
-          .select('id,total,sku,catalogo_sku,codigo_anuncio,created_at,estado')
+          .select('id,total,sku,catalogo_sku,items,codigo_anuncio,created_at,estado')
           .neq('estado', 'cancelado'),
         supabase
           .from('gastos_publicidad')
@@ -123,6 +132,7 @@ export function BovedaProductosRoas() {
         setVaultCutoffState(getVaultCutoffDate());
       }
       setStockItems(itemsStock || []);
+      setVariantsDb(allVariants || []);
       setOrdenes(resOrdenes.data || []);
       setGastos(resGastos.data || []);
       setProductosDb(resProd.data || []);
@@ -137,14 +147,40 @@ export function BovedaProductosRoas() {
     cargarHistorico();
   }, []);
 
-  // Construcción de la Bóveda de Productos cruzando Orders + Ads Spend con consolidación por Catálogo Maestro
+  // Identificar filas duplicadas de variantes en inventory_stock para excluirlas como productos maestros
+  const { duplicateChildSkuSet } = useMemo(
+    () => identifyDuplicateVariantStockRows(stockItems, variantsDb),
+    [stockItems, variantsDb]
+  );
+
+  const masterStockItems = useMemo(
+    () =>
+      stockItems.filter(item => {
+        const s = item.sku.trim().toUpperCase();
+        if (!s || s.toLowerCase().includes('fee') || s.toLowerCase().includes('descuento')) return false;
+        return !duplicateChildSkuSet.has(s);
+      }),
+    [stockItems, duplicateChildSkuSet]
+  );
+
+  const catalogIndex = useMemo(
+    () =>
+      buildCatalogResolutionIndex({
+        stockItems,
+        variants: variantsDb,
+        productosDb,
+        duplicateChildSkuSet,
+      }),
+    [stockItems, variantsDb, productosDb, duplicateChildSkuSet]
+  );
+
+  // Construcción de la Bóveda de Productos cruzando Orders + Ads Spend con consolidación estricta por Producto Maestro (sin desdoblar por variante)
   const { boveda, textosSinMapear, codigosSinMapear } = useMemo(() => {
-    if (ordenes.length === 0 && gastos.length === 0 && stockItems.length === 0) {
+    if (ordenes.length === 0 && gastos.length === 0 && masterStockItems.length === 0) {
       return { boveda: [], textosSinMapear: [], codigosSinMapear: [] };
     }
 
-    // 1. Catálogo Canónico Maestro
-    // Usamos stockItems como fuente de productos físicos, complementado por productosDb
+    // 1. Catálogo Canónico Maestro (1 tarjeta única por producto maestro, nunca por variante)
     const canonicalMap = new Map<string, {
       sku: string;
       nombre: string;
@@ -156,25 +192,29 @@ export function BovedaProductosRoas() {
       activoItem: boolean;
       ventasTotales: number;
       pedidosTotales: number;
+      unidadesTotales: number;
       gastoTotal: number;
       anuncios: Set<string>;
       aliasTextos: Set<string>;
-      mesesVentas: { ventas: number; pedidos: number }[];
+      mesesVentas: { ventas: number; pedidos: number; unidades: number }[];
       mesesGasto: number[];
     }>();
 
-    const initMeses = () => Array.from({ length: 12 }, () => ({ ventas: 0, pedidos: 0 }));
+    const initMeses = () => Array.from({ length: 12 }, () => ({ ventas: 0, pedidos: 0, unidades: 0 }));
     const initMesesGasto = () => Array.from({ length: 12 }, () => 0);
 
-    // Rastrear template_id ya cubiertos por inventory_stock para evitar duplicados (#SKU vs #template_id)
+    // Rastrear template_id y nombres ya cubiertos por masterStockItems para evitar duplicados (#SKU vs #template_id)
     const seenTemplateIds = new Set<string>();
+    const seenNormNames = new Set<string>();
 
-    // Registrar productos del inventario/stock
-    stockItems.forEach(item => {
+    masterStockItems.forEach(item => {
       const cSku = item.sku.trim().toUpperCase();
       if (item.template_id) {
         seenTemplateIds.add(String(item.template_id).trim().toUpperCase());
       }
+      const normName = normalizeKey(item.nombre);
+      if (normName) seenNormNames.add(normName);
+
       canonicalMap.set(cSku, {
         sku: cSku,
         nombre: item.nombre || cSku,
@@ -186,6 +226,7 @@ export function BovedaProductosRoas() {
         activoItem: item.activo !== false,
         ventasTotales: 0,
         pedidosTotales: 0,
+        unidadesTotales: 0,
         gastoTotal: 0,
         anuncios: new Set(),
         aliasTextos: new Set(),
@@ -194,11 +235,19 @@ export function BovedaProductosRoas() {
       });
     });
 
-    // Registrar productos de la tabla legacy productos SOLO si no tienen ya SKU en inventory_stock y están activos
+    // Registrar productos de la tabla `productos` SOLO si están activos y no existen ya por template_id ni por nombre normalizado
     productosDb.forEach(p => {
       if (p.active === false) return;
       const tId = String(p.template_id || '').trim().toUpperCase();
-      if (tId && !seenTemplateIds.has(tId) && !canonicalMap.has(tId)) {
+      const normBase = normalizeKey(p.nombre_base);
+      if (
+        tId &&
+        !seenTemplateIds.has(tId) &&
+        !canonicalMap.has(tId) &&
+        (!normBase || !seenNormNames.has(normBase))
+      ) {
+        seenTemplateIds.add(tId);
+        if (normBase) seenNormNames.add(normBase);
         canonicalMap.set(tId, {
           sku: tId,
           nombre: p.nombre_base || tId,
@@ -210,6 +259,7 @@ export function BovedaProductosRoas() {
           activoItem: true,
           ventasTotales: 0,
           pedidosTotales: 0,
+          unidadesTotales: 0,
           gastoTotal: 0,
           anuncios: new Set(),
           aliasTextos: new Set(),
@@ -223,8 +273,9 @@ export function BovedaProductosRoas() {
     const sinMapearTextos = new Set<string>();
     const sinMapearAnuncios = new Set<string>();
 
-    // 2. Procesar y Atribuir Órdenes de WhatsApp (respetando fecha de corte de Bóveda si está activa)
+    // 2. Procesar y Atribuir Órdenes de WhatsApp al Producto Maestro (con unificación automática de variantes y unidades reales)
     ordenes.forEach(o => {
+      if (String(o.estado || '').toLowerCase() === 'cancelado') return;
       if (vaultCutoff && isOrderBeforeCutoff(o.created_at, vaultCutoff)) {
         return;
       }
@@ -232,24 +283,34 @@ export function BovedaProductosRoas() {
       const catSkuDirecto = (o.catalogo_sku || '').trim();
       const codAnuncio = (o.codigo_anuncio || '').trim();
       const monto = Number(o.total || 0);
-      const fecha = o.created_at ? new Date(o.created_at) : new Date();
-      const mesIdx = isNaN(fecha.getMonth()) ? 0 : fecha.getMonth();
+      const unidades = extractOrderUnits({ items: o.items, sku: rawSku });
+      const svDay = o.created_at ? toElSalvadorDateKey(o.created_at) : '';
+      const mesParsed = svDay ? Number(svDay.slice(5, 7)) - 1 : new Date().getMonth();
+      const mesIdx = Number.isFinite(mesParsed) && mesParsed >= 0 && mesParsed < 12 ? mesParsed : 0;
 
-      // Resolver a qué SKU del Catálogo Maestro pertenece esta orden
-      const targetSku = resolveCatalogSku(rawSku, codAnuncio, catSkuDirecto, knownSkus);
+      // Resolver SIEMPRE al SKU del Producto Maestro padre (aunque el pedido traiga variante o nombre con paréntesis)
+      const targetSku = resolveCatalogSku(rawSku, codAnuncio, catSkuDirecto, knownSkus, {
+        items: o.items,
+        index: catalogIndex,
+      });
 
       if (targetSku && canonicalMap.has(targetSku.toUpperCase())) {
         const prod = canonicalMap.get(targetSku.toUpperCase())!;
         prod.ventasTotales += monto;
         prod.pedidosTotales += 1;
+        prod.unidadesTotales += unidades;
         if (rawSku) prod.aliasTextos.add(rawSku);
+        if (catSkuDirecto && catSkuDirecto.toUpperCase() !== prod.sku) {
+          prod.aliasTextos.add(catSkuDirecto.toUpperCase());
+        }
         if (codAnuncio) prod.anuncios.add(codAnuncio.toUpperCase());
         if (prod.mesesVentas[mesIdx]) {
           prod.mesesVentas[mesIdx].ventas += monto;
           prod.mesesVentas[mesIdx].pedidos += 1;
+          prod.mesesVentas[mesIdx].unidades += unidades;
         }
       } else {
-        // No está vinculado a un producto canónico conocido: agrupar por rawSku
+        // No está vinculado a ningún producto maestro del catálogo
         const unlinkedKey = (rawSku || 'SIN_PRODUCTO').toUpperCase();
         sinMapearTextos.add(rawSku || 'SIN_PRODUCTO');
         if (codAnuncio) sinMapearAnuncios.add(codAnuncio);
@@ -266,9 +327,10 @@ export function BovedaProductosRoas() {
             activoItem: true,
             ventasTotales: 0,
             pedidosTotales: 0,
+            unidadesTotales: 0,
             gastoTotal: 0,
             anuncios: new Set(),
-            aliasTextos: new Set([rawSku]),
+            aliasTextos: new Set(rawSku ? [rawSku] : []),
             mesesVentas: initMeses(),
             mesesGasto: initMesesGasto()
           });
@@ -276,11 +338,13 @@ export function BovedaProductosRoas() {
         const prod = canonicalMap.get(unlinkedKey)!;
         prod.ventasTotales += monto;
         prod.pedidosTotales += 1;
+        prod.unidadesTotales += unidades;
         if (rawSku) prod.aliasTextos.add(rawSku);
         if (codAnuncio) prod.anuncios.add(codAnuncio.toUpperCase());
         if (prod.mesesVentas[mesIdx]) {
           prod.mesesVentas[mesIdx].ventas += monto;
           prod.mesesVentas[mesIdx].pedidos += 1;
+          prod.mesesVentas[mesIdx].unidades += unidades;
         }
       }
     });
@@ -292,13 +356,14 @@ export function BovedaProductosRoas() {
       }
       const codGasto = (g.codigo_anuncio || '').trim();
       const montoGasto = Number(g.monto || 0);
-      const fechaGasto = g.fecha ? new Date(g.fecha) : new Date();
-      const mesGastoIdx = isNaN(fechaGasto.getMonth()) ? 0 : fechaGasto.getMonth();
+      const mesStr = g.fecha ? g.fecha.slice(5, 7) : '';
+      const mesParsed = mesStr ? Number(mesStr) - 1 : new Date().getMonth();
+      const mesGastoIdx = Number.isFinite(mesParsed) && mesParsed >= 0 && mesParsed < 12 ? mesParsed : 0;
 
       // Resolver producto canónico para este código de anuncio
-      let targetSku = resolveCatalogSku(null, codGasto, null, knownSkus);
+      let targetSku = resolveCatalogSku(null, codGasto, null, knownSkus, { index: catalogIndex });
 
-      // Si no se resolvió directamente, revisar si algún producto ya tiene este anuncio
+      // Si no se resolvió directamente, revisar si algún producto maestro ya tiene este anuncio
       if (!targetSku) {
         for (const [skuKey, pData] of canonicalMap.entries()) {
           if (pData.anuncios.has(codGasto.toUpperCase())) {
@@ -318,7 +383,7 @@ export function BovedaProductosRoas() {
       } else {
         // Campaña publicitaria independiente o no asignada aún
         const campKey = (codGasto || 'ADS_GENERAL').toUpperCase();
-        sinMapearAnuncios.add(codGasto);
+        if (codGasto) sinMapearAnuncios.add(codGasto);
 
         if (!canonicalMap.has(campKey)) {
           canonicalMap.set(campKey, {
@@ -332,6 +397,7 @@ export function BovedaProductosRoas() {
             activoItem: true,
             ventasTotales: 0,
             pedidosTotales: 0,
+            unidadesTotales: 0,
             gastoTotal: 0,
             anuncios: new Set([campKey]),
             aliasTextos: new Set(),
@@ -359,6 +425,7 @@ export function BovedaProductosRoas() {
       const gastoTotal = prod.gastoTotal;
       const ventasTotales = prod.ventasTotales;
       const pedidosTotales = prod.pedidosTotales;
+      const unidadesTotales = prod.unidadesTotales;
 
       // Leer personalización y costo de localStorage si existe
       let estadoCiclo: CicloVidaProducto = 'escala';
@@ -385,11 +452,11 @@ export function BovedaProductosRoas() {
         }
       } catch {}
 
-      // Métricas contables reales
-      const cogsTotal = costoUnitario * pedidosTotales;
+      // Métricas contables reales (COGS calculado sobre unidades vendidas reales)
+      const cogsTotal = costoUnitario * unidadesTotales;
       const gananciaNetaReal = ventasTotales - (cogsTotal + gastoTotal);
       const margenNetoPorcentaje = ventasTotales > 0 ? (gananciaNetaReal / ventasTotales) * 100 : null;
-      const utilidadPorUnidad = pedidosTotales > 0 ? gananciaNetaReal / pedidosTotales : 0;
+      const utilidadPorUnidad = unidadesTotales > 0 ? gananciaNetaReal / unidadesTotales : 0;
       const roasHistorico = gastoTotal > 0 ? ventasTotales / gastoTotal : null;
       const cpaHistorico = pedidosTotales > 0 && gastoTotal > 0 ? gastoTotal / pedidosTotales : null;
       const ticketPromedio = pedidosTotales > 0 ? ventasTotales / pedidosTotales : 0;
@@ -398,8 +465,9 @@ export function BovedaProductosRoas() {
       const mesesDesempeno: RendimientoMesProducto[] = MESES_NOMBRES.map((nombreMes, idx) => {
         const vMes = prod.mesesVentas[idx]?.ventas || 0;
         const pMes = prod.mesesVentas[idx]?.pedidos || 0;
+        const uMes = prod.mesesVentas[idx]?.unidades || 0;
         const gMes = prod.mesesGasto[idx] || 0;
-        const cogsMes = costoUnitario * pMes;
+        const cogsMes = costoUnitario * uMes;
         const gananciaNetaMes = vMes - (cogsMes + gMes);
         const margenNetoMes = vMes > 0 ? (gananciaNetaMes / vMes) * 100 : null;
         const roasMes = gMes > 0 ? vMes / gMes : (vMes > 0 ? 99 : null);
@@ -447,6 +515,7 @@ export function BovedaProductosRoas() {
         margenNetoPorcentaje,
         utilidadPorUnidad,
         pedidosTotales,
+        unidadesTotales,
         roasHistorico,
         cpaHistorico,
         ticketPromedio,
@@ -467,7 +536,7 @@ export function BovedaProductosRoas() {
       textosSinMapear: Array.from(sinMapearTextos),
       codigosSinMapear: Array.from(sinMapearAnuncios)
     };
-  }, [ordenes, gastos, stockItems, productosDb, versionAtribucion, vaultCutoff]);
+  }, [ordenes, gastos, masterStockItems, productosDb, catalogIndex, versionAtribucion, vaultCutoff]);
 
   // Filtros y ordenamiento
   const productosFiltrados = useMemo(() => {
@@ -1067,7 +1136,11 @@ export function BovedaProductosRoas() {
                 {/* Footer de la Tarjeta */}
                 <div className="mt-3 pt-2.5 border-t border-[var(--bd)] flex items-center justify-between text-[11px]">
                   <span className="tx-mu text-[10px]">
-                    {prod.pedidosTotales} pedidos · {prod.anunciosAsociados.length} anuncios
+                    {prod.pedidosTotales} pedidos
+                    {prod.unidadesTotales && prod.unidadesTotales > prod.pedidosTotales
+                      ? ` (${prod.unidadesTotales} uds)`
+                      : ''}{' '}
+                    · {prod.anunciosAsociados.length} anuncios
                   </span>
                   <span className="text-[var(--ac)] font-bold group-hover:underline flex items-center gap-0.5">
                     Ver Expediente →
@@ -1163,7 +1236,7 @@ export function BovedaProductosRoas() {
                     </span>
                     <span className="text-[9px] tx-mu block mt-0.5">
                       {productoSeleccionado.costoUnitario > 0 
-                        ? `${formatCurrency(productoSeleccionado.costoUnitario)} × ${productoSeleccionado.pedidosTotales} uds` 
+                        ? `${formatCurrency(productoSeleccionado.costoUnitario)} × ${productoSeleccionado.unidadesTotales ?? productoSeleccionado.pedidosTotales} uds` 
                         : 'Sin costo registrado'}
                     </span>
                   </div>
@@ -1492,7 +1565,7 @@ export function BovedaProductosRoas() {
                       className="w-full p-2 bg-cd border border-[var(--bd)] rounded-lg text-xs outline-none focus:border-indigo-500 font-semibold"
                     >
                       <option value="">Selecciona un producto...</option>
-                      {stockItems.filter(item => item.activo !== false).map(item => (
+                      {masterStockItems.filter(item => item.activo !== false).map(item => (
                         <option key={item.sku} value={item.sku}>
                           {item.nombre} (#{item.sku})
                         </option>

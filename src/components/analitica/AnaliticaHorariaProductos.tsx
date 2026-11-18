@@ -7,15 +7,22 @@ import {
   TrendingUp,
   DollarSign
 } from 'lucide-react';
-import { formatCurrency } from '@/lib/rentabilidad';
+import { formatCurrency, toElSalvadorDateKey } from '@/lib/rentabilidad';
+import {
+  extractOrderUnits,
+  resolveCatalogSku,
+  stripQtyAndVariantParens,
+  type CatalogResolutionIndex,
+} from '@/lib/catalogAliases';
 
 interface Props {
   pedidosData: any[];
+  catalogIndex?: CatalogResolutionIndex;
 }
 
 const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-export function AnaliticaHorariaProductos({ pedidosData }: Props) {
+export function AnaliticaHorariaProductos({ pedidosData, catalogIndex }: Props) {
   const { diasData, maxDiaPedidos, metodosPago, topProductos } = useMemo(() => {
     const conteoDias = [0, 0, 0, 0, 0, 0, 0]; // 0=Dom, 1=Lun, ..., 6=Sab
     const ventasDias = [0, 0, 0, 0, 0, 0, 0];
@@ -23,11 +30,26 @@ export function AnaliticaHorariaProductos({ pedidosData }: Props) {
     const prodMap = new Map<string, { cantidad: number; monto: number }>();
 
     pedidosData.forEach(p => {
-      const fecha = p.created_at ? new Date(p.created_at) : new Date();
+      if (String(p.estado || '').toLowerCase() === 'cancelado') return;
+      const svKey = p.created_at ? toElSalvadorDateKey(p.created_at) : '';
+      const fecha = svKey ? new Date(`${svKey}T12:00:00`) : new Date();
       const diaIdx = isNaN(fecha.getDay()) ? 0 : fecha.getDay();
       const monto = Number(p.total) || 0;
       const metodo = (p.metodo_pago || 'Contra entrega').trim();
-      const prodNombre = (p.catalogo_sku || p.sku || 'Producto General').trim();
+      const resolvedSku = resolveCatalogSku(
+        p.sku,
+        p.codigo_anuncio,
+        p.catalogo_sku,
+        catalogIndex?.masterSkus || [],
+        { items: p.items, index: catalogIndex }
+      );
+      const prodNombre =
+        (resolvedSku && catalogIndex?.masterNameBySku[resolvedSku]) ||
+        stripQtyAndVariantParens(p.sku) ||
+        p.catalogo_sku ||
+        p.sku ||
+        'Producto General';
+      const unidades = extractOrderUnits({ items: p.items, sku: p.sku });
 
       conteoDias[diaIdx] += 1;
       ventasDias[diaIdx] += monto;
@@ -40,12 +62,12 @@ export function AnaliticaHorariaProductos({ pedidosData }: Props) {
       mStat.cantidad += 1;
       mStat.monto += monto;
 
-      // Productos
+      // Productos consolidados por producto maestro y unidades reales
       if (!prodMap.has(prodNombre)) {
         prodMap.set(prodNombre, { cantidad: 0, monto: 0 });
       }
       const pStat = prodMap.get(prodNombre)!;
-      pStat.cantidad += 1;
+      pStat.cantidad += unidades;
       pStat.monto += monto;
     });
 
@@ -77,7 +99,7 @@ export function AnaliticaHorariaProductos({ pedidosData }: Props) {
       metodosPago: listaMetodos,
       topProductos: listaProductos
     };
-  }, [pedidosData]);
+  }, [pedidosData, catalogIndex]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

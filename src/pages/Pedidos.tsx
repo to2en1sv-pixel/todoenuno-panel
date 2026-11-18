@@ -74,7 +74,13 @@ import {
   getCachedDispatchSlaSettings,
   type DispatchSlaSettings,
 } from "@/lib/dispatchSla";
-import { addManualTransaction } from "@/lib/finance";
+import {
+  addManualTransaction,
+  getFinanceCutoffDate,
+  hydrateFinanceCutoffFromOsEvents,
+  isRecordBeforeFinanceCutoff,
+} from "@/lib/finance";
+import { toElSalvadorDateKey, hoyLocal } from "@/lib/rentabilidad";
 import { DirectorioListaNegra } from "@/components/analitica/DirectorioListaNegra";
 import { evaluateCustomerRisk, getBlacklistEntries } from "@/lib/blacklist";
 import {
@@ -250,6 +256,7 @@ export function PedidosPage() {
   const [error, setError] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState("");
   const [mostrarHistorial, setMostrarHistorial] = useState(false);
+  const [financeCutoff, setFinanceCutoff] = useState<string | null>(() => getFinanceCutoffDate());
 
   // Vistas y Filtros Pro
   const { activeNames: courierNames } = useCouriers();
@@ -335,15 +342,18 @@ export function PedidosPage() {
     else setCargando(true);
     setError(null);
 
-    const [ordersRes, stockRes, kardexMapRes] = await Promise.all([
+    const [ordersRes, stockRes, kardexMapRes, , finCutoff] = await Promise.all([
       supabase
         .from("whatsapp_orders")
         .select("*")
         .order("created_at", { ascending: false }),
       fetchStockItems(),
       fetchOrderKardexMap(),
-      hydrateCutoffsFromOsEvents(supabase)
+      hydrateCutoffsFromOsEvents(supabase),
+      hydrateFinanceCutoffFromOsEvents(supabase)
     ]);
+
+    setFinanceCutoff(finCutoff);
 
     if (ordersRes.error) {
       setError(ordersRes.error.message);
@@ -386,13 +396,13 @@ export function PedidosPage() {
     let ventasHoy = 0;
     let porDespachar = 0;
     let totalHistorico = 0;
+    let pedidosActivos = 0;
     let pendientesLiquidacion = 0;
     let totalEncargos = 0;
     let montoEncargos = 0;
     let encargosUrgentes = 0;
-    
-    const hoy = new Date();
-    const hoyStr = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
+
+    const hoyStr = hoyLocal();
 
     pedidos.forEach((p) => {
       const total = Number(p.total) || 0;
@@ -400,7 +410,8 @@ export function PedidosPage() {
 
       if (!esCancelado) {
         totalHistorico += total;
-        if (p.created_at && p.created_at.startsWith(hoyStr)) {
+        pedidosActivos++;
+        if (p.created_at && toElSalvadorDateKey(p.created_at) === hoyStr) {
           ventasHoy += total;
         }
       }
@@ -420,7 +431,11 @@ export function PedidosPage() {
         }
       }
 
-      if ((p.estado === "en_camino" || p.estado === "entregado") && !p.liquidado) {
+      if (
+        (p.estado === "en_camino" || p.estado === "entregado") &&
+        !p.liquidado &&
+        !isRecordBeforeFinanceCutoff(p.created_at, undefined, financeCutoff)
+      ) {
         pendientesLiquidacion += total;
       }
     });
@@ -428,13 +443,13 @@ export function PedidosPage() {
     return {
       ventasHoy,
       porDespachar,
-      ticketPromedio: pedidos.length > 0 ? totalHistorico / pedidos.length : 0,
+      ticketPromedio: pedidosActivos > 0 ? totalHistorico / pedidosActivos : 0,
       pendientesLiquidacion,
       totalEncargos,
       montoEncargos,
       encargosUrgentes
     };
-  }, [pedidos]);
+  }, [pedidos, financeCutoff]);
 
   /* --------------------------- Filtro y Agrupación --------------------------- */
   const pedidosFiltrados = useMemo(() => {

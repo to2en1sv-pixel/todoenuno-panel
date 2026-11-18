@@ -388,7 +388,7 @@ export function FinanzasPage() {
         hydrateFinanceCutoffFromOsEvents(supabase),
         fetchCashAccounts(),
         fetchBudgets(),
-        fetchMoneyTransactions(250),
+        fetchMoneyTransactions(1000),
         supabase
           .from('whatsapp_orders')
           .select('id, pedido_codigo, nombre_cliente, total, estado, liquidado, courier, metodo_pago, created_at')

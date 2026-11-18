@@ -13,6 +13,8 @@ export interface OrdenWhatsapp {
   total: number
   sku?: string | null
   catalogo_sku?: string | null
+  items?: any
+  estado?: string | null
   codigo_anuncio: string | null
   created_at: string
 }
@@ -63,6 +65,7 @@ export interface ProductoBovedaRoas {
   margenNetoPorcentaje: number | null;
   utilidadPorUnidad: number;
   pedidosTotales: number;
+  unidadesTotales?: number;
   roasHistorico: number | null;
   cpaHistorico: number | null;
   ticketPromedio: number;

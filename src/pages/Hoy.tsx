@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { usePostQueue } from '@/hooks/usePostQueue';
 import { useProductos, useVariantes } from '@/hooks/useCatalog';
-import { fetchStockItems } from '@/lib/inventory';
+import { fetchStockItems, fetchProductVariants, identifyDuplicateVariantStockRows } from '@/lib/inventory';
+import { toElSalvadorDateKey } from '@/lib/rentabilidad';
 import {
   fetchCashAccounts,
   getFinanceCutoffDate,
@@ -13,7 +14,7 @@ import {
 import PedidoModal from '@/components/PedidoModal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { fmtAgo } from '@/lib/format';
-import type { StockItem } from '@/types/inventory';
+import type { ProductVariant, StockItem } from '@/types/inventory';
 import type { CashAccount } from '@/types/finance';
 import {
   AlertTriangle,
@@ -86,8 +87,7 @@ type NotaRow = {
 const LOCAL_NOTES_KEY = 'todoenuno_hoy_notes_fallback_v1';
 
 function getTodayISO(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return toElSalvadorDateKey(new Date());
 }
 
 function getDiffDaysFromToday(dateStr?: string | null): number | null {
@@ -156,9 +156,12 @@ export function HoyPage() {
   const [refreshing, setRefreshing] = useState(false);
 
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [unliquidatedOrders, setUnliquidatedOrders] = useState<OrderRow[]>([]);
+  const [unliqLoaded, setUnliqLoaded] = useState(false);
   const [conversations, setConversations] = useState<ConversationRow[]>([]);
   const [lastMsgFromMeMap, setLastMsgFromMeMap] = useState<Record<string, boolean>>({});
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
+  const [variantsDb, setVariantsDb] = useState<ProductVariant[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [adSpendToday, setAdSpendToday] = useState(0);
   const [pagosProximos, setPagosProximos] = useState<PagoRow[]>([]);
@@ -186,9 +189,11 @@ export function HoyPage() {
     try {
       const [
         ordersRes,
+        unliqRes,
         convRes,
         msgsRes,
         stockRes,
+        variantsRes,
         accountsRes,
         adRes,
         pagosRes,
@@ -202,6 +207,12 @@ export function HoyPage() {
           .order('created_at', { ascending: false })
           .limit(250),
         supabase
+          .from('whatsapp_orders')
+          .select('id,total,estado,liquidado,created_at')
+          .in('estado', ['en_camino', 'entregado'])
+          .or('liquidado.is.null,liquidado.eq.false')
+          .limit(500),
+        supabase
           .from('bb_conversations')
           .select('id,instance_id,contact_name,contact_phone,last_message,updated_at,status')
           .order('updated_at', { ascending: false })
@@ -212,6 +223,7 @@ export function HoyPage() {
           .order('created_at', { ascending: false })
           .limit(300),
         fetchStockItems(),
+        fetchProductVariants(),
         fetchCashAccounts(),
         supabase
           .from('gastos_publicidad')
@@ -226,6 +238,13 @@ export function HoyPage() {
 
       if (!ordersRes.error && Array.isArray(ordersRes.data)) {
         setOrders(ordersRes.data as OrderRow[]);
+      }
+
+      if (!unliqRes.error && Array.isArray(unliqRes.data)) {
+        setUnliquidatedOrders(unliqRes.data as OrderRow[]);
+        setUnliqLoaded(true);
+      } else {
+        setUnliqLoaded(false);
       }
 
       if (!convRes.error && Array.isArray(convRes.data)) {
@@ -243,6 +262,7 @@ export function HoyPage() {
       }
 
       setStockItems(stockRes.items || []);
+      setVariantsDb(Array.isArray(variantsRes) ? variantsRes : []);
       setCashAccounts(accountsRes.accounts || []);
 
       if (!adRes.error && Array.isArray(adRes.data)) {
@@ -344,7 +364,7 @@ export function HoyPage() {
     for (const o of orders) {
       const total = Number(o.total) || 0;
       const isCancelled = o.estado === 'cancelado';
-      const createdToday = Boolean(o.created_at && o.created_at.startsWith(todayISO));
+      const createdToday = Boolean(o.created_at && toElSalvadorDateKey(o.created_at) === todayISO);
 
       if (createdToday && !isCancelled) {
         ventasHoy += total;
@@ -365,6 +385,7 @@ export function HoyPage() {
       }
 
       if (
+        !unliqLoaded &&
         (o.estado === 'en_camino' || o.estado === 'entregado') &&
         !o.liquidado &&
         !isRecordBeforeFinanceCutoff(o.created_at, undefined, financeCutoff)
@@ -384,6 +405,18 @@ export function HoyPage() {
       }
     }
 
+    if (unliqLoaded) {
+      for (const u of unliquidatedOrders) {
+        if (
+          (u.estado === 'en_camino' || u.estado === 'entregado') &&
+          !u.liquidado &&
+          !isRecordBeforeFinanceCutoff(u.created_at, undefined, financeCutoff)
+        ) {
+          cobrosEnCalle += Number(u.total) || 0;
+        }
+      }
+    }
+
     encargosUrgentes.sort((a, b) => (a.diffDays ?? 99) - (b.diffDays ?? 99));
 
     return {
@@ -396,7 +429,7 @@ export function HoyPage() {
       enRuta,
       recientesHoy,
     };
-  }, [orders, todayISO, financeCutoff]);
+  }, [orders, unliquidatedOrders, unliqLoaded, todayISO, financeCutoff]);
 
   const chatMetrics = useMemo(() => {
     const active = conversations.filter((c) => !isLegacyConversation(c));
@@ -422,9 +455,19 @@ export function HoyPage() {
   }, [conversations, lastMsgFromMeMap]);
 
   const inventoryMetrics = useMemo(() => {
+    const activeVariants = variantsDb.length > 0 ? variantsDb : ((variantes.data ?? []) as ProductVariant[]);
+    const { duplicateChildSkuSet } = identifyDuplicateVariantStockRows(stockItems, activeVariants);
+
     const valid = stockItems.filter((item) => {
-      const s = item.sku.toLowerCase();
-      return !s.includes('fee') && !s.includes('test') && !s.includes('descuento') && item.activo !== false;
+      const skuUpper = item.sku.trim().toUpperCase();
+      const s = skuUpper.toLowerCase();
+      return (
+        !s.includes('fee') &&
+        !s.includes('test') &&
+        !s.includes('descuento') &&
+        item.activo !== false &&
+        !duplicateChildSkuSet.has(skuUpper)
+      );
     });
 
     const lowStock = valid
@@ -441,7 +484,7 @@ export function HoyPage() {
       totalUnits,
       lowStock,
     };
-  }, [stockItems]);
+  }, [stockItems, variantsDb, variantes.data]);
 
   const totalCaja = useMemo(
     () => cashAccounts.filter((a) => a.activo !== false).reduce((acc, a) => acc + (Number(a.saldo_actual) || 0), 0),
@@ -460,9 +503,9 @@ export function HoyPage() {
   const todayPosts = useMemo(
     () =>
       (queue.data ?? []).filter(
-        (x) => x.status === 'posted' && x.posted_at && new Date(x.posted_at).toDateString() === now.toDateString()
+        (x) => x.status === 'posted' && x.posted_at && toElSalvadorDateKey(x.posted_at) === todayISO
       ),
-    [queue.data, now]
+    [queue.data, todayISO]
   );
   const queueErrors = useMemo(() => (queue.data ?? []).filter((x) => x.status === 'error'), [queue.data]);
 

@@ -97,13 +97,13 @@ export function AnaliticaLogisticaCod({ pedidosData }: Props) {
 
     const totalPedidos = pedidosData.length;
     const cerrados = entregados + cancelados;
-    const tasaEntregaGlobal = cerrados > 0 ? (entregados / cerrados) * 100 : 0;
+    const tasaEntregaGlobal: number | null = cerrados > 0 ? (entregados / cerrados) * 100 : null;
 
     const listaCouriers = Array.from(courierMap.values())
       .filter(c => c.pedidos > 0)
       .map(c => {
         const cerradosC = c.entregados + c.cancelados;
-        const efectividad = cerradosC > 0 ? (c.entregados / cerradosC) * 100 : 0;
+        const efectividad: number | null = cerradosC > 0 ? (c.entregados / cerradosC) * 100 : null;
         return {
           ...c,
           efectividad
@@ -155,7 +155,10 @@ export function AnaliticaLogisticaCod({ pedidosData }: Props) {
         {/* Badge Tasa de Entrega COD */}
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold font-mono tabular-nums text-xs">
           <CheckCircle2 size={14} />
-          <span>Efectividad Nacional COD: {tasaEntregaGlobal.toFixed(1)}%</span>
+          <span>
+            Efectividad Nacional COD:{' '}
+            {tasaEntregaGlobal !== null ? `${tasaEntregaGlobal.toFixed(1)}%` : '—'}
+          </span>
         </div>
       </div>
 
@@ -243,11 +246,12 @@ export function AnaliticaLogisticaCod({ pedidosData }: Props) {
                     </td>
                     <td className="p-3 text-right">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-mono tabular-nums font-semibold ${
+                        c.efectividad === null ? 'bg-sf tx-mu border border-[var(--bd)]' :
                         c.efectividad >= 80 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' :
                         c.efectividad >= 65 ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20' :
                         'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
                       }`}>
-                        {c.efectividad > 0 ? `${c.efectividad.toFixed(1)}%` : '—'}
+                        {c.efectividad !== null ? `${c.efectividad.toFixed(1)}%` : '—'}
                       </span>
                     </td>
                     <td className="p-3 text-right font-mono tabular-nums font-bold text-emerald-600 dark:text-emerald-400">

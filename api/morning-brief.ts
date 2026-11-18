@@ -298,6 +298,7 @@ export default async function handler(req: any, res: any) {
       msgsRes,
       stateRes,
       stockRes,
+      variantsRes,
       adRes,
       pagosRes,
       notasRes,
@@ -305,11 +306,12 @@ export default async function handler(req: any, res: any) {
       catDocRes,
       accountsRes,
       txTodayRes,
+      financeCutoffRes,
     ] = await Promise.all([
       supabase
         .from('whatsapp_orders')
         .select(
-          'id,pedido_codigo,nombre_cliente,sku,catalogo_sku,total,estado,liquidado,es_encargo,fecha_programada,codigo_anuncio,notas,created_at'
+          'id,pedido_codigo,nombre_cliente,sku,catalogo_sku,items,total,estado,liquidado,es_encargo,fecha_programada,codigo_anuncio,notas,created_at'
         )
         .order('created_at', { ascending: false })
         .limit(800),
@@ -330,8 +332,11 @@ export default async function handler(req: any, res: any) {
         .limit(150),
       supabase
         .from('inventory_stock')
-        .select('sku,nombre,costo_unitario,stock_disponible,stock_minimo_alerta,activo,activo_todd')
+        .select('sku,nombre,template_id,costo_unitario,stock_disponible,stock_minimo_alerta,activo,activo_todd')
         .order('stock_disponible', { ascending: true }),
+      supabase
+        .from('productos_variantes')
+        .select('variante_id,template_id,sku,nombre_completo,color'),
       supabase
         .from('gastos_publicidad')
         .select('monto,fecha,codigo_anuncio')
@@ -354,41 +359,137 @@ export default async function handler(req: any, res: any) {
         .from('finance_money_transactions')
         .select('tipo,categoria,monto,fecha')
         .eq('fecha', dateInfo.svTodayIso),
+      supabase
+        .from('os_events')
+        .select('type,payload,occurred_at')
+        .in('type', ['system.finance_reset', 'system.finance_cutoff_cleared'])
+        .order('occurred_at', { ascending: false })
+        .limit(1),
     ]);
 
-    /* 1. INVENTARIO & MAPA DE COSTOS (COGS) */
+    let financeCutoffMs: number | null = null;
+    if (!financeCutoffRes.error && Array.isArray(financeCutoffRes.data) && financeCutoffRes.data.length > 0) {
+      const latestCut = financeCutoffRes.data[0];
+      if (latestCut.type === 'system.finance_reset') {
+        const cutoffIso = latestCut.payload?.finance_cutoff || latestCut.occurred_at || null;
+        const parsedMs = cutoffIso ? new Date(cutoffIso).getTime() : NaN;
+        if (Number.isFinite(parsedMs)) financeCutoffMs = parsedMs;
+      }
+    }
+    const isBeforeFinanceCutoff = (createdAt?: string | null) => {
+      if (!financeCutoffMs || !createdAt) return false;
+      const ms = new Date(createdAt).getTime();
+      return Number.isFinite(ms) && ms <= financeCutoffMs;
+    };
+
+    /* 1. INVENTARIO & MAPA DE COSTOS (COGS) CON UNIFICACIÓN DE VARIANTES */
     const stockRows = Array.isArray(stockRes.data) ? stockRes.data : [];
+    const variantRows = Array.isArray(variantsRes.data) ? variantsRes.data : [];
+    const variantSkuSet = new Set(variantRows.map((v: any) => String(v.sku || '').trim().toUpperCase()).filter(Boolean));
+
+    const duplicateChildSkus = new Set<string>();
+    const rowsByTemplate = new Map<string, any[]>();
+    for (const item of stockRows) {
+      const tId = item.template_id !== undefined && item.template_id !== null ? String(item.template_id).trim() : '';
+      if (!tId) continue;
+      const arr = rowsByTemplate.get(tId) || [];
+      arr.push(item);
+      rowsByTemplate.set(tId, arr);
+    }
+    rowsByTemplate.forEach((rows) => {
+      if (rows.length <= 1) return;
+      const sorted = [...rows].sort((a, b) => {
+        const aIsVar = variantSkuSet.has(String(a.sku || '').trim().toUpperCase()) ? 1 : 0;
+        const bIsVar = variantSkuSet.has(String(b.sku || '').trim().toUpperCase()) ? 1 : 0;
+        if (aIsVar !== bIsVar) return aIsVar - bIsVar;
+        return String(a.sku || '').trim().length - String(b.sku || '').trim().length;
+      });
+      const parentSku = String(sorted[0]?.sku || '').trim().toUpperCase();
+      for (let i = 1; i < sorted.length; i++) {
+        const childSku = String(sorted[i]?.sku || '').trim().toUpperCase();
+        if (childSku && (variantSkuSet.has(childSku) || childSku.startsWith(`${parentSku}-`))) {
+          duplicateChildSkus.add(childSku);
+        }
+      }
+    });
+
     const costBySku = new Map<string, number>();
     const nameBySku = new Map<string, string>();
+    const templateToParentSku = new Map<string, string>();
+    const variantToParentSku = new Map<string, string>();
     const normalizedStockEntries: Array<{ key: string; sku: string; costo: number }> = [];
+
+    const stripOrderText = (raw?: string | null) =>
+      normalizeTextKey(
+        String(raw || '')
+          .replace(/^\s*\d+\s*[x×]\s*/i, '')
+          .replace(/\s*\([^)]*\)\s*/g, ' ')
+      );
 
     for (const item of stockRows) {
       const skuUpper = String(item.sku || '').trim().toUpperCase();
+      if (!skuUpper || duplicateChildSkus.has(skuUpper) || skuUpper.toLowerCase().includes('fee')) continue;
       const costo = Number(item.costo_unitario) || 0;
       const itemName = String(item.nombre || item.sku || '').trim();
-      if (skuUpper) {
-        costBySku.set(skuUpper, costo);
-        nameBySku.set(skuUpper, itemName);
-        normalizedStockEntries.push({
-          key: normalizeTextKey(itemName),
-          sku: skuUpper,
-          costo,
-        });
+      costBySku.set(skuUpper, costo);
+      nameBySku.set(skuUpper, itemName);
+      const tId = item.template_id !== undefined && item.template_id !== null ? String(item.template_id).trim() : '';
+      if (tId && !templateToParentSku.has(tId)) templateToParentSku.set(tId, skuUpper);
+      normalizedStockEntries.push({
+        key: stripOrderText(itemName),
+        sku: skuUpper,
+        costo,
+      });
+    }
+
+    const masterSkusList = Array.from(costBySku.keys());
+    for (const v of variantRows) {
+      const vSku = String(v.sku || '').trim().toUpperCase();
+      const tId = v.template_id !== undefined && v.template_id !== null ? String(v.template_id).trim() : '';
+      let parentSku = tId ? templateToParentSku.get(tId) : undefined;
+      if (!parentSku && vSku) {
+        parentSku = masterSkusList
+          .filter((m) => vSku === m || vSku.startsWith(`${m}-`))
+          .sort((a, b) => b.length - a.length)[0];
+      }
+      if (parentSku && vSku) {
+        variantToParentSku.set(vSku, parentSku);
       }
     }
 
+    const canonicalizeCandidateSku = (rawCandidate?: string | null): string | null => {
+      const c = String(rawCandidate || '').trim().toUpperCase();
+      if (!c) return null;
+      if (costBySku.has(c)) return c;
+      if (variantToParentSku.has(c)) return variantToParentSku.get(c)!;
+      if (templateToParentSku.has(c)) return templateToParentSku.get(c)!;
+      const prefix = masterSkusList
+        .filter((m) => c.startsWith(`${m}-`))
+        .sort((a, b) => b.length - a.length)[0];
+      return prefix || null;
+    };
+
     const resolveOrderUnitCost = (o: any): { found: boolean; cost: number; label: string } => {
-      const catSku = String(o.catalogo_sku || '').trim().toUpperCase();
-      if (catSku && costBySku.has(catSku)) {
-        const c = costBySku.get(catSku) || 0;
-        return { found: c > 0, cost: c, label: nameBySku.get(catSku) || catSku };
+      const candidates: string[] = [];
+      if (o.catalogo_sku) candidates.push(String(o.catalogo_sku));
+      if (Array.isArray(o.items)) {
+        for (const it of o.items) {
+          if (it?.catalogo_sku) candidates.push(String(it.catalogo_sku));
+          if (it?.variante_sku) candidates.push(String(it.variante_sku));
+          if (it?.sku) candidates.push(String(it.sku));
+        }
       }
-      const rawSkuUpper = String(o.sku || '').trim().toUpperCase();
-      if (rawSkuUpper && costBySku.has(rawSkuUpper)) {
-        const c = costBySku.get(rawSkuUpper) || 0;
-        return { found: c > 0, cost: c, label: nameBySku.get(rawSkuUpper) || rawSkuUpper };
+      if (o.sku) candidates.push(String(o.sku));
+
+      for (const cand of candidates) {
+        const master = canonicalizeCandidateSku(cand);
+        if (master && costBySku.has(master)) {
+          const c = costBySku.get(master) || 0;
+          return { found: c > 0, cost: c, label: nameBySku.get(master) || master };
+        }
       }
-      const normRaw = normalizeTextKey(o.sku);
+
+      const normRaw = stripOrderText(o.sku);
       if (normRaw) {
         for (const entry of normalizedStockEntries) {
           if (entry.key && (normRaw.includes(entry.key) || entry.key.includes(normRaw))) {
@@ -408,8 +509,15 @@ export default async function handler(req: any, res: any) {
     };
 
     const validStock = stockRows.filter((item: any) => {
-      const s = String(item.sku || '').toLowerCase();
-      return !s.includes('fee') && !s.includes('test') && !s.includes('descuento') && item.activo !== false;
+      const skuUpper = String(item.sku || '').trim().toUpperCase();
+      const s = skuUpper.toLowerCase();
+      return (
+        !s.includes('fee') &&
+        !s.includes('test') &&
+        !s.includes('descuento') &&
+        item.activo !== false &&
+        !duplicateChildSkus.has(skuUpper)
+      );
     });
     const outOfStock = validStock.filter((i: any) => Number(i.stock_disponible || 0) <= 0);
     const lowStock = validStock.filter((i: any) => {
@@ -451,7 +559,7 @@ export default async function handler(req: any, res: any) {
         }
       }
 
-      if (estado === 'entregado' && !o.liquidado) {
+      if (estado === 'entregado' && !o.liquidado && !isBeforeFinanceCutoff(createdAt)) {
         porLiquidar.push(o);
       }
 
@@ -495,7 +603,9 @@ export default async function handler(req: any, res: any) {
     const adSalesToday = new Map<string, { chats: number; orders: number; revenue: number }>();
 
     for (const o of ventasHoyOrders) {
-      const qty = inferOrderQty(o.sku);
+      const qty = Array.isArray(o.items) && o.items.length > 0
+        ? o.items.reduce((acc: number, it: any) => acc + Math.max(1, Number(it?.cantidad ?? it?.qty ?? 1) || 1), 0)
+        : inferOrderQty(o.sku);
       const resolved = resolveOrderUnitCost(o);
       if (resolved.found) {
         cogsHoyTotal += resolved.cost * qty;
@@ -2729,16 +2839,34 @@ async function handleOrderSearchQuery(supabase: any, chatId: string | number, qu
 
 async function handlePendingOrdersQuery(supabase: any, chatId: string | number) {
   const todayIso = getElSalvadorDate();
-  const { data: orders, error } = await supabase
-    .from('whatsapp_orders')
-    .select(
-      'id,pedido_codigo,nombre_cliente,telefono,departamento,courier,sku,total,estado,liquidado,es_encargo,fecha_programada,created_at'
-    )
-    .order('created_at', { ascending: false })
-    .limit(500);
+  const [{ data: orders, error }, cutoffRes] = await Promise.all([
+    supabase
+      .from('whatsapp_orders')
+      .select(
+        'id,pedido_codigo,nombre_cliente,telefono,departamento,courier,sku,total,estado,liquidado,es_encargo,fecha_programada,created_at'
+      )
+      .order('created_at', { ascending: false })
+      .limit(500),
+    supabase
+      .from('os_events')
+      .select('type,payload,occurred_at')
+      .in('type', ['system.finance_reset', 'system.finance_cutoff_cleared'])
+      .order('occurred_at', { ascending: false })
+      .limit(1),
+  ]);
 
   if (error) {
     throw new Error(`Error consultando pendientes: ${error.message}`);
+  }
+
+  let financeCutoffMs: number | null = null;
+  if (!cutoffRes.error && Array.isArray(cutoffRes.data) && cutoffRes.data.length > 0) {
+    const latest = cutoffRes.data[0];
+    if (latest.type === 'system.finance_reset') {
+      const cutoffIso = latest.payload?.finance_cutoff || latest.occurred_at || null;
+      const ms = cutoffIso ? new Date(cutoffIso).getTime() : NaN;
+      if (Number.isFinite(ms)) financeCutoffMs = ms;
+    }
   }
 
   const all = Array.isArray(orders) ? orders : [];
@@ -2751,9 +2879,14 @@ async function handlePendingOrdersQuery(supabase: any, chatId: string | number) 
     if (!o.fecha_programada) return true;
     return String(o.fecha_programada).slice(0, 10) <= todayIso;
   });
-  const porLiquidar = all.filter(
-    (o: any) => String(o.estado || '').toLowerCase() === 'entregado' && o.liquidado !== true
-  );
+  const porLiquidar = all.filter((o: any) => {
+    if (String(o.estado || '').toLowerCase() !== 'entregado' || o.liquidado === true) return false;
+    if (financeCutoffMs && o.created_at) {
+      const ms = new Date(o.created_at).getTime();
+      if (Number.isFinite(ms) && ms <= financeCutoffMs) return false;
+    }
+    return true;
+  });
 
   const sumTotal = (arr: any[]) => arr.reduce((s, o) => s + (Number(o.total) || 0), 0);
 

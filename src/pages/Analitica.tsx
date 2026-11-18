@@ -21,6 +21,8 @@ import { VentasLineChart } from '@/components/charts/VentasLineChart';
 import { MapaElSalvadorCalor } from '@/components/analitica/MapaElSalvadorCalor';
 import { AnaliticaLogisticaCod } from '@/components/analitica/AnaliticaLogisticaCod';
 import { AnaliticaHorariaProductos } from '@/components/analitica/AnaliticaHorariaProductos';
+import { fetchStockItems, fetchProductVariants, identifyDuplicateVariantStockRows } from '@/lib/inventory';
+import { buildCatalogResolutionIndex } from '@/lib/catalogAliases';
 import {
   etiquetaMes,
   formatCurrency,
@@ -32,9 +34,11 @@ import {
   rangoMes,
   roasColorClass,
   serieDiaria,
+  toElSalvadorDateKey,
 } from '@/lib/rentabilidad';
 import { normalizarDepartamento } from '@/data/elSalvadorDeptos';
 import type { GastoPublicidad } from '@/types/rentabilidad';
+import type { StockItem, ProductVariant } from '@/types/inventory';
 
 type RangoTiempo = 'este_mes' | 'mes_anterior' | 'ultimos_7_dias' | 'historico';
 type TabAnalitica = 'mapa' | 'logistica' | 'ventas';
@@ -49,6 +53,9 @@ export function AnaliticaPage() {
 
   const [ordenes, setOrdenes] = useState<any[]>([]);
   const [gastos, setGastos] = useState<GastoPublicidad[]>([]);
+  const [stockItems, setStockItems] = useState<StockItem[]>([]);
+  const [variantsDb, setVariantsDb] = useState<ProductVariant[]>([]);
+  const [productosDb, setProductosDb] = useState<any[]>([]);
   const [ventasMesAnterior, setVentasMesAnterior] = useState<number>(0);
   const [cargando, setCargando] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +70,7 @@ export function AnaliticaPage() {
 
       let queryOrdenes = supabase
         .from('whatsapp_orders')
-        .select('id,total,sku,catalogo_sku,codigo_anuncio,created_at,estado,departamento,courier,metodo_pago')
+        .select('id,total,sku,catalogo_sku,items,codigo_anuncio,created_at,estado,departamento,courier,metodo_pago')
         .order('created_at', { ascending: false });
 
       let queryGastos = supabase
@@ -90,20 +97,24 @@ export function AnaliticaPage() {
         const hace7Dias = new Date();
         hace7Dias.setDate(hace7Dias.getDate() - 7);
         const iso7 = hace7Dias.toISOString();
-        const ymd7 = hace7Dias.toISOString().slice(0, 10);
+        const ymd7 = toElSalvadorDateKey(hace7Dias);
         queryOrdenes = queryOrdenes.gte('created_at', iso7);
         queryGastos = queryGastos.gte('fecha', ymd7);
       }
       // 'historico' no aplica filtro de fecha
 
-      const [resOrdenes, resGastos, resOrdenesAnterior] = await Promise.all([
+      const [resOrdenes, resGastos, resOrdenesAnterior, stockRes, variantsRes, prodRes] = await Promise.all([
         queryOrdenes,
         queryGastos,
         supabase
           .from('whatsapp_orders')
-          .select('total')
+          .select('total,estado')
+          .neq('estado', 'cancelado')
           .gte('created_at', anterior.isoInicio)
           .lt('created_at', anterior.isoFinExclusivo),
+        fetchStockItems(),
+        fetchProductVariants(),
+        supabase.from('productos').select('*'),
       ]);
 
       if (resOrdenes.error || resGastos.error || resOrdenesAnterior.error) {
@@ -117,11 +128,13 @@ export function AnaliticaPage() {
 
       setOrdenes(resOrdenes.data || []);
       setGastos(resGastos.data || []);
+      setStockItems(stockRes.items || []);
+      setVariantsDb(variantsRes || []);
+      setProductosDb(prodRes.data || []);
       setVentasMesAnterior(
-        (resOrdenesAnterior.data || []).reduce(
-          (acc, orden) => acc + (Number(orden.total) || 0),
-          0
-        )
+        (resOrdenesAnterior.data || [])
+          .filter((orden: any) => String(orden.estado || '').toLowerCase() !== 'cancelado')
+          .reduce((acc, orden: any) => acc + (Number(orden.total) || 0), 0)
       );
     } catch (err: any) {
       console.error('Error cargando analítica:', err);
@@ -135,37 +148,53 @@ export function AnaliticaPage() {
     void cargarDatos();
   }, [cargarDatos]);
 
+  const catalogIndex = useMemo(() => {
+    const { duplicateChildSkuSet } = identifyDuplicateVariantStockRows(stockItems, variantsDb);
+    return buildCatalogResolutionIndex({
+      stockItems,
+      variants: variantsDb,
+      productosDb,
+      duplicateChildSkuSet,
+    });
+  }, [stockItems, variantsDb, productosDb]);
+
   // Órdenes filtradas por departamento si el usuario seleccionó uno en el mapa
   const ordenesFiltradas = useMemo(() => {
     if (!deptoSeleccionado) return ordenes;
     return ordenes.filter(o => normalizarDepartamento(o.departamento) === deptoSeleccionado);
   }, [ordenes, deptoSeleccionado]);
 
-  // Serie diaria para el gráfico de ingresos
+  // Serie diaria para el gráfico de ingresos (ya excluye cancelados internamente)
   const serie = useMemo(() => {
     return serieDiaria(ordenesFiltradas, mes);
   }, [ordenesFiltradas, mes]);
 
-  // KPIs Generales del período
+  // KPIs Generales del período (ventas, ticket y ROAS excluyen pedidos cancelados; efectividad COD usa solo cerrados reales)
   const kpis = useMemo(() => {
     const totalPedidos = ordenesFiltradas.length;
-    const ventas = ordenesFiltradas.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
     const gasto = deptoSeleccionado ? 0 : gastos.reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
 
+    let ventas = 0;
+    let pedidosActivos = 0;
     let entregados = 0;
     let cancelados = 0;
     let enRuta = 0;
 
     ordenesFiltradas.forEach(o => {
       const est = String(o.estado || '').toLowerCase();
-      if (est === 'entregado') entregados++;
-      else if (est === 'cancelado') cancelados++;
-      else if (est === 'en_camino' || est === 'por_empacar' || est === 'nuevo') enRuta++;
+      if (est === 'cancelado') {
+        cancelados++;
+      } else {
+        ventas += Number(o.total) || 0;
+        pedidosActivos++;
+        if (est === 'entregado') entregados++;
+        else if (est === 'en_camino' || est === 'por_empacar' || est === 'nuevo' || est === 'programado') enRuta++;
+      }
     });
 
     const cerrados = entregados + cancelados;
-    const tasaEntrega = cerrados > 0 ? (entregados / cerrados) * 100 : (totalPedidos > 0 ? 80 : 0);
-    const ticketPromedio = totalPedidos > 0 ? ventas / totalPedidos : 0;
+    const tasaEntrega: number | null = cerrados > 0 ? (entregados / cerrados) * 100 : null;
+    const ticketPromedio = pedidosActivos > 0 ? ventas / pedidosActivos : 0;
 
     const variacion =
       ventasMesAnterior > 0 && !deptoSeleccionado
@@ -175,6 +204,7 @@ export function AnaliticaPage() {
     return {
       ventas,
       pedidos: totalPedidos,
+      pedidosActivos,
       entregados,
       cancelados,
       enRuta,
@@ -283,7 +313,7 @@ export function AnaliticaPage() {
             {formatCurrency(kpis.ventas)}
           </div>
           <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
-            {kpis.variacion !== null ? `vs mes ant.: ${formatPorcentaje(kpis.variacion)}` : `${kpis.pedidos} pedidos`}
+            {kpis.variacion !== null ? `vs mes ant.: ${formatPorcentaje(kpis.variacion)}` : `${kpis.pedidosActivos} órdenes activas`}
           </div>
         </div>
 
@@ -301,17 +331,21 @@ export function AnaliticaPage() {
           <div className="text-xs font-medium text-[var(--mu)]">Efectividad COD</div>
           <div
             className={`text-2xl font-bold font-mono tabular-nums mt-1.5 ${
-              kpis.tasaEntrega >= 80
-                ? 'text-emerald-600 dark:text-emerald-400'
-                : kpis.tasaEntrega >= 65
-                  ? 'text-amber-600 dark:text-amber-400'
-                  : 'text-rose-600 dark:text-rose-400'
+              kpis.tasaEntrega === null
+                ? 'text-[var(--mu)]'
+                : kpis.tasaEntrega >= 80
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : kpis.tasaEntrega >= 65
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-rose-600 dark:text-rose-400'
             }`}
           >
-            {kpis.tasaEntrega.toFixed(1)}%
+            {kpis.tasaEntrega !== null ? `${kpis.tasaEntrega.toFixed(1)}%` : '—'}
           </div>
           <div className="text-xs text-[var(--mu)] mt-1 tabular-nums">
-            {kpis.cancelados} cancelados / dev.
+            {kpis.entregados + kpis.cancelados > 0
+              ? `${kpis.cancelados} cancelados / dev.`
+              : 'Sin pedidos cerrados aún'}
           </div>
         </div>
 
@@ -320,7 +354,7 @@ export function AnaliticaPage() {
           <div className="text-2xl font-bold font-mono tabular-nums text-[var(--tx)] mt-1.5">
             {formatCurrency(kpis.ticketPromedio)}
           </div>
-          <div className="text-xs text-[var(--mu)] mt-1">Promedio por orden</div>
+          <div className="text-xs text-[var(--mu)] mt-1">Sobre pedidos no cancelados</div>
         </div>
 
         <div className="p-5 col-span-2 md:col-span-1">
@@ -379,6 +413,7 @@ export function AnaliticaPage() {
               pedidosData={ordenes}
               deptoSeleccionado={deptoSeleccionado}
               onSeleccionarDepto={setDeptoSeleccionado}
+              catalogIndex={catalogIndex}
             />
           )}
 
@@ -395,7 +430,7 @@ export function AnaliticaPage() {
                       Facturación diaria en el período
                     </h3>
                     <p className="text-xs text-[var(--mu)] mt-0.5">
-                      Evolución diaria de ventas en USD
+                      Evolución diaria de ventas en USD (excluye cancelados)
                     </p>
                   </div>
                   <span className="text-xs font-medium text-[var(--mu)] tabular-nums">
@@ -408,7 +443,7 @@ export function AnaliticaPage() {
                 </div>
               </section>
 
-              <AnaliticaHorariaProductos pedidosData={ordenesFiltradas} />
+              <AnaliticaHorariaProductos pedidosData={ordenesFiltradas} catalogIndex={catalogIndex} />
             </div>
           )}
         </div>

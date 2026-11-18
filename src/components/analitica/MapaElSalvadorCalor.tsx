@@ -24,6 +24,12 @@ import {
   MUNICIPIOS_POR_DEPTO
 } from '@/data/elSalvadorDeptos';
 import { formatCurrency } from '@/lib/rentabilidad';
+import {
+  extractOrderUnits,
+  resolveCatalogSku,
+  stripQtyAndVariantParens,
+  type CatalogResolutionIndex,
+} from '@/lib/catalogAliases';
 
 export type MetricaCalor = 'pedidos' | 'ventas' | 'tasaEntrega' | 'ticketPromedio';
 
@@ -33,11 +39,12 @@ export interface EstadisticasDepto {
   region: RegionElSalvador;
   cabecera: string;
   pedidos: number;
+  pedidosActivos: number;
   ventas: number;
   entregados: number;
   cancelados: number;
   enCamino: number;
-  tasaEntrega: number; // 0 - 100%
+  tasaEntrega: number | null; // 0 - 100%, null si aún no hay pedidos cerrados
   ticketPromedio: number;
   topProductos: { nombre: string; cantidad: number }[];
 }
@@ -49,19 +56,21 @@ export interface MunicipioStat {
   ventas: number;
   entregados: number;
   cancelados: number;
-  tasaEntrega: number;
+  tasaEntrega: number | null;
 }
 
 interface Props {
   pedidosData: any[];
   deptoSeleccionado: string | null;
   onSeleccionarDepto: (deptoNombre: string | null) => void;
+  catalogIndex?: CatalogResolutionIndex;
 }
 
 export function MapaElSalvadorCalor({ 
   pedidosData, 
   deptoSeleccionado, 
-  onSeleccionarDepto 
+  onSeleccionarDepto,
+  catalogIndex,
 }: Props) {
   const [metrica, setMetrica] = useState<MetricaCalor>('pedidos');
   const [hoveredDepto, setHoveredDepto] = useState<string | null>(null);
@@ -80,11 +89,12 @@ export function MapaElSalvadorCalor({
         region: d.region,
         cabecera: d.cabecera,
         pedidos: 0,
+        pedidosActivos: 0,
         ventas: 0,
         entregados: 0,
         cancelados: 0,
         enCamino: 0,
-        tasaEntrega: 0,
+        tasaEntrega: null,
         ticketPromedio: 0,
         topProductos: []
       });
@@ -93,6 +103,7 @@ export function MapaElSalvadorCalor({
     const productosPorDepto = new Map<string, Map<string, number>>();
 
     let totalPedidos = 0;
+    let totalPedidosActivos = 0;
     let totalVentas = 0;
     let totalEntregados = 0;
     let totalCancelados = 0;
@@ -105,13 +116,31 @@ export function MapaElSalvadorCalor({
 
       const monto = Number(p.total) || 0;
       const estado = String(p.estado || '').toLowerCase();
-      const prodNombre = (p.catalogo_sku || p.sku || 'Producto General').trim();
+      const isCancelled = estado === 'cancelado';
+      const resolvedSku = resolveCatalogSku(
+        p.sku,
+        p.codigo_anuncio,
+        p.catalogo_sku,
+        catalogIndex?.masterSkus || [],
+        { items: p.items, index: catalogIndex }
+      );
+      const prodNombre =
+        (resolvedSku && catalogIndex?.masterNameBySku[resolvedSku]) ||
+        stripQtyAndVariantParens(p.sku) ||
+        p.catalogo_sku ||
+        p.sku ||
+        'Producto General';
+      const unidades = extractOrderUnits({ items: p.items, sku: p.sku });
       const muniNombre = extraerMunicipio(p.direccion, deptoNormalizado);
 
       stats.pedidos += 1;
-      stats.ventas += monto;
       totalPedidos += 1;
-      totalVentas += monto;
+      if (!isCancelled) {
+        stats.pedidosActivos += 1;
+        stats.ventas += monto;
+        totalPedidosActivos += 1;
+        totalVentas += monto;
+      }
 
       // Desglose de municipios
       const muniKey = `${deptoNormalizado}__${muniNombre}`;
@@ -123,18 +152,20 @@ export function MapaElSalvadorCalor({
           ventas: 0,
           entregados: 0,
           cancelados: 0,
-          tasaEntrega: 0
+          tasaEntrega: null
         });
       }
       const mStat = muniMap.get(muniKey)!;
       mStat.pedidos += 1;
-      mStat.ventas += monto;
+      if (!isCancelled) {
+        mStat.ventas += monto;
+      }
 
       if (estado === 'entregado') {
         stats.entregados += 1;
         totalEntregados += 1;
         mStat.entregados += 1;
-      } else if (estado === 'cancelado') {
+      } else if (isCancelled) {
         stats.cancelados += 1;
         totalCancelados += 1;
         mStat.cancelados += 1;
@@ -142,15 +173,17 @@ export function MapaElSalvadorCalor({
         stats.enCamino += 1;
       }
 
-      // Conteo de productos más vendidos en el departamento
-      if (!productosPorDepto.has(deptoNormalizado)) {
-        productosPorDepto.set(deptoNormalizado, new Map());
+      // Conteo de productos más vendidos en el departamento (excluyendo cancelados y unificando variantes)
+      if (!isCancelled) {
+        if (!productosPorDepto.has(deptoNormalizado)) {
+          productosPorDepto.set(deptoNormalizado, new Map());
+        }
+        const prodMap = productosPorDepto.get(deptoNormalizado)!;
+        prodMap.set(prodNombre, (prodMap.get(prodNombre) || 0) + unidades);
       }
-      const prodMap = productosPorDepto.get(deptoNormalizado)!;
-      prodMap.set(prodNombre, (prodMap.get(prodNombre) || 0) + 1);
     });
 
-    // Calcular tasas y top productos
+    // Calcular tasas reales (sin porcentajes inventados) y top productos
     let maxPedidos = 0;
     let maxVentas = 0;
     let maxTicket = 0;
@@ -164,8 +197,8 @@ export function MapaElSalvadorCalor({
 
     map.forEach(stats => {
       const cerrados = stats.entregados + stats.cancelados;
-      stats.tasaEntrega = cerrados > 0 ? (stats.entregados / cerrados) * 100 : (stats.pedidos > 0 ? 85 : 0);
-      stats.ticketPromedio = stats.pedidos > 0 ? stats.ventas / stats.pedidos : 0;
+      stats.tasaEntrega = cerrados > 0 ? (stats.entregados / cerrados) * 100 : null;
+      stats.ticketPromedio = stats.pedidosActivos > 0 ? stats.ventas / stats.pedidosActivos : 0;
 
       if (stats.pedidos > maxPedidos) maxPedidos = stats.pedidos;
       if (stats.ventas > maxVentas) maxVentas = stats.ventas;
@@ -186,15 +219,15 @@ export function MapaElSalvadorCalor({
       statsRegion[stats.region].entregados += stats.entregados;
     });
 
-    // Calcular tasas en municipios
+    // Calcular tasas reales en municipios
     muniMap.forEach(m => {
       const totCerrados = m.entregados + m.cancelados;
-      m.tasaEntrega = totCerrados > 0 ? (m.entregados / totCerrados) * 100 : 85;
+      m.tasaEntrega = totCerrados > 0 ? (m.entregados / totCerrados) * 100 : null;
     });
 
     const tasaEntregaNacional = (totalEntregados + totalCancelados) > 0 
       ? (totalEntregados / (totalEntregados + totalCancelados)) * 100 
-      : 0;
+      : null;
 
     return {
       statsPorDepto: map,
@@ -209,18 +242,27 @@ export function MapaElSalvadorCalor({
         pedidos: totalPedidos,
         ventas: totalVentas,
         tasaEntrega: tasaEntregaNacional,
-        ticketPromedio: totalPedidos > 0 ? totalVentas / totalPedidos : 0
+        ticketPromedio: totalPedidosActivos > 0 ? totalVentas / totalPedidosActivos : 0
       },
       statsPorRegion: statsRegion
     };
-  }, [pedidosData]);
+  }, [pedidosData, catalogIndex]);
 
   // Color de calor seguro para SVG (nunca devuelve clases Tailwind como string de color)
   const getDeptoFillColor = (deptoNombre: string) => {
     const stats = statsPorDepto.get(deptoNombre);
     if (!stats || stats.pedidos === 0) {
-      // Color neutral sutil y elegante para departamentos sin actividad (evita la pantalla negra)
       return 'rgba(148, 163, 184, 0.22)';
+    }
+
+    if (metrica === 'tasaEntrega') {
+      if (stats.tasaEntrega === null) {
+        return 'rgba(148, 163, 184, 0.28)';
+      }
+      const clampedTasa = Math.min(Math.max(stats.tasaEntrega / 100, 0.15), 1);
+      if (stats.tasaEntrega >= 80) return `rgba(16, 185, 129, ${0.45 + clampedTasa * 0.55})`;
+      if (stats.tasaEntrega >= 60) return `rgba(245, 158, 11, ${0.45 + clampedTasa * 0.55})`;
+      return `rgba(244, 63, 94, ${0.45 + clampedTasa * 0.55})`;
     }
 
     let ratio = 0;
@@ -228,22 +270,11 @@ export function MapaElSalvadorCalor({
       ratio = stats.pedidos / maximos.pedidos;
     } else if (metrica === 'ventas') {
       ratio = stats.ventas / maximos.ventas;
-    } else if (metrica === 'tasaEntrega') {
-      ratio = stats.tasaEntrega / 100;
     } else if (metrica === 'ticketPromedio') {
       ratio = stats.ticketPromedio / maximos.ticketPromedio;
     }
 
-    // Clamp ratio 0.15 - 1
     const clamped = Math.min(Math.max(ratio, 0.15), 1);
-
-    if (metrica === 'tasaEntrega') {
-      if (stats.tasaEntrega >= 80) return `rgba(16, 185, 129, ${0.45 + clamped * 0.55})`;
-      if (stats.tasaEntrega >= 60) return `rgba(245, 158, 11, ${0.45 + clamped * 0.55})`;
-      return `rgba(244, 63, 94, ${0.45 + clamped * 0.55})`;
-    }
-
-    // Escala Violeta / Índigo corporativo (alta visibilidad tanto en tema claro como oscuro)
     return `rgba(99, 102, 241, ${0.30 + clamped * 0.70})`;
   };
 
@@ -252,7 +283,7 @@ export function MapaElSalvadorCalor({
     const arr = Array.from(statsPorDepto.values());
     if (metrica === 'pedidos') return arr.sort((a, b) => b.pedidos - a.pedidos);
     if (metrica === 'ventas') return arr.sort((a, b) => b.ventas - a.ventas);
-    if (metrica === 'tasaEntrega') return arr.sort((a, b) => b.tasaEntrega - a.tasaEntrega);
+    if (metrica === 'tasaEntrega') return arr.sort((a, b) => (b.tasaEntrega ?? -1) - (a.tasaEntrega ?? -1));
     return arr.sort((a, b) => b.ticketPromedio - a.ticketPromedio);
   }, [statsPorDepto, metrica]);
 
@@ -484,7 +515,7 @@ export function MapaElSalvadorCalor({
                         {hasOrders && stats ? (
                           metrica === 'pedidos' ? `${stats.pedidos} ord` :
                           metrica === 'ventas' ? formatCurrency(stats.ventas) :
-                          metrica === 'tasaEntrega' ? `${stats.tasaEntrega.toFixed(0)}%` :
+                          metrica === 'tasaEntrega' ? (stats.tasaEntrega !== null ? `${stats.tasaEntrega.toFixed(0)}%` : '—') :
                           formatCurrency(stats.ticketPromedio)
                         ) : (
                           '0 ord'
@@ -564,11 +595,12 @@ export function MapaElSalvadorCalor({
                 <div className="p-2 rounded-lg bg-cd border border-[var(--bd)]">
                   <span className="text-[9px] uppercase font-semibold tx-mu block">Efectividad COD</span>
                   <span className={`text-sm font-bold font-mono tabular-nums block mt-0.5 ${
+                    deptoActivoInfo.tasaEntrega === null ? 'tx-mu' :
                     deptoActivoInfo.tasaEntrega >= 80 ? 'text-emerald-600 dark:text-emerald-400' :
                     deptoActivoInfo.tasaEntrega >= 60 ? 'text-amber-600 dark:text-amber-400' :
                     'text-rose-600 dark:text-rose-400'
                   }`}>
-                    {deptoActivoInfo.tasaEntrega.toFixed(1)}%
+                    {deptoActivoInfo.tasaEntrega !== null ? `${deptoActivoInfo.tasaEntrega.toFixed(1)}%` : '—'}
                   </span>
                   <span className="text-[9px] tx-mu font-mono block">
                     {deptoActivoInfo.entregados} entregados
@@ -612,7 +644,7 @@ export function MapaElSalvadorCalor({
                               {m.municipio}
                             </span>
                             <span className="text-[10px] tx-mu font-mono tabular-nums block">
-                              Efectividad: {m.tasaEntrega.toFixed(0)}% · {formatCurrency(m.ventas)}
+                              Efectividad: {m.tasaEntrega !== null ? `${m.tasaEntrega.toFixed(0)}%` : '—'} · {formatCurrency(m.ventas)}
                             </span>
                           </div>
                           <div className="text-right shrink-0 font-mono tabular-nums">
@@ -696,7 +728,7 @@ export function MapaElSalvadorCalor({
                 {rankingDeptos.slice(0, 5).map((d, index) => {
                   const valorActual = metrica === 'pedidos' ? d.pedidos :
                     metrica === 'ventas' ? d.ventas :
-                    metrica === 'tasaEntrega' ? d.tasaEntrega : d.ticketPromedio;
+                    metrica === 'tasaEntrega' ? (d.tasaEntrega ?? 0) : d.ticketPromedio;
 
                   const maxVal = metrica === 'pedidos' ? maximos.pedidos :
                     metrica === 'ventas' ? maximos.ventas :
@@ -729,7 +761,7 @@ export function MapaElSalvadorCalor({
                         <span className="font-mono font-bold text-xs text-indigo-600">
                           {metrica === 'pedidos' && `${d.pedidos} ord`}
                           {metrica === 'ventas' && formatCurrency(d.ventas)}
-                          {metrica === 'tasaEntrega' && `${d.tasaEntrega.toFixed(1)}%`}
+                          {metrica === 'tasaEntrega' && (d.tasaEntrega !== null ? `${d.tasaEntrega.toFixed(1)}%` : '—')}
                           {metrica === 'ticketPromedio' && formatCurrency(d.ticketPromedio)}
                         </span>
                       </div>

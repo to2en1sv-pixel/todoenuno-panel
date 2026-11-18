@@ -1,6 +1,7 @@
 import { cleanPhone, formatPhoneDisplay, getBlacklistEntries } from './blacklist';
 import { emitOsEvent } from './osEvents';
 import { supabase } from './supabase';
+import { resolveCatalogSku, type CatalogResolutionIndex } from './catalogAliases';
 
 /* ------------------------------------------------------------------ */
 /* Tipos y Modelos de Datos para LTV & Fidelización                   */
@@ -98,7 +99,7 @@ export interface MetricasLTVGlobales {
   clientesListosOferta: number;
   clientesVip: number;
   clientesExcluidosFraude: number;
-  potencialVentasCrossSell: number; // Estimación $ si el 15% compra la oferta flash
+  potencialVentasCrossSell: number; // Suma real del ticket de clientes maduros listos para oferta
 }
 
 /* ------------------------------------------------------------------ */
@@ -204,7 +205,10 @@ export function clasificarProductoEnCategoria(nombreProducto?: string | null): {
 /* Motor de Análisis de Clientes LTV & RFM                            */
 /* ------------------------------------------------------------------ */
 
-export function procesarPerfilesLtv(orders: any[]): {
+export function procesarPerfilesLtv(
+  orders: any[],
+  catalogIndex?: CatalogResolutionIndex
+): {
   perfiles: ClienteLtvProfile[];
   metricas: MetricasLTVGlobales;
   cohortes: CohorteCategoria[];
@@ -255,15 +259,30 @@ export function procesarPerfilesLtv(orders: any[]): {
     pedidos.forEach(p => {
       const est = String(p.estado || '').toLowerCase();
       const monto = Number(p.total) || 0;
-      const nombreProd = p.producto || p.sku || 'Producto TODOENUNO';
-      const cat = clasificarProductoEnCategoria(nombreProd);
+      const resolvedSku = resolveCatalogSku(
+        p.sku,
+        p.codigo_anuncio,
+        p.catalogo_sku,
+        catalogIndex?.masterSkus || [],
+        {
+          items: Array.isArray(p.items) ? p.items : undefined,
+          index: catalogIndex
+        }
+      );
+      const nombreProd =
+        (resolvedSku && catalogIndex?.masterNameBySku[resolvedSku]) ||
+        p.producto ||
+        p.catalogo_sku ||
+        p.sku ||
+        'Producto TODOENUNO';
+      const cat = clasificarProductoEnCategoria(`${nombreProd} ${resolvedSku || ''}`);
 
       if (est === 'entregado') {
         entregados++;
         ltvTotal += monto;
         categoriasSet.add(cat.id);
         productosComprados.push({
-          sku: p.sku || '',
+          sku: resolvedSku || p.catalogo_sku || p.sku || '',
           nombre: nombreProd,
           fecha: p.created_at || '',
           monto,
@@ -364,17 +383,21 @@ export function procesarPerfilesLtv(orders: any[]): {
   const entregadosTodos = perfiles.reduce((acc, p) => acc + p.pedidosEntregados, 0);
   const ticketPromedioGeneral = entregadosTodos > 0 ? totalLtvRecaudado / entregadosTodos : 0;
 
-  const clientesListosOferta = perfiles.filter(p => 
-    p.proximaNecesidadEstimada?.maduroParaOferta && 
-    !p.enListaNegra && 
+  const readyProfiles = perfiles.filter(p =>
+    p.proximaNecesidadEstimada?.maduroParaOferta &&
+    !p.enListaNegra &&
     (p.segmentoRFM === 'listo_cross_sell' || p.segmentoRFM === 'comprador_fiel' || p.segmentoRFM === 'vip_campeon')
-  ).length;
+  );
+  const clientesListosOferta = readyProfiles.length;
 
   const clientesVip = perfiles.filter(p => p.segmentoRFM === 'vip_campeon').length;
   const clientesExcluidosFraude = perfiles.filter(p => p.enListaNegra || p.segmentoRFM === 'bloqueado').length;
 
-  // Estimación conservadora: Si el 12% de los listos compran una oferta promedio de $15.00
-  const potencialVentasCrossSell = clientesListosOferta * 0.12 * 15.00;
+  // Valor real de 1 recompra sobre el ticket histórico real de cada cliente maduro listo para oferta
+  const potencialVentasCrossSell = readyProfiles.reduce((acc, p) => {
+    const ticketReal = p.ticketPromedio > 0 ? p.ticketPromedio : ticketPromedioGeneral;
+    return acc + ticketReal;
+  }, 0);
 
   const metricas: MetricasLTVGlobales = {
     totalClientesUnicos,

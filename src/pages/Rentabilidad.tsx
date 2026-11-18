@@ -4,6 +4,8 @@ import { emitOsEvent } from '@/lib/osEvents'
 import { BovedaProductosRoas } from '@/components/BovedaProductosRoas'
 import { MetaAdsLiveView } from '@/components/rentabilidad/MetaAdsLiveView'
 import { RefreshCw, Trash2, X } from 'lucide-react'
+import { fetchStockItems, fetchProductVariants, identifyDuplicateVariantStockRows } from '@/lib/inventory'
+import { buildCatalogResolutionIndex } from '@/lib/catalogAliases'
 import {
   construirRoas,
   etiquetaMes,
@@ -16,6 +18,7 @@ import {
   roasColorClass,
 } from '@/lib/rentabilidad'
 import type { GastoPublicidad, OrdenWhatsapp } from '@/types/rentabilidad'
+import type { StockItem, ProductVariant } from '@/types/inventory'
 
 const PLATAFORMAS = ['Meta', 'TikTok', 'Google', 'WhatsApp', 'Otro'] as const
 
@@ -32,6 +35,9 @@ export function RentabilidadPage() {
   const [mes, setMes] = useState<string>(mesActual())
   const [gastos, setGastos] = useState<GastoPublicidad[]>([])
   const [ordenes, setOrdenes] = useState<OrdenWhatsapp[]>([])
+  const [stockItems, setStockItems] = useState<StockItem[]>([])
+  const [variantsDb, setVariantsDb] = useState<ProductVariant[]>([])
+  const [productosDb, setProductosDb] = useState<any[]>([])
   const [cargando, setCargando] = useState<boolean>(true)
   const [guardando, setGuardando] = useState<boolean>(false)
   const [syncingMeta, setSyncingMeta] = useState<boolean>(false)
@@ -47,7 +53,7 @@ export function RentabilidadPage() {
     setCargando(true)
     setError(null)
 
-    const [resGastos, resOrdenes] = await Promise.all([
+    const [resGastos, resOrdenes, stockRes, variantsRes, prodRes] = await Promise.all([
       supabase
         .from('gastos_publicidad')
         .select('id,fecha,codigo_anuncio,plataforma,monto,notas,created_at')
@@ -57,9 +63,13 @@ export function RentabilidadPage() {
         .order('created_at', { ascending: false }),
       supabase
         .from('whatsapp_orders')
-        .select('id,total,sku,catalogo_sku,codigo_anuncio,created_at')
+        .select('id,total,sku,catalogo_sku,items,estado,codigo_anuncio,created_at')
+        .neq('estado', 'cancelado')
         .gte('created_at', rango.isoInicio)
         .lt('created_at', rango.isoFinExclusivo),
+      fetchStockItems(),
+      fetchProductVariants(),
+      supabase.from('productos').select('*'),
     ])
 
     if (resGastos.error || resOrdenes.error) {
@@ -72,8 +82,11 @@ export function RentabilidadPage() {
       setOrdenes([])
     } else {
       setGastos((resGastos.data ?? []) as GastoPublicidad[])
-      setOrdenes((resOrdenes.data ?? []) as OrdenWhatsapp[])
+      setOrdenes(((resOrdenes.data ?? []) as OrdenWhatsapp[]).filter((o) => String(o.estado || '').toLowerCase() !== 'cancelado'))
     }
+    setStockItems(stockRes.items || [])
+    setVariantsDb(variantsRes || [])
+    setProductosDb(prodRes.data || [])
 
     setCargando(false)
   }, [rango])
@@ -206,9 +219,19 @@ export function RentabilidadPage() {
     setEliminandoId(null)
   }
 
+  const catalogIndex = useMemo(() => {
+    const { duplicateChildSkuSet } = identifyDuplicateVariantStockRows(stockItems, variantsDb)
+    return buildCatalogResolutionIndex({
+      stockItems,
+      variants: variantsDb,
+      productosDb,
+      duplicateChildSkuSet,
+    })
+  }, [stockItems, variantsDb, productosDb])
+
   const filasRoas = useMemo(
-    () => construirRoas(ordenes, gastos),
-    [ordenes, gastos],
+    () => construirRoas(ordenes, gastos, catalogIndex),
+    [ordenes, gastos, catalogIndex],
   )
 
   const totales = useMemo(() => {

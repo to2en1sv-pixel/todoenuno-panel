@@ -402,25 +402,124 @@ export default async function handler(req: any, res: any) {
       const since = getElSalvadorDate(-(days - 1));
       const until = getElSalvadorDate(0);
 
-      const [cachedDoc, ordersRes, stockRes] = await Promise.all([
+      const [cachedDoc, ordersRes, stockRes, variantsRes] = await Promise.all([
         readDocJson<any>(supabase, INSIGHTS_DOC_TITLE, { lastSyncedAt: null, rows: [] }),
         supabase
-          .from('pedidos')
-          .select('id,sku,total,estado,codigo_anuncio,created_at')
-          .gte('created_at', `${since}T00:00:00Z`),
+          .from('whatsapp_orders')
+          .select('id,sku,catalogo_sku,items,total,estado,codigo_anuncio,created_at')
+          .gte('created_at', `${since}T06:00:00.000Z`),
         supabase
           .from('inventory_stock')
-          .select('sku,nombre,stock_disponible,activo'),
+          .select('sku,nombre,template_id,stock_disponible,activo'),
+        supabase
+          .from('productos_variantes')
+          .select('variante_id,template_id,sku,nombre_completo,color'),
       ]);
 
       const rawRows = (Array.isArray(cachedDoc.data?.rows) ? cachedDoc.data.rows : []).filter(
         (r: any) => r.fecha >= since && r.fecha <= until
       );
 
-      const stockBySku = new Map<string, any>();
-      for (const s of stockRes?.data || []) {
-        stockBySku.set(String(s.sku || '').trim().toUpperCase(), s);
+      const normSku = (v: any) => String(v || '').trim().toUpperCase();
+      const normText = (v: any) =>
+        String(v || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/^\s*\d+\s*[x×]\s*/i, '')
+          .replace(/\s*\([^)]*\)\s*/g, ' ')
+          .toUpperCase()
+          .replace(/[^A-Z0-9]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+      const allStockRows = Array.isArray(stockRes?.data) ? stockRes.data : [];
+      const allVariantRows = Array.isArray(variantsRes?.data) ? variantsRes.data : [];
+      const variantSkuSet = new Set(allVariantRows.map((v: any) => normSku(v.sku)).filter(Boolean));
+
+      const duplicateChildSkus = new Set<string>();
+      const rowsByTemplate = new Map<string, any[]>();
+      for (const s of allStockRows) {
+        const tId = s.template_id !== undefined && s.template_id !== null ? String(s.template_id).trim() : '';
+        if (!tId) continue;
+        const arr = rowsByTemplate.get(tId) || [];
+        arr.push(s);
+        rowsByTemplate.set(tId, arr);
       }
+      rowsByTemplate.forEach((rows) => {
+        if (rows.length <= 1) return;
+        const sorted = [...rows].sort((a, b) => {
+          const aIsVar = variantSkuSet.has(normSku(a.sku)) ? 1 : 0;
+          const bIsVar = variantSkuSet.has(normSku(b.sku)) ? 1 : 0;
+          if (aIsVar !== bIsVar) return aIsVar - bIsVar;
+          return normSku(a.sku).length - normSku(b.sku).length;
+        });
+        const parentSku = normSku(sorted[0]?.sku);
+        for (let i = 1; i < sorted.length; i++) {
+          const childSku = normSku(sorted[i]?.sku);
+          if (childSku && (variantSkuSet.has(childSku) || childSku.startsWith(`${parentSku}-`))) {
+            duplicateChildSkus.add(childSku);
+          }
+        }
+      });
+
+      const stockBySku = new Map<string, any>();
+      const templateToParentSku = new Map<string, string>();
+      const nameToParentSku = new Map<string, string>();
+      const variantToParentSku = new Map<string, string>();
+
+      for (const s of allStockRows) {
+        const sKey = normSku(s.sku);
+        if (!sKey || duplicateChildSkus.has(sKey) || sKey.toLowerCase().includes('fee')) continue;
+        stockBySku.set(sKey, s);
+        const tId = s.template_id !== undefined && s.template_id !== null ? String(s.template_id).trim() : '';
+        if (tId && !templateToParentSku.has(tId)) templateToParentSku.set(tId, sKey);
+        const nKey = normText(s.nombre || s.sku);
+        if (nKey && !nameToParentSku.has(nKey)) nameToParentSku.set(nKey, sKey);
+      }
+
+      const masterSkus = Array.from(stockBySku.keys());
+      for (const v of allVariantRows) {
+        const vSku = normSku(v.sku);
+        const tId = v.template_id !== undefined && v.template_id !== null ? String(v.template_id).trim() : '';
+        let parentSku = tId ? templateToParentSku.get(tId) : undefined;
+        if (!parentSku && vSku) {
+          parentSku = masterSkus
+            .filter((m) => vSku === m || vSku.startsWith(`${m}-`))
+            .sort((a, b) => b.length - a.length)[0];
+        }
+        if (parentSku) {
+          if (vSku) variantToParentSku.set(vSku, parentSku);
+          const vName = normText(v.nombre_completo);
+          if (vName && !nameToParentSku.has(vName)) nameToParentSku.set(vName, parentSku);
+        }
+      }
+
+      const resolveMasterSkuForOrder = (o: any): string | null => {
+        const candidates: string[] = [];
+        if (o.catalogo_sku) candidates.push(normSku(o.catalogo_sku));
+        if (Array.isArray(o.items)) {
+          for (const it of o.items) {
+            if (it?.catalogo_sku) candidates.push(normSku(it.catalogo_sku));
+            if (it?.variante_sku) candidates.push(normSku(it.variante_sku));
+            if (it?.sku) candidates.push(normSku(it.sku));
+          }
+        }
+        if (o.sku) candidates.push(normSku(o.sku));
+
+        for (const c of candidates) {
+          if (!c) continue;
+          if (stockBySku.has(c)) return c;
+          if (variantToParentSku.has(c)) return variantToParentSku.get(c)!;
+          if (templateToParentSku.has(c)) return templateToParentSku.get(c)!;
+          const prefix = masterSkus
+            .filter((m) => c.startsWith(`${m}-`))
+            .sort((a, b) => b.length - a.length)[0];
+          if (prefix) return prefix;
+        }
+        const nKey = normText(o.sku);
+        if (nKey && nameToParentSku.has(nKey)) return nameToParentSku.get(nKey)!;
+        return candidates[0] || null;
+      };
 
       const ordersByCode = new Map<
         string,
@@ -447,7 +546,8 @@ export default async function handler(req: any, res: any) {
           cur.deliveredOrders += 1;
           cur.deliveredSales += total;
         }
-        if (o.sku) cur.skus.add(String(o.sku).trim().toUpperCase());
+        const resolvedSku = resolveMasterSkuForOrder(o);
+        if (resolvedSku) cur.skus.add(resolvedSku);
         ordersByCode.set(code, cur);
       }
 
@@ -497,12 +597,14 @@ export default async function handler(req: any, res: any) {
           const roasBruto = a.spend > 0 ? ord.totalSales / a.spend : null;
 
           // Verificar si el código del anuncio o sus SKUs asociados tienen stock 0
-          const directStock = stockBySku.get(a.codigo_anuncio);
+          const directCanonical =
+            variantToParentSku.get(a.codigo_anuncio) || a.codigo_anuncio;
+          const directStock = stockBySku.get(directCanonical);
           let linkedSku: string | null = directStock ? directStock.sku : null;
           let stockDisponible: number | null = directStock ? Number(directStock.stock_disponible) : null;
           if (stockDisponible === null) {
             for (const sKey of ord.skus) {
-              const st = stockBySku.get(sKey);
+              const st = stockBySku.get(variantToParentSku.get(sKey) || sKey);
               if (st) {
                 linkedSku = st.sku;
                 stockDisponible = Number(st.stock_disponible);
