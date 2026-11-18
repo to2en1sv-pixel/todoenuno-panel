@@ -75,10 +75,11 @@ import {
   type DispatchSlaSettings,
 } from "@/lib/dispatchSla";
 import {
-  addManualTransaction,
-  getFinanceCutoffDate,
-  hydrateFinanceCutoffFromOsEvents,
-  isRecordBeforeFinanceCutoff,
+  computeStreetCollectionsSummary,
+  fetchPendingStreetOrders,
+  liquidateOrderInFinances,
+  normalizeOrderStatus,
+  STREET_COLLECTION_DB_STATUSES,
 } from "@/lib/finance";
 import { toElSalvadorDateKey, hoyLocal } from "@/lib/rentabilidad";
 import { DirectorioListaNegra } from "@/components/analitica/DirectorioListaNegra";
@@ -167,18 +168,7 @@ const DEPARTAMENTOS = [
   "La Unión"
 ];
 
-const normalizarEstado = (e: string | null | undefined): Estado => {
-  const raw = String(e || "").trim().toLowerCase();
-  if (!raw) return "nuevo";
-  if (ESTADOS.includes(raw as Estado)) return raw as Estado;
-  if (raw === "en_ruta" || raw === "en ruta" || raw === "despachado" || raw === "enviado") {
-    return "en_camino";
-  }
-  if (raw === "empacado" || raw === "confirmado") {
-    return "por_empacar";
-  }
-  return "nuevo";
-};
+const normalizarEstado = normalizeOrderStatus;
 
 const dinero = (n: number | null | undefined) => `$${Number(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -263,7 +253,6 @@ export function PedidosPage() {
   const [error, setError] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState("");
   const [mostrarHistorial, setMostrarHistorial] = useState(false);
-  const [financeCutoff, setFinanceCutoff] = useState<string | null>(() => getFinanceCutoffDate());
 
   // Vistas y Filtros Pro
   const { activeNames: courierNames } = useCouriers();
@@ -349,7 +338,7 @@ export function PedidosPage() {
     else setCargando(true);
     setError(null);
 
-    const [ordersRes, activeOrdersRes, stockRes, kardexMapRes, , finCutoff] = await Promise.all([
+    const [ordersRes, activeOrdersRes, pendingStreetRes, stockRes, kardexMapRes] = await Promise.all([
       supabase
         .from("whatsapp_orders")
         .select("*")
@@ -358,16 +347,14 @@ export function PedidosPage() {
       supabase
         .from("whatsapp_orders")
         .select("*")
-        .in("estado", ["nuevo", "programado", "por_empacar", "en_camino"])
+        .in("estado", ["nuevo", "programado", "por_empacar", "empacado", "confirmado", ...STREET_COLLECTION_DB_STATUSES])
         .order("created_at", { ascending: false })
         .limit(1000),
+      fetchPendingStreetOrders(),
       fetchStockItems(),
       fetchOrderKardexMap(),
       hydrateCutoffsFromOsEvents(supabase),
-      hydrateFinanceCutoffFromOsEvents(supabase)
     ]);
-
-    setFinanceCutoff(finCutoff);
 
     if (ordersRes.error) {
       setError(ordersRes.error.message);
@@ -379,6 +366,31 @@ export function PedidosPage() {
       if (!activeOrdersRes.error && Array.isArray(activeOrdersRes.data)) {
         for (const r of activeOrdersRes.data as Pedido[]) {
           if (!mergedById.has(r.id)) mergedById.set(r.id, r);
+        }
+      }
+      if (!pendingStreetRes.error && Array.isArray(pendingStreetRes.orders)) {
+        for (const r of pendingStreetRes.orders) {
+          if (!mergedById.has(r.id)) {
+            mergedById.set(r.id, {
+              id: r.id,
+              pedido_codigo: r.pedido_codigo ?? null,
+              nombre_cliente: r.nombre_cliente ?? null,
+              total: r.total ?? 0,
+              estado: r.estado ?? null,
+              created_at: r.created_at ?? null,
+              sku: r.sku ?? null,
+              catalogo_sku: r.catalogo_sku ?? null,
+              items: r.items,
+              telefono: r.telefono ?? null,
+              direccion: null,
+              metodo_pago: r.metodo_pago ?? null,
+              codigo_anuncio: null,
+              notas: r.notas ?? null,
+              courier: r.courier ?? null,
+              liquidado: r.liquidado ?? false,
+              cuenta_liquidacion: r.cuenta_liquidacion ?? null,
+            });
+          }
         }
       }
       setPedidos(
@@ -424,7 +436,6 @@ export function PedidosPage() {
     let porDespachar = 0;
     let totalHistorico = 0;
     let pedidosActivos = 0;
-    let pendientesLiquidacion = 0;
     let totalEncargos = 0;
     let montoEncargos = 0;
     let encargosUrgentes = 0;
@@ -433,7 +444,8 @@ export function PedidosPage() {
 
     pedidos.forEach((p) => {
       const total = Number(p.total) || 0;
-      const esCancelado = p.estado === "cancelado";
+      const st = normalizarEstado(p.estado);
+      const esCancelado = st === "cancelado";
 
       if (!esCancelado) {
         totalHistorico += total;
@@ -444,12 +456,12 @@ export function PedidosPage() {
       }
 
       // Pedidos activos para despachar hoy (excluye encargos futuros)
-      if (p.estado === "nuevo" || p.estado === "por_empacar") {
+      if (st === "nuevo" || st === "por_empacar") {
         porDespachar++;
       }
 
       // Encargos programados
-      if (p.estado === "programado" || (p.estado !== 'cancelado' && p.estado !== 'entregado' && esPedidoEncargo(p) && p.estado !== 'por_empacar' && p.estado !== 'en_camino')) {
+      if (st === "programado" || (st !== 'cancelado' && st !== 'entregado' && esPedidoEncargo(p) && st !== 'por_empacar' && st !== 'en_camino')) {
         totalEncargos++;
         montoEncargos += total;
         const info = infoEncargo(p);
@@ -457,26 +469,20 @@ export function PedidosPage() {
           encargosUrgentes++;
         }
       }
-
-      if (
-        (p.estado === "en_camino" || p.estado === "entregado") &&
-        !p.liquidado &&
-        !isRecordBeforeFinanceCutoff(p.created_at, undefined, financeCutoff)
-      ) {
-        pendientesLiquidacion += total;
-      }
     });
+
+    const streetSummary = computeStreetCollectionsSummary(pedidos);
 
     return {
       ventasHoy,
       porDespachar,
       ticketPromedio: pedidosActivos > 0 ? totalHistorico / pedidosActivos : 0,
-      pendientesLiquidacion,
+      pendientesLiquidacion: streetSummary.totalAfuera,
       totalEncargos,
       montoEncargos,
       encargosUrgentes
     };
-  }, [pedidos, financeCutoff]);
+  }, [pedidos]);
 
   /* --------------------------- Filtro y Agrupación --------------------------- */
   const pedidosFiltrados = useMemo(() => {
@@ -761,56 +767,40 @@ export function PedidosPage() {
   const confirmarLiquidacion = async () => {
     if (!pedidoALiquidar || pedidoALiquidar.liquidado || liquidando) return;
     setLiquidando(true);
-    const prevEstado = normalizarEstado(pedidoALiquidar.estado);
+    const target = pedidoALiquidar;
 
     try {
-      const monto = Number(pedidoALiquidar.total || 0);
-      const codigo = pedidoALiquidar.pedido_codigo || `#${pedidoALiquidar.id.slice(0, 8).toUpperCase()}`;
-
-      // 1. Marcar como liquidado en DB primero
-      const { error: updErr } = await supabase
-        .from("whatsapp_orders")
-        .update({
-          liquidado: true,
-          liquidado_at: new Date().toISOString(),
-          cuenta_liquidacion: cuentaLiquidacion,
-          estado: 'entregado'
-        })
-        .eq("id", pedidoALiquidar.id);
-
-      if (updErr) throw updErr;
-
-      // 2. Asentar ingreso en el Money Engine (solo al liquidar)
-      if (monto > 0) {
-        await addManualTransaction({
-          account_id: cuentaLiquidacion,
-          tipo: 'income',
-          categoria: 'venta_contraentrega',
-          monto,
-          descripcion: `Liquidación pedido ${codigo} (${pedidoALiquidar.nombre_cliente || 'Cliente'})`,
-          fecha: new Date().toISOString().slice(0, 10)
-        });
-      }
-
-      // 3. Si aún no estaba marcado como entregado, descontar de Bodega idempotentemente
-      if (prevEstado !== 'entregado') {
-        try {
-          const invRes = await syncOrderInventoryOnStatusChange({
-            order: pedidoALiquidar,
-            prevEstado,
-            nextEstado: 'entregado',
-            usuario: 'Liquidación Finanzas',
-            stockItemsCache: stockItems
-          });
-          if (!invRes.skipped && invRes.actions.length > 0) {
-            showInvToast('ok', invRes.summaryText);
+      const res = await liquidateOrderInFinances({
+        order: target,
+        accountId: cuentaLiquidacion,
+        onSyncInventory: async (prevEstado) => {
+          try {
+            const invRes = await syncOrderInventoryOnStatusChange({
+              order: target,
+              prevEstado,
+              nextEstado: 'entregado',
+              usuario: 'Liquidación Finanzas',
+              stockItemsCache: stockItems
+            });
+            if (!invRes.skipped && invRes.actions.length > 0) {
+              showInvToast('ok', invRes.summaryText);
+            }
+          } catch (invErr) {
+            console.warn('Error descontando stock al liquidar:', invErr);
           }
-        } catch (invErr) {
-          console.warn('Error descontando stock al liquidar:', invErr);
         }
+      });
+
+      if (!res.success) {
+        throw new Error(res.error || 'Error al liquidar cobro');
       }
 
       await cargarPedidos(true);
+      if (res.alreadyLiquidated) {
+        showInvToast('warn', 'Este pedido ya había sido liquidado previamente.');
+      } else {
+        showInvToast('ok', `Cobro liquidado en ${cuentaLiquidacion}.`);
+      }
     } catch (err) {
       console.error('Error al liquidar cobro:', err);
     } finally {

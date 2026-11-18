@@ -16,12 +16,19 @@ import {
   AlertCircle,
   ExternalLink,
   Calendar,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  Truck,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
   fetchCashAccounts,
   fetchBudgets,
   fetchMoneyTransactions,
+  fetchPendingStreetOrders,
+  computeStreetCollectionsSummary,
+  liquidateOrderInFinances,
   addManualTransaction,
   addAccountTransfer,
   saveBudget,
@@ -33,7 +40,9 @@ import {
   resetFinancesFromNow,
   clearFinanceCutoff,
   clearLegacyDeliveredPending,
+  type PendingStreetOrder,
 } from '@/lib/finance';
+import { syncOrderInventoryOnStatusChange } from '@/lib/inventory';
 import type {
   CashAccount,
   MoneyTransaction,
@@ -49,18 +58,6 @@ type PagoFijo = {
   fecha_vencimiento: string;
   frecuencia: string;
   categoria: string;
-};
-
-type PendingSettlementOrder = {
-  id: string;
-  pedido_codigo?: string | null;
-  nombre_cliente?: string | null;
-  total?: number | null;
-  estado?: string | null;
-  liquidado?: boolean | null;
-  courier?: string | null;
-  metodo_pago?: string | null;
-  created_at?: string | null;
 };
 
 const FINANCE_RESET_AND_PATCH_SQL = `-- ============================================================================
@@ -299,11 +296,17 @@ export function FinanzasPage() {
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [transactions, setTransactions] = useState<MoneyTransaction[]>([]);
-  const [pendingOrders, setPendingOrders] = useState<PendingSettlementOrder[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<PendingStreetOrder[]>([]);
   const [pagosFijos, setPagosFijos] = useState<PagoFijo[]>([]);
   const [financeCutoff, setFinanceCutoff] = useState<string | null>(() => getFinanceCutoffDate());
   const [loading, setLoading] = useState(true);
   const [statusNotice, setStatusNotice] = useState<{ tipo: 'ok' | 'warn'; msg: string } | null>(null);
+
+  // Auditoría y liquidación directa en calle
+  const [streetDetailFilter, setStreetDetailFilter] = useState<'none' | 'todos' | 'entregado' | 'en_camino'>('none');
+  const [liquidateTargetOrder, setLiquidateTargetOrder] = useState<PendingStreetOrder | null>(null);
+  const [liquidateAccountId, setLiquidateAccountId] = useState('caja_efectivo');
+  const [liquidatingOrder, setLiquidatingOrder] = useState(false);
 
   // Confirmación inline de borrado de movimientos
   const [confirmDeleteTxId, setConfirmDeleteTxId] = useState<number | string | null>(null);
@@ -346,6 +349,8 @@ export function FinanzasPage() {
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [adjustAccount, setAdjustAccount] = useState<CashAccount | null>(null);
   const [adjustSaldo, setAdjustSaldo] = useState('');
+  const [adjustRecordTx, setAdjustRecordTx] = useState(true);
+  const [adjustMotivo, setAdjustMotivo] = useState('');
   const [isSavingAdjust, setIsSavingAdjust] = useState(false);
 
   // Modal: Presupuesto
@@ -384,17 +389,12 @@ export function FinanzasPage() {
   const loadFinanceData = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [cutoff, accData, budData, txData, ordersRes, pagosRes] = await Promise.all([
+      const [cutoff, accData, budData, txData, pendingRes, pagosRes] = await Promise.all([
         hydrateFinanceCutoffFromOsEvents(supabase),
         fetchCashAccounts(),
         fetchBudgets(),
-        fetchMoneyTransactions(1000),
-        supabase
-          .from('whatsapp_orders')
-          .select('id, pedido_codigo, nombre_cliente, total, estado, liquidado, courier, metodo_pago, created_at')
-          .in('estado', ['en_camino', 'entregado'])
-          .order('created_at', { ascending: false })
-          .limit(500),
+        fetchMoneyTransactions(5000),
+        fetchPendingStreetOrders(),
         supabase.from('panel_pagos').select('*').order('fecha_vencimiento', { ascending: true }),
       ]);
 
@@ -402,8 +402,10 @@ export function FinanzasPage() {
       setAccounts(accData.accounts);
       setBudgets(budData.budgets);
       setTransactions(txData.transactions);
-      if (!ordersRes.error && ordersRes.data) {
-        setPendingOrders(ordersRes.data as PendingSettlementOrder[]);
+      if (!pendingRes.error) {
+        setPendingOrders(pendingRes.orders);
+      } else {
+        showNotice('warn', `No se pudieron cargar los pedidos por liquidar: ${pendingRes.error}`);
       }
       if (!pagosRes.error && pagosRes.data) {
         setPagosFijos(pagosRes.data);
@@ -417,21 +419,13 @@ export function FinanzasPage() {
     loadFinanceData();
   }, []);
 
-  // Transacciones visibles respetando el corte desde ahora si existe
+  // Transacciones visibles respetando el corte de libro diario si existe
   const activeTransactions = useMemo(() => {
     if (!financeCutoff) return transactions;
     return transactions.filter(
       tx => !isRecordBeforeFinanceCutoff(tx.created_at, tx.fecha, financeCutoff)
     );
   }, [transactions, financeCutoff]);
-
-  // Pedidos activos respetando el corte desde ahora
-  const activePendingOrders = useMemo(() => {
-    if (!financeCutoff) return pendingOrders;
-    return pendingOrders.filter(
-      o => !isRecordBeforeFinanceCutoff(o.created_at, undefined, financeCutoff)
-    );
-  }, [pendingOrders, financeCutoff]);
 
   const saldoTotalCuentas = useMemo(
     () => accounts.reduce((sum, a) => sum + (Number(a.saldo_actual) || 0), 0),
@@ -450,46 +444,15 @@ export function FinanzasPage() {
     return { ingresos, egresos, utilidadNeta, margen };
   }, [activeTransactions]);
 
-  // Estimado en calle / pendiente de liquidar
-  const estimadoPorEntrar = useMemo(() => {
-    let entregadosTotal = 0;
-    let entregadosCount = 0;
-    let enCaminoTotal = 0;
-    let enCaminoCount = 0;
-    const byCourierMap = new Map<string, { courier: string; total: number; count: number }>();
-
-    activePendingOrders.forEach(o => {
-      if (o.liquidado) return;
-      const monto = Number(o.total || 0);
-      if (o.estado === 'entregado') {
-        entregadosTotal += monto;
-        entregadosCount += 1;
-        const cName = String(o.courier || 'Sin courier').trim() || 'Sin courier';
-        const prev = byCourierMap.get(cName) || { courier: cName, total: 0, count: 0 };
-        prev.total += monto;
-        prev.count += 1;
-        byCourierMap.set(cName, prev);
-      } else if (o.estado === 'en_camino') {
-        enCaminoTotal += monto;
-        enCaminoCount += 1;
-      }
-    });
-
-    const courierBreakdown = Array.from(byCourierMap.values()).sort((a, b) => b.total - a.total);
-    return {
-      entregadosTotal,
-      entregadosCount,
-      enCaminoTotal,
-      enCaminoCount,
-      totalAfuera: entregadosTotal + enCaminoTotal,
-      totalCount: entregadosCount + enCaminoCount,
-      courierBreakdown,
-    };
-  }, [activePendingOrders]);
+  // Estimado en calle / pendiente de liquidar (fuente única unificada, sin amputar por created_at)
+  const estimadoPorEntrar = useMemo(
+    () => computeStreetCollectionsSummary(pendingOrders),
+    [pendingOrders]
+  );
 
   // Cobros automáticos viejos (venta_pedido) para pedidos todavía sin liquidar
   const prematureAutoTxs = useMemo(() => {
-    const orderById = new Map(activePendingOrders.map(o => [String(o.id), o]));
+    const orderById = new Map(pendingOrders.map(o => [String(o.id), o]));
     return activeTransactions.filter(t => {
       if (t.categoria !== 'venta_pedido' || t.es_manual || t.source_table !== 'whatsapp_orders') {
         return false;
@@ -498,7 +461,7 @@ export function FinanzasPage() {
       const ord = orderById.get(String(t.source_id));
       return ord ? !ord.liquidado : false;
     });
-  }, [activeTransactions, activePendingOrders]);
+  }, [activeTransactions, pendingOrders]);
 
   const prematureTotal = useMemo(
     () => prematureAutoTxs.reduce((sum, tx) => sum + (Number(tx.monto) || 0), 0),
@@ -717,11 +680,61 @@ export function FinanzasPage() {
     e.preventDefault();
     if (!adjustAccount || adjustSaldo === '') return;
     setIsSavingAdjust(true);
-    await updateCashAccountBalance(adjustAccount.id, parseFloat(adjustSaldo));
+    await updateCashAccountBalance(adjustAccount.id, parseFloat(adjustSaldo), {
+      recordAdjustmentTx: adjustRecordTx,
+      motivo: adjustMotivo,
+    });
     setIsSavingAdjust(false);
     setShowAdjustModal(false);
+    setAdjustMotivo('');
     await loadFinanceData(true);
-    showNotice('ok', `Saldo de ${adjustAccount.nombre} actualizado.`);
+    showNotice(
+      'ok',
+      `Saldo de ${adjustAccount.nombre} actualizado${adjustRecordTx ? ' y conciliado en libro diario' : ''}.`
+    );
+  };
+
+  const handleConfirmDirectLiquidation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!liquidateTargetOrder || liquidatingOrder) return;
+    setLiquidatingOrder(true);
+    try {
+      const target = liquidateTargetOrder;
+      const res = await liquidateOrderInFinances({
+        order: target,
+        accountId: liquidateAccountId,
+        onSyncInventory: async (prevEstado) => {
+          await syncOrderInventoryOnStatusChange({
+            order: {
+              id: target.id,
+              sku: target.sku || '',
+              catalogo_sku: target.catalogo_sku,
+              items: target.items,
+              nombre_cliente: target.nombre_cliente,
+              created_at: target.created_at,
+            },
+            prevEstado,
+            nextEstado: 'entregado',
+            usuario: 'Liquidación Finanzas',
+          });
+        },
+      });
+
+      if (!res.success) {
+        showNotice('warn', res.error || 'No se pudo liquidar el pedido.');
+        return;
+      }
+      setLiquidateTargetOrder(null);
+      await loadFinanceData(true);
+      if (res.alreadyLiquidated) {
+        showNotice('warn', 'Este pedido ya había sido liquidado previamente.');
+      } else {
+        const codigo = target.pedido_codigo || `#${target.id.slice(0, 8).toUpperCase()}`;
+        showNotice('ok', `Pedido ${codigo} liquidado en ${liquidateAccountId}.`);
+      }
+    } finally {
+      setLiquidatingOrder(false);
+    }
   };
 
   const handleSaveBudget = async (e: React.FormEvent) => {
@@ -1008,6 +1021,8 @@ export function FinanzasPage() {
                             onClick={() => {
                               setAdjustAccount(acc);
                               setAdjustSaldo(String(acc.saldo_actual));
+                              setAdjustRecordTx(true);
+                              setAdjustMotivo('');
                               setShowAdjustModal(true);
                             }}
                             className="hover:text-[var(--tx)] transition-colors"
@@ -1038,14 +1053,35 @@ export function FinanzasPage() {
             {/* Pendiente por liquidar */}
             <div className="lg:col-span-5 bg-cd border border-[var(--bd)] rounded-xl flex flex-col justify-between">
               <div>
-                <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between">
+                <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between gap-2">
                   <h2 className="text-sm font-semibold text-[var(--tx)]">Por liquidar en caja</h2>
-                  <Link
-                    to="/pedidos"
-                    className="text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] flex items-center gap-1 transition-colors"
-                  >
-                    Ir a Pedidos <ExternalLink size={12} />
-                  </Link>
+                  <div className="flex items-center gap-3">
+                    {estimadoPorEntrar.totalCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setStreetDetailFilter(prev => (prev === 'none' ? 'todos' : 'none'))
+                        }
+                        className="text-xs font-medium text-[var(--tx)] hover:opacity-80 flex items-center gap-1 transition-opacity"
+                      >
+                        {streetDetailFilter === 'none' ? (
+                          <>
+                            Ver detalle ({estimadoPorEntrar.totalCount}) <ChevronDown size={13} />
+                          </>
+                        ) : (
+                          <>
+                            Ocultar detalle <ChevronUp size={13} />
+                          </>
+                        )}
+                      </button>
+                    )}
+                    <Link
+                      to="/pedidos"
+                      className="text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] flex items-center gap-1 transition-colors"
+                    >
+                      Ir a Pedidos <ExternalLink size={12} />
+                    </Link>
+                  </div>
                 </div>
 
                 <div className="divide-y divide-[var(--bd)]">
@@ -1055,10 +1091,25 @@ export function FinanzasPage() {
                         Entregados sin depositar
                       </div>
                       <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--mu)] tabular-nums mt-0.5">
-                        <span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setStreetDetailFilter(prev => (prev === 'entregado' ? 'none' : 'entregado'))
+                          }
+                          className="hover:text-[var(--tx)] underline-offset-2 hover:underline text-left"
+                        >
                           {estimadoPorEntrar.entregadosCount}{' '}
                           {estimadoPorEntrar.entregadosCount === 1 ? 'pedido' : 'pedidos'}
-                        </span>
+                        </button>
+                        {estimadoPorEntrar.entregadosTransferenciaTotal > 0 && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span>
+                              {fmtMoney(estimadoPorEntrar.entregadosEfectivoTotal)} efect. /{' '}
+                              {fmtMoney(estimadoPorEntrar.entregadosTransferenciaTotal)} transf.
+                            </span>
+                          </>
+                        )}
                         {estimadoPorEntrar.entregadosCount > 0 && (
                           <>
                             <span aria-hidden="true">·</span>
@@ -1103,9 +1154,26 @@ export function FinanzasPage() {
                       <div className="text-sm font-medium text-[var(--tx)]">
                         En ruta por cobrar
                       </div>
-                      <div className="text-xs text-[var(--mu)] tabular-nums">
-                        {estimadoPorEntrar.enCaminoCount}{' '}
-                        {estimadoPorEntrar.enCaminoCount === 1 ? 'paquete' : 'paquetes'}
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--mu)] tabular-nums mt-0.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setStreetDetailFilter(prev => (prev === 'en_camino' ? 'none' : 'en_camino'))
+                          }
+                          className="hover:text-[var(--tx)] underline-offset-2 hover:underline text-left"
+                        >
+                          {estimadoPorEntrar.enCaminoCount}{' '}
+                          {estimadoPorEntrar.enCaminoCount === 1 ? 'paquete' : 'paquetes'}
+                        </button>
+                        {estimadoPorEntrar.enCaminoTransferenciaTotal > 0 && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span>
+                              {fmtMoney(estimadoPorEntrar.enCaminoEfectivoTotal)} efect. /{' '}
+                              {fmtMoney(estimadoPorEntrar.enCaminoTransferenciaTotal)} transf.
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="text-base font-bold font-mono tabular-nums text-[var(--tx)]">
@@ -1116,19 +1184,23 @@ export function FinanzasPage() {
                   {estimadoPorEntrar.courierBreakdown.length > 0 ? (
                     <div className="px-5 py-3.5 space-y-2">
                       <div className="text-xs font-medium text-[var(--mu)]">
-                        Efectivo pendiente por repartidor
+                        Desglose en calle por repartidor
                       </div>
                       <div className="space-y-1.5">
                         {estimadoPorEntrar.courierBreakdown.map(item => (
                           <div
                             key={item.courier}
-                            className="flex items-center justify-between text-xs"
+                            className="flex items-center justify-between gap-2 text-xs"
                           >
-                            <span className="text-[var(--tx)] truncate pr-2">
-                              {item.courier}{' '}
-                              <span className="text-[var(--mu)] tabular-nums">({item.count})</span>
-                            </span>
-                            <span className="font-mono tabular-nums font-semibold text-[var(--tx)]">
+                            <div className="min-w-0 truncate">
+                              <span className="text-[var(--tx)] font-medium">{item.courier}</span>{' '}
+                              <span className="text-[var(--mu)] tabular-nums">
+                                ({item.entregadosCount > 0 ? `${item.entregadosCount} entr.` : ''}
+                                {item.entregadosCount > 0 && item.enCaminoCount > 0 ? ' · ' : ''}
+                                {item.enCaminoCount > 0 ? `${item.enCaminoCount} ruta` : ''})
+                              </span>
+                            </div>
+                            <span className="font-mono tabular-nums font-semibold text-[var(--tx)] shrink-0">
                               {fmtMoney(item.total)}
                             </span>
                           </div>
@@ -1137,7 +1209,96 @@ export function FinanzasPage() {
                     </div>
                   ) : (
                     <div className="px-5 py-5 text-xs text-[var(--mu)]">
-                      No hay cobros pendientes por liquidar en este período.
+                      No hay cobros pendientes por liquidar ni paquetes en ruta.
+                    </div>
+                  )}
+
+                  {streetDetailFilter !== 'none' && estimadoPorEntrar.totalCount > 0 && (
+                    <div className="px-4 py-3 bg-sf/50 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1 text-[11px]">
+                          {[
+                            { id: 'todos', label: `Todos (${estimadoPorEntrar.totalCount})` },
+                            { id: 'entregado', label: `Entregados (${estimadoPorEntrar.entregadosCount})` },
+                            { id: 'en_camino', label: `En ruta (${estimadoPorEntrar.enCaminoCount})` },
+                          ].map(opt => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => setStreetDetailFilter(opt.id as any)}
+                              className={`px-2 py-1 rounded-md font-medium transition-colors ${
+                                streetDetailFilter === opt.id
+                                  ? 'bg-cd text-[var(--tx)] border border-[var(--bd)]'
+                                  : 'text-[var(--mu)] hover:text-[var(--tx)]'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="max-h-64 overflow-y-auto divide-y divide-[var(--bd)] rounded-lg border border-[var(--bd)] bg-cd">
+                        {(streetDetailFilter === 'entregado'
+                          ? estimadoPorEntrar.entregados
+                          : streetDetailFilter === 'en_camino'
+                          ? estimadoPorEntrar.enCamino
+                          : [...estimadoPorEntrar.entregados, ...estimadoPorEntrar.enCamino]
+                        ).map(ord => {
+                          const code = ord.pedido_codigo || `#${ord.id.slice(0, 6).toUpperCase()}`;
+                          const isEntregado = ord.estadoNormalizado === 'entregado';
+                          return (
+                            <div
+                              key={ord.id}
+                              className="px-3 py-2 flex items-center justify-between gap-2 text-xs"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono text-[11px] text-[var(--mu)]">{code}</span>
+                                  <span className="font-medium text-[var(--tx)] truncate">
+                                    {ord.nombre_cliente || 'Cliente'}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-[var(--mu)] flex flex-wrap items-center gap-1.5 mt-0.5">
+                                  <span
+                                    className={
+                                      isEntregado
+                                        ? 'text-amber-600 dark:text-amber-400 font-medium'
+                                        : 'text-sky-600 dark:text-sky-400 font-medium inline-flex items-center gap-0.5'
+                                    }
+                                  >
+                                    {!isEntregado && <Truck size={10} />}
+                                    {isEntregado ? 'Entregado' : 'En ruta'}
+                                  </span>
+                                  <span>·</span>
+                                  <span>{ord.courier || 'Sin asignar'}</span>
+                                  <span>·</span>
+                                  <span>{ord.esTransferenciaOPrepagado ? 'Transf/Prepago' : 'Contra entrega'}</span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="font-mono tabular-nums font-semibold text-[var(--tx)]">
+                                  {fmtMoney(ord.total || 0)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setLiquidateTargetOrder(ord);
+                                    setLiquidateAccountId(
+                                      ord.esTransferenciaOPrepagado ? 'banco_principal' : 'caja_efectivo'
+                                    );
+                                  }}
+                                  className="px-2 py-1 rounded-md border border-[var(--bd)] bg-sf hover:bg-[var(--tx)] hover:text-[var(--cd)] text-[11px] font-semibold transition-colors inline-flex items-center gap-1"
+                                  title="Liquidar cobro en cuenta"
+                                >
+                                  <CheckCircle2 size={11} /> Liquidar
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2126,6 +2287,34 @@ export function FinanzasPage() {
                 />
               </div>
 
+              <label className="flex items-start gap-2 text-xs text-[var(--mu)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={adjustRecordTx}
+                  onChange={e => setAdjustRecordTx(e.target.checked)}
+                  className="mt-0.5 accent-emerald-600"
+                />
+                <span>
+                  <strong className="text-[var(--tx)] block">Registrar asiento de conciliación</strong>
+                  Mantiene cuadrado el libro diario con el nuevo saldo de la cuenta.
+                </span>
+              </label>
+
+              {adjustRecordTx && (
+                <div>
+                  <label className="block text-xs font-medium text-[var(--mu)] mb-1">
+                    Motivo del ajuste (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={adjustMotivo}
+                    onChange={e => setAdjustMotivo(e.target.value)}
+                    placeholder="Ej. Cuadre de caja física, comisión bancaria..."
+                    className="w-full p-2 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                  />
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-1">
                 <button
                   type="button"
@@ -2140,6 +2329,95 @@ export function FinanzasPage() {
                   className="px-4 py-2 bg-[var(--tx)] text-[var(--cd)] font-semibold rounded-lg text-xs disabled:opacity-50"
                 >
                   {isSavingAdjust ? 'Guardando...' : 'Guardar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: LIQUIDAR PEDIDO DIRECTO DESDE FINANZAS */}
+      {liquidateTargetOrder && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => !liquidatingOrder && setLiquidateTargetOrder(null)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-md rounded-xl border border-[var(--bd)] bg-cd text-[var(--tx)] shadow-2xl overflow-hidden"
+          >
+            <div className="px-5 py-4 border-b border-[var(--bd)] flex items-center justify-between bg-sf">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 size={16} className="text-emerald-500" />
+                <h3 className="font-semibold text-sm">Liquidar cobro de pedido</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !liquidatingOrder && setLiquidateTargetOrder(null)}
+                className="p-1 rounded-md text-[var(--mu)] hover:text-[var(--tx)]"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmDirectLiquidation} className="p-5 space-y-4">
+              <div className="p-3.5 rounded-lg border border-[var(--bd)] bg-sf/60 space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-mono text-[var(--mu)]">
+                    {liquidateTargetOrder.pedido_codigo || `#${liquidateTargetOrder.id.slice(0, 8).toUpperCase()}`}
+                  </span>
+                  <span className="font-mono font-bold text-base text-emerald-600 dark:text-emerald-400">
+                    {fmtMoney(liquidateTargetOrder.total || 0)}
+                  </span>
+                </div>
+                <div className="text-sm font-semibold text-[var(--tx)]">
+                  {liquidateTargetOrder.nombre_cliente || 'Cliente'}
+                </div>
+                <div className="text-xs text-[var(--mu)]">
+                  Repartidor: {liquidateTargetOrder.courier || 'Sin asignar'} ·{' '}
+                  {liquidateTargetOrder.esTransferenciaOPrepagado ? 'Transferencia / Prepagado' : 'Contra entrega'}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[var(--mu)] mb-1">
+                  Cuenta donde ingresa el dinero *
+                </label>
+                <select
+                  value={liquidateAccountId}
+                  onChange={e => setLiquidateAccountId(e.target.value)}
+                  className="w-full p-2.5 rounded-lg border border-[var(--bd)] bg-sf text-xs outline-none"
+                >
+                  {accounts.map(acc => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.nombre} ({fmtMoney(acc.saldo_actual)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {liquidateTargetOrder.estadoNormalizado !== 'entregado' && (
+                <div className="text-[11px] text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5">
+                  Este pedido figura aún <strong>En ruta</strong>; al liquidarlo también se marcará como{' '}
+                  <strong>Entregado</strong> y descontará su unidad física en Kárdex.
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={liquidatingOrder}
+                  onClick={() => setLiquidateTargetOrder(null)}
+                  className="px-4 py-2 border border-[var(--bd)] rounded-lg text-xs font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={liquidatingOrder}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs disabled:opacity-50"
+                >
+                  {liquidatingOrder ? 'Liquidando...' : 'Confirmar ingreso'}
                 </button>
               </div>
             </form>

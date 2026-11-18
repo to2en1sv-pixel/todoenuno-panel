@@ -6,10 +6,12 @@ import { useProductos, useVariantes } from '@/hooks/useCatalog';
 import { fetchStockItems, fetchProductVariants, identifyDuplicateVariantStockRows } from '@/lib/inventory';
 import { toElSalvadorDateKey } from '@/lib/rentabilidad';
 import {
+  computeStreetCollectionsSummary,
   fetchCashAccounts,
-  getFinanceCutoffDate,
-  hydrateFinanceCutoffFromOsEvents,
-  isRecordBeforeFinanceCutoff,
+  fetchPendingStreetOrders,
+  normalizeOrderStatus,
+  STREET_COLLECTION_DB_STATUSES,
+  type PendingStreetOrder,
 } from '@/lib/finance';
 import PedidoModal from '@/components/PedidoModal';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -156,7 +158,7 @@ export function HoyPage() {
   const [refreshing, setRefreshing] = useState(false);
 
   const [orders, setOrders] = useState<OrderRow[]>([]);
-  const [unliquidatedOrders, setUnliquidatedOrders] = useState<OrderRow[]>([]);
+  const [unliquidatedOrders, setUnliquidatedOrders] = useState<PendingStreetOrder[]>([]);
   const [unliqLoaded, setUnliqLoaded] = useState(false);
   const [conversations, setConversations] = useState<ConversationRow[]>([]);
   const [lastMsgFromMeMap, setLastMsgFromMeMap] = useState<Record<string, boolean>>({});
@@ -165,7 +167,6 @@ export function HoyPage() {
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [adSpendToday, setAdSpendToday] = useState(0);
   const [pagosProximos, setPagosProximos] = useState<PagoRow[]>([]);
-  const [financeCutoff, setFinanceCutoff] = useState<string | null>(() => getFinanceCutoffDate());
 
   const [notas, setNotas] = useState<NotaRow[]>([]);
   const [nuevaNota, setNuevaNota] = useState('');
@@ -212,15 +213,10 @@ export function HoyPage() {
           .select(
             'id,pedido_codigo,nombre_cliente,telefono,direccion,departamento,courier,sku,catalogo_sku,total,estado,metodo_pago,liquidado,es_encargo,fecha_programada,codigo_anuncio,created_at'
           )
-          .in('estado', ['nuevo', 'programado', 'por_empacar', 'en_camino'])
+          .in('estado', ['nuevo', 'programado', 'por_empacar', 'empacado', 'confirmado', ...STREET_COLLECTION_DB_STATUSES])
           .order('created_at', { ascending: false })
           .limit(500),
-        supabase
-          .from('whatsapp_orders')
-          .select('id,total,estado,liquidado,created_at')
-          .in('estado', ['en_camino', 'entregado'])
-          .or('liquidado.is.null,liquidado.eq.false')
-          .limit(500),
+        fetchPendingStreetOrders(),
         supabase
           .from('bb_conversations')
           .select('id,instance_id,contact_name,contact_phone,last_message,updated_at,status')
@@ -242,9 +238,6 @@ export function HoyPage() {
         supabase.from('panel_notas').select('*').order('created_at', { ascending: false }),
       ]);
 
-      const cutoff = await hydrateFinanceCutoffFromOsEvents(supabase);
-      setFinanceCutoff(cutoff);
-
       if (!ordersRes.error && Array.isArray(ordersRes.data)) {
         const mergedById = new Map<string, OrderRow>();
         for (const r of ordersRes.data as OrderRow[]) {
@@ -264,8 +257,8 @@ export function HoyPage() {
         setOrders(activeOrdersRes.data as OrderRow[]);
       }
 
-      if (!unliqRes.error && Array.isArray(unliqRes.data)) {
-        setUnliquidatedOrders(unliqRes.data as OrderRow[]);
+      if (!unliqRes.error && Array.isArray(unliqRes.orders)) {
+        setUnliquidatedOrders(unliqRes.orders);
         setUnliqLoaded(true);
       } else {
         setUnliqLoaded(false);
@@ -387,7 +380,7 @@ export function HoyPage() {
 
     for (const o of orders) {
       const total = Number(o.total) || 0;
-      const estado = String(o.estado || '').trim().toLowerCase();
+      const estado = normalizeOrderStatus(o.estado);
       const isCancelled = estado === 'cancelado';
       const createdToday = Boolean(o.created_at && toElSalvadorDateKey(o.created_at) === todayISO);
 
@@ -409,12 +402,7 @@ export function HoyPage() {
         enRuta.push(o);
       }
 
-      if (
-        !unliqLoaded &&
-        (estado === 'en_camino' || estado === 'entregado') &&
-        !o.liquidado &&
-        !isRecordBeforeFinanceCutoff(o.created_at, undefined, financeCutoff)
-      ) {
+      if (!unliqLoaded && (estado === 'en_camino' || estado === 'entregado') && !o.liquidado) {
         cobrosEnCalle += total;
       }
 
@@ -431,14 +419,10 @@ export function HoyPage() {
     }
 
     if (unliqLoaded) {
-      for (const u of unliquidatedOrders) {
-        if (
-          (u.estado === 'en_camino' || u.estado === 'entregado') &&
-          !u.liquidado &&
-          !isRecordBeforeFinanceCutoff(u.created_at, undefined, financeCutoff)
-        ) {
-          cobrosEnCalle += Number(u.total) || 0;
-        }
+      const streetSummary = computeStreetCollectionsSummary(unliquidatedOrders);
+      cobrosEnCalle = streetSummary.totalAfuera;
+      if (streetSummary.enCaminoCount > enCaminoCount) {
+        enCaminoCount = streetSummary.enCaminoCount;
       }
     }
 
@@ -454,7 +438,7 @@ export function HoyPage() {
       enRuta,
       recientesHoy,
     };
-  }, [orders, unliquidatedOrders, unliqLoaded, todayISO, financeCutoff]);
+  }, [orders, unliquidatedOrders, unliqLoaded, todayISO]);
 
   const chatMetrics = useMemo(() => {
     const active = conversations.filter((c) => !isLegacyConversation(c));

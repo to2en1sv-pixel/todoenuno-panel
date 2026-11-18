@@ -56,6 +56,10 @@ import {
   type DriverPortalSession,
 } from "@/lib/couriers";
 import { uploadOrderDataUrlToBucket, saveOrderEvidence } from "@/lib/orderStorage";
+import {
+  IN_ROUTE_DB_STATUSES,
+  normalizeOrderStatus,
+} from "@/lib/finance";
 
 const DRIVER_COURIER_STORAGE_KEY = "todoenuno_driver_courier_v1";
 
@@ -415,7 +419,7 @@ export function ConfirmarEntregaPage() {
       supabase
         .from("whatsapp_orders")
         .select("*")
-        .in("estado", ["en_camino", "por_empacar"])
+        .in("estado", ["por_empacar", "empacado", "confirmado", ...IN_ROUTE_DB_STATUSES])
         .order("created_at", { ascending: false })
         .limit(500),
     ]);
@@ -723,13 +727,18 @@ export function ConfirmarEntregaPage() {
     const nextNotas = pedido.notas ? `${pedido.notas} • ${notaEntrega}` : notaEntrega;
 
     try {
+      const updatePayload: Record<string, any> = {
+        estado: "entregado",
+        courier: assignedCourier,
+        notas: nextNotas,
+      };
+      if (!prepagado && cobroTipo === "transferencia") {
+        updatePayload.metodo_pago = "Transferencia";
+      }
+
       const { error: updErr } = await supabase
         .from("whatsapp_orders")
-        .update({
-          estado: "entregado",
-          courier: assignedCourier,
-          notas: nextNotas,
-        })
+        .update(updatePayload)
         .eq("id", pedido.id);
 
       if (updErr) throw updErr;
@@ -825,7 +834,13 @@ export function ConfirmarEntregaPage() {
         });
       } catch {}
 
-      const updatedOrder = { ...pedido, estado: "entregado", courier: assignedCourier, notas: nextNotas };
+      const updatedOrder = {
+        ...pedido,
+        estado: "entregado",
+        courier: assignedCourier,
+        notas: nextNotas,
+        ...(!prepagado && cobroTipo === "transferencia" ? { metodo_pago: "Transferencia" } : {}),
+      };
       setPedido(updatedOrder);
       setTodosLosPedidos((prev) =>
         prev.map((item) => (item.id === pedido.id ? updatedOrder : item))
@@ -988,7 +1003,7 @@ export function ConfirmarEntregaPage() {
   }, [todosLosPedidos, activeCourierName]);
 
   const totalEnRutaGlobal = useMemo(() => {
-    return todosLosPedidos.filter((p) => String(p.estado || "").trim().toLowerCase() === "en_camino").length;
+    return todosLosPedidos.filter((p) => normalizeOrderStatus(p.estado) === "en_camino").length;
   }, [todosLosPedidos]);
 
   // Clasificación operativa del día (Tu Ruta = solo en_camino; entregadosHoy y novedades solo para KPIs y Cuadre)
@@ -998,7 +1013,7 @@ export function ConfirmarEntregaPage() {
     const novedades: any[] = [];
 
     for (const p of pedidosDelCourier) {
-      const est = String(p.estado || "").trim().toLowerCase();
+      const est = normalizeOrderStatus(p.estado);
       if (est === "entregado") {
         if (isDeliveredTodaySv(p, todaySv)) {
           entregadosHoy.push(p);

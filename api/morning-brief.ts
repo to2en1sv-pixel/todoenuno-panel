@@ -294,6 +294,7 @@ export default async function handler(req: any, res: any) {
   try {
     const [
       ordersRes,
+      unliqOrdersRes,
       convRes,
       msgsRes,
       stateRes,
@@ -306,7 +307,6 @@ export default async function handler(req: any, res: any) {
       catDocRes,
       accountsRes,
       txTodayRes,
-      financeCutoffRes,
     ] = await Promise.all([
       supabase
         .from('whatsapp_orders')
@@ -315,6 +315,14 @@ export default async function handler(req: any, res: any) {
         )
         .order('created_at', { ascending: false })
         .limit(800),
+      supabase
+        .from('whatsapp_orders')
+        .select(
+          'id,pedido_codigo,nombre_cliente,sku,catalogo_sku,items,total,estado,liquidado,es_encargo,fecha_programada,codigo_anuncio,notas,created_at'
+        )
+        .or('liquidado.is.null,liquidado.eq.false')
+        .order('created_at', { ascending: false })
+        .limit(1000),
       supabase
         .from('bb_conversations')
         .select('id,instance_id,contact_name,contact_phone,last_message,updated_at,status')
@@ -359,27 +367,18 @@ export default async function handler(req: any, res: any) {
         .from('finance_money_transactions')
         .select('tipo,categoria,monto,fecha')
         .eq('fecha', dateInfo.svTodayIso),
-      supabase
-        .from('os_events')
-        .select('type,payload,occurred_at')
-        .in('type', ['system.finance_reset', 'system.finance_cutoff_cleared'])
-        .order('occurred_at', { ascending: false })
-        .limit(1),
     ]);
 
-    let financeCutoffMs: number | null = null;
-    if (!financeCutoffRes.error && Array.isArray(financeCutoffRes.data) && financeCutoffRes.data.length > 0) {
-      const latestCut = financeCutoffRes.data[0];
-      if (latestCut.type === 'system.finance_reset') {
-        const cutoffIso = latestCut.payload?.finance_cutoff || latestCut.occurred_at || null;
-        const parsedMs = cutoffIso ? new Date(cutoffIso).getTime() : NaN;
-        if (Number.isFinite(parsedMs)) financeCutoffMs = parsedMs;
-      }
-    }
-    const isBeforeFinanceCutoff = (createdAt?: string | null) => {
-      if (!financeCutoffMs || !createdAt) return false;
-      const ms = new Date(createdAt).getTime();
-      return Number.isFinite(ms) && ms <= financeCutoffMs;
+    const normalizeOrderStatusLocal = (rawEstado?: string | null) => {
+      const raw = String(rawEstado || '').trim().toLowerCase();
+      if (!raw) return 'nuevo';
+      if (['nuevo', 'programado', 'por_empacar', 'en_camino', 'entregado', 'cancelado'].includes(raw)) return raw;
+      if (['en_ruta', 'en ruta', 'despachado', 'enviado', 'ruta', 'en camino'].includes(raw)) return 'en_camino';
+      if (['empacado', 'confirmado', 'en_empaque', 'por empacar'].includes(raw)) return 'por_empacar';
+      if (['entregada', 'completado', 'completada'].includes(raw)) return 'entregado';
+      if (['cancelada', 'rechazado', 'devuelto'].includes(raw)) return 'cancelado';
+      if (['encargo', 'agendado'].includes(raw)) return 'programado';
+      return 'nuevo';
     };
 
     /* 1. INVENTARIO & MAPA DE COSTOS (COGS) CON UNIFICACIÓN DE VARIANTES */
@@ -527,7 +526,14 @@ export default async function handler(req: any, res: any) {
     });
 
     /* 2. PEDIDOS: DESPACHO, ENCARGOS, RUTA Y VENTAS (HOY / AYER / MES) */
-    const orders = Array.isArray(ordersRes.data) ? ordersRes.data : [];
+    const ordersMap = new Map<string, any>();
+    for (const o of Array.isArray(ordersRes.data) ? ordersRes.data : []) {
+      ordersMap.set(o.id, o);
+    }
+    for (const o of Array.isArray(unliqOrdersRes.data) ? unliqOrdersRes.data : []) {
+      if (!ordersMap.has(o.id)) ordersMap.set(o.id, o);
+    }
+    const orders = Array.from(ordersMap.values());
     const porDespachar: any[] = [];
     const encargosUrgentes: Array<any & { diff: number | null }> = [];
     const enRuta: any[] = [];
@@ -540,7 +546,7 @@ export default async function handler(req: any, res: any) {
     let indicacionesPostCierreCount = 0;
 
     for (const o of orders) {
-      const estado = String(o.estado || '').toLowerCase();
+      const estado = normalizeOrderStatusLocal(o.estado);
       const createdAt = String(o.created_at || '');
       const createdMs = createdAt ? new Date(createdAt).getTime() : 0;
       const isCancelled = estado === 'cancelado';
@@ -559,7 +565,7 @@ export default async function handler(req: any, res: any) {
         }
       }
 
-      if (estado === 'entregado' && !o.liquidado && !isBeforeFinanceCutoff(createdAt)) {
+      if (estado === 'entregado' && o.liquidado !== true) {
         porLiquidar.push(o);
       }
 
@@ -2839,7 +2845,7 @@ async function handleOrderSearchQuery(supabase: any, chatId: string | number, qu
 
 async function handlePendingOrdersQuery(supabase: any, chatId: string | number) {
   const todayIso = getElSalvadorDate();
-  const [{ data: orders, error }, cutoffRes] = await Promise.all([
+  const [recentRes, unliqRes] = await Promise.all([
     supabase
       .from('whatsapp_orders')
       .select(
@@ -2848,45 +2854,50 @@ async function handlePendingOrdersQuery(supabase: any, chatId: string | number) 
       .order('created_at', { ascending: false })
       .limit(500),
     supabase
-      .from('os_events')
-      .select('type,payload,occurred_at')
-      .in('type', ['system.finance_reset', 'system.finance_cutoff_cleared'])
-      .order('occurred_at', { ascending: false })
-      .limit(1),
+      .from('whatsapp_orders')
+      .select(
+        'id,pedido_codigo,nombre_cliente,telefono,departamento,courier,sku,total,estado,liquidado,es_encargo,fecha_programada,created_at'
+      )
+      .or('liquidado.is.null,liquidado.eq.false')
+      .order('created_at', { ascending: false })
+      .limit(1000),
   ]);
 
-  if (error) {
-    throw new Error(`Error consultando pendientes: ${error.message}`);
+  if (recentRes.error) {
+    throw new Error(`Error consultando pendientes: ${recentRes.error.message}`);
   }
 
-  let financeCutoffMs: number | null = null;
-  if (!cutoffRes.error && Array.isArray(cutoffRes.data) && cutoffRes.data.length > 0) {
-    const latest = cutoffRes.data[0];
-    if (latest.type === 'system.finance_reset') {
-      const cutoffIso = latest.payload?.finance_cutoff || latest.occurred_at || null;
-      const ms = cutoffIso ? new Date(cutoffIso).getTime() : NaN;
-      if (Number.isFinite(ms)) financeCutoffMs = ms;
-    }
+  const normalizeEstado = (rawEstado?: string | null) => {
+    const raw = String(rawEstado || '').trim().toLowerCase();
+    if (!raw) return 'nuevo';
+    if (['nuevo', 'programado', 'por_empacar', 'en_camino', 'entregado', 'cancelado'].includes(raw)) return raw;
+    if (['en_ruta', 'en ruta', 'despachado', 'enviado', 'ruta', 'en camino'].includes(raw)) return 'en_camino';
+    if (['empacado', 'confirmado', 'en_empaque', 'por empacar'].includes(raw)) return 'por_empacar';
+    if (['entregada', 'completado', 'completada'].includes(raw)) return 'entregado';
+    if (['cancelada', 'rechazado', 'devuelto'].includes(raw)) return 'cancelado';
+    if (['encargo', 'agendado'].includes(raw)) return 'programado';
+    return 'nuevo';
+  };
+
+  const merged = new Map<string, any>();
+  for (const o of Array.isArray(recentRes.data) ? recentRes.data : []) merged.set(o.id, o);
+  for (const o of Array.isArray(unliqRes.data) ? unliqRes.data : []) {
+    if (!merged.has(o.id)) merged.set(o.id, o);
   }
 
-  const all = Array.isArray(orders) ? orders : [];
-  const nuevos = all.filter((o: any) => String(o.estado || '').toLowerCase() === 'nuevo');
-  const porEmpacar = all.filter((o: any) => String(o.estado || '').toLowerCase() === 'por_empacar');
-  const enCamino = all.filter((o: any) => String(o.estado || '').toLowerCase() === 'en_camino');
+  const all = Array.from(merged.values());
+  const nuevos = all.filter((o: any) => normalizeEstado(o.estado) === 'nuevo');
+  const porEmpacar = all.filter((o: any) => normalizeEstado(o.estado) === 'por_empacar');
+  const enCamino = all.filter((o: any) => normalizeEstado(o.estado) === 'en_camino' && o.liquidado !== true);
   const encargosProntos = all.filter((o: any) => {
-    const est = String(o.estado || '').toLowerCase();
+    const est = normalizeEstado(o.estado);
     if (est !== 'programado') return false;
     if (!o.fecha_programada) return true;
     return String(o.fecha_programada).slice(0, 10) <= todayIso;
   });
-  const porLiquidar = all.filter((o: any) => {
-    if (String(o.estado || '').toLowerCase() !== 'entregado' || o.liquidado === true) return false;
-    if (financeCutoffMs && o.created_at) {
-      const ms = new Date(o.created_at).getTime();
-      if (Number.isFinite(ms) && ms <= financeCutoffMs) return false;
-    }
-    return true;
-  });
+  const porLiquidar = all.filter(
+    (o: any) => normalizeEstado(o.estado) === 'entregado' && o.liquidado !== true
+  );
 
   const sumTotal = (arr: any[]) => arr.reduce((s, o) => s + (Number(o.total) || 0), 0);
 

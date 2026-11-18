@@ -1,11 +1,10 @@
 import { supabase } from '@/lib/supabase';
 import { emitOsEvent } from '@/lib/osEvents';
-import type { 
-  CashAccount, 
-  MoneyTransaction, 
-  Budget, 
-  DailyMetric,
-  TransactionType 
+import type {
+  CashAccount,
+  MoneyTransaction,
+  Budget,
+  TransactionType,
 } from '@/types/finance';
 
 const DEFAULT_ACCOUNTS: CashAccount[] = [
@@ -16,7 +15,7 @@ const DEFAULT_ACCOUNTS: CashAccount[] = [
     saldo_actual: 0,
     moneda: 'USD',
     activo: true,
-    color: '#10b981'
+    color: '#10b981',
   },
   {
     id: 'banco_principal',
@@ -25,7 +24,7 @@ const DEFAULT_ACCOUNTS: CashAccount[] = [
     saldo_actual: 0,
     moneda: 'USD',
     activo: true,
-    color: '#3b82f6'
+    color: '#3b82f6',
   },
   {
     id: 'caja_chica',
@@ -34,7 +33,7 @@ const DEFAULT_ACCOUNTS: CashAccount[] = [
     saldo_actual: 0,
     moneda: 'USD',
     activo: true,
-    color: '#f59e0b'
+    color: '#f59e0b',
   },
   {
     id: 'tarjeta_pauta',
@@ -43,8 +42,8 @@ const DEFAULT_ACCOUNTS: CashAccount[] = [
     saldo_actual: 0,
     moneda: 'USD',
     activo: true,
-    color: '#8b5cf6'
-  }
+    color: '#8b5cf6',
+  },
 ];
 
 const currentMonth = () => {
@@ -59,7 +58,7 @@ const DEFAULT_BUDGETS: Budget[] = [
     categoria: 'Marketing & Pauta Meta',
     monto_presupuestado: 1200.0,
     monto_gastado: 0,
-    notas: 'Presupuesto mensual para campañas de conversión en Meta y TikTok'
+    notas: 'Presupuesto mensual para campañas de conversión en Meta y TikTok',
   },
   {
     id: `${currentMonth()}-envios`,
@@ -67,7 +66,7 @@ const DEFAULT_BUDGETS: Budget[] = [
     categoria: 'Envíos y Logística',
     monto_presupuestado: 500.0,
     monto_gastado: 0,
-    notas: 'Fletes y pagos a mensajeros por entrega de paquetes'
+    notas: 'Fletes y pagos a mensajeros por entrega de paquetes',
   },
   {
     id: `${currentMonth()}-empaque`,
@@ -75,7 +74,7 @@ const DEFAULT_BUDGETS: Budget[] = [
     categoria: 'Suministros y Empaque',
     monto_presupuestado: 250.0,
     monto_gastado: 0,
-    notas: 'Bolsas Kraft, cinta adhesiva y etiquetas térmicas'
+    notas: 'Bolsas Kraft, cinta adhesiva y etiquetas térmicas',
   },
   {
     id: `${currentMonth()}-operativo`,
@@ -83,15 +82,335 @@ const DEFAULT_BUDGETS: Budget[] = [
     categoria: 'Nómina y Operaciones',
     monto_presupuestado: 800.0,
     monto_gastado: 0,
-    notas: 'Ayudante de empaque y servicios básicos'
-  }
+    notas: 'Ayudante de empaque y servicios básicos',
+  },
 ];
-
-const DEFAULT_TRANSACTIONS: MoneyTransaction[] = [];
 
 let localAccounts = [...DEFAULT_ACCOUNTS];
 let localBudgets = [...DEFAULT_BUDGETS];
-let localTransactions: MoneyTransaction[] = [...DEFAULT_TRANSACTIONS];
+let localTransactions: MoneyTransaction[] = [];
+
+/* ========================================================================== */
+/* NORMALIZACIÓN UNIFICADA DE ESTADOS Y COBROS EN CALLE (FUENTE ÚNICA)         */
+/* ========================================================================== */
+
+export type NormalizedOrderStatus =
+  | 'nuevo'
+  | 'programado'
+  | 'por_empacar'
+  | 'en_camino'
+  | 'entregado'
+  | 'cancelado';
+
+const CANONICAL_STATUSES = new Set<NormalizedOrderStatus>([
+  'nuevo',
+  'programado',
+  'por_empacar',
+  'en_camino',
+  'entregado',
+  'cancelado',
+]);
+
+export const IN_ROUTE_DB_STATUSES = [
+  'en_camino',
+  'en_ruta',
+  'en ruta',
+  'despachado',
+  'enviado',
+  'ruta',
+] as const;
+
+export const DELIVERED_DB_STATUSES = [
+  'entregado',
+  'entregada',
+  'completado',
+  'completada',
+] as const;
+
+export const STREET_COLLECTION_DB_STATUSES = [
+  ...IN_ROUTE_DB_STATUSES,
+  ...DELIVERED_DB_STATUSES,
+] as const;
+
+export function normalizeOrderStatus(rawEstado: string | null | undefined): NormalizedOrderStatus {
+  const raw = String(rawEstado || '').trim().toLowerCase();
+  if (!raw) return 'nuevo';
+  if (CANONICAL_STATUSES.has(raw as NormalizedOrderStatus)) {
+    return raw as NormalizedOrderStatus;
+  }
+  if (
+    raw === 'en_ruta' ||
+    raw === 'en ruta' ||
+    raw === 'despachado' ||
+    raw === 'enviado' ||
+    raw === 'ruta' ||
+    raw === 'en camino'
+  ) {
+    return 'en_camino';
+  }
+  if (
+    raw === 'empacado' ||
+    raw === 'confirmado' ||
+    raw === 'en_empaque' ||
+    raw === 'por empacar'
+  ) {
+    return 'por_empacar';
+  }
+  if (raw === 'entregada' || raw === 'completado' || raw === 'completada') {
+    return 'entregado';
+  }
+  if (raw === 'cancelada' || raw === 'rechazado' || raw === 'devuelto') {
+    return 'cancelado';
+  }
+  if (raw === 'encargo' || raw === 'agendado') {
+    return 'programado';
+  }
+  return 'nuevo';
+}
+
+export function isPrepaidOrTransferOrder(order: {
+  metodo_pago?: string | null;
+  notas?: string | null;
+}): boolean {
+  const mp = String(order?.metodo_pago || '').toLowerCase();
+  const notas = String(order?.notas || '').toLowerCase();
+  if (
+    mp.includes('transfer') ||
+    mp.includes('prepag') ||
+    mp.includes('pagado') ||
+    mp.includes('tarjeta') ||
+    mp.includes('deposito') ||
+    mp.includes('depósito') ||
+    mp.includes('chivo') ||
+    mp.includes('wompi') ||
+    mp.includes('link')
+  ) {
+    return true;
+  }
+  if (
+    notas.includes('cobro: transferencia') ||
+    notas.includes('cobro: prepagado') ||
+    notas.includes('transferencia bancaria')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export interface PendingStreetOrder {
+  id: string;
+  pedido_codigo?: string | null;
+  nombre_cliente?: string | null;
+  telefono?: string | null;
+  sku?: string | null;
+  catalogo_sku?: string | null;
+  items?: any;
+  total: number | null;
+  estado: string | null;
+  estadoNormalizado: NormalizedOrderStatus;
+  liquidado?: boolean | null;
+  liquidado_at?: string | null;
+  cuenta_liquidacion?: string | null;
+  courier?: string | null;
+  metodo_pago?: string | null;
+  notas?: string | null;
+  created_at?: string | null;
+  esTransferenciaOPrepagado: boolean;
+}
+
+export interface CourierStreetBreakdown {
+  courier: string;
+  entregadosCount: number;
+  entregadosTotal: number;
+  enCaminoCount: number;
+  enCaminoTotal: number;
+  total: number;
+  count: number;
+  efectivoTotal: number;
+  transferenciaTotal: number;
+}
+
+export interface StreetCollectionsSummary {
+  entregados: PendingStreetOrder[];
+  enCamino: PendingStreetOrder[];
+  entregadosTotal: number;
+  entregadosCount: number;
+  entregadosEfectivoTotal: number;
+  entregadosTransferenciaTotal: number;
+  enCaminoTotal: number;
+  enCaminoCount: number;
+  enCaminoEfectivoTotal: number;
+  enCaminoTransferenciaTotal: number;
+  totalAfuera: number;
+  totalCount: number;
+  totalEfectivoEnCalle: number;
+  totalTransferenciaEnCalle: number;
+  courierBreakdown: CourierStreetBreakdown[];
+}
+
+/**
+ * Obtiene TODOS los pedidos activos en calle o entregados pendientes de liquidar,
+ * paginando en lotes para no amputar pedidos antiguos por historial ya liquidado
+ * y normalizando variantes de estado.
+ */
+export async function fetchPendingStreetOrders(): Promise<{
+  orders: PendingStreetOrder[];
+  error?: string;
+}> {
+  const PAGE_SIZE = 1000;
+  const MAX_PAGES = 6;
+  const collected: any[] = [];
+
+  try {
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const from = page * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const { data, error } = await supabase
+        .from('whatsapp_orders')
+        .select(
+          'id, pedido_codigo, nombre_cliente, telefono, sku, catalogo_sku, items, total, estado, liquidado, liquidado_at, cuenta_liquidacion, courier, metodo_pago, notas, created_at'
+        )
+        .or('liquidado.is.null,liquidado.eq.false')
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+      if (error) {
+        return { orders: [], error: error.message };
+      }
+
+      const rows = Array.isArray(data) ? data : [];
+      collected.push(...rows);
+      if (rows.length < PAGE_SIZE) break;
+    }
+
+    const mapped: PendingStreetOrder[] = [];
+    for (const row of collected) {
+      if (row.liquidado === true) continue;
+      const estadoNormalizado = normalizeOrderStatus(row.estado);
+      if (estadoNormalizado !== 'en_camino' && estadoNormalizado !== 'entregado') continue;
+      mapped.push({
+        ...row,
+        estadoNormalizado,
+        esTransferenciaOPrepagado: isPrepaidOrTransferOrder(row),
+      });
+    }
+
+    return { orders: mapped };
+  } catch (err: any) {
+    return {
+      orders: [],
+      error: err?.message || 'Error consultando pedidos pendientes en calle',
+    };
+  }
+}
+
+export function computeStreetCollectionsSummary(
+  orders: Array<
+    Partial<PendingStreetOrder> & {
+      id: string;
+      total?: number | null;
+      estado?: string | null;
+      liquidado?: boolean | null;
+      courier?: string | null;
+      metodo_pago?: string | null;
+      notas?: string | null;
+    }
+  >
+): StreetCollectionsSummary {
+  const entregados: PendingStreetOrder[] = [];
+  const enCamino: PendingStreetOrder[] = [];
+
+  let entregadosTotal = 0;
+  let entregadosEfectivoTotal = 0;
+  let entregadosTransferenciaTotal = 0;
+
+  let enCaminoTotal = 0;
+  let enCaminoEfectivoTotal = 0;
+  let enCaminoTransferenciaTotal = 0;
+
+  const byCourierMap = new Map<string, CourierStreetBreakdown>();
+
+  for (const raw of orders) {
+    if (raw.liquidado === true) continue;
+    const st = raw.estadoNormalizado || normalizeOrderStatus(raw.estado);
+    if (st !== 'entregado' && st !== 'en_camino') continue;
+
+    const esTransf =
+      typeof raw.esTransferenciaOPrepagado === 'boolean'
+        ? raw.esTransferenciaOPrepagado
+        : isPrepaidOrTransferOrder(raw);
+    const monto = Number(raw.total || 0);
+    const courierName = String(raw.courier || '').trim() || 'Sin asignar';
+
+    const enriched: PendingStreetOrder = {
+      ...(raw as any),
+      total: monto,
+      estadoNormalizado: st,
+      esTransferenciaOPrepagado: esTransf,
+    };
+
+    const prev = byCourierMap.get(courierName) || {
+      courier: courierName,
+      entregadosCount: 0,
+      entregadosTotal: 0,
+      enCaminoCount: 0,
+      enCaminoTotal: 0,
+      total: 0,
+      count: 0,
+      efectivoTotal: 0,
+      transferenciaTotal: 0,
+    };
+
+    prev.total += monto;
+    prev.count += 1;
+    if (esTransf) prev.transferenciaTotal += monto;
+    else prev.efectivoTotal += monto;
+
+    if (st === 'entregado') {
+      entregados.push(enriched);
+      entregadosTotal += monto;
+      if (esTransf) entregadosTransferenciaTotal += monto;
+      else entregadosEfectivoTotal += monto;
+
+      prev.entregadosCount += 1;
+      prev.entregadosTotal += monto;
+    } else {
+      enCamino.push(enriched);
+      enCaminoTotal += monto;
+      if (esTransf) enCaminoTransferenciaTotal += monto;
+      else enCaminoEfectivoTotal += monto;
+
+      prev.enCaminoCount += 1;
+      prev.enCaminoTotal += monto;
+    }
+
+    byCourierMap.set(courierName, prev);
+  }
+
+  const courierBreakdown = Array.from(byCourierMap.values()).sort((a, b) => b.total - a.total);
+
+  return {
+    entregados,
+    enCamino,
+    entregadosTotal,
+    entregadosCount: entregados.length,
+    entregadosEfectivoTotal,
+    entregadosTransferenciaTotal,
+    enCaminoTotal,
+    enCaminoCount: enCamino.length,
+    enCaminoEfectivoTotal,
+    enCaminoTransferenciaTotal,
+    totalAfuera: entregadosTotal + enCaminoTotal,
+    totalCount: entregados.length + enCamino.length,
+    totalEfectivoEnCalle: entregadosEfectivoTotal + enCaminoEfectivoTotal,
+    totalTransferenciaEnCalle: entregadosTransferenciaTotal + enCaminoTransferenciaTotal,
+    courierBreakdown,
+  };
+}
+
+/* ========================================================================== */
+/* CUENTAS, PRESUPUESTOS Y LIBRO DIARIO                                       */
+/* ========================================================================== */
 
 /**
  * Obtener Cuentas de Dinero
@@ -100,17 +419,55 @@ export async function fetchCashAccounts(): Promise<{ accounts: CashAccount[]; is
   try {
     const res = await supabase.from('finance_cash_accounts').select('*').order('nombre');
     if (!res.error && res.data) {
+      localAccounts = res.data as CashAccount[];
       return { accounts: res.data as CashAccount[], isRealDb: true };
     }
 
-    const schemaRes = await (supabase as any).schema('finance').from('cash_accounts').select('*').order('nombre');
+    const schemaRes = await (supabase as any)
+      .schema('finance')
+      .from('cash_accounts')
+      .select('*')
+      .order('nombre');
     if (!schemaRes.error && schemaRes.data) {
+      localAccounts = schemaRes.data as CashAccount[];
       return { accounts: schemaRes.data as CashAccount[], isRealDb: true };
     }
   } catch {
     // fallback local
   }
   return { accounts: localAccounts, isRealDb: false };
+}
+
+/**
+ * Helper interno para actualizar saldo en DB con respaldo si RPC falla
+ */
+async function applyBalanceDeltaInDb(accountId: string, delta: number, freshAccounts: CashAccount[]) {
+  try {
+    const rpcRes = await (supabase as any).rpc('update_account_balance', {
+      p_account_id: accountId,
+      p_delta: delta,
+    });
+    if (!rpcRes?.error) return;
+  } catch {
+    // fallback directo
+  }
+
+  const target = freshAccounts.find(a => a.id === accountId);
+  const currentSaldo = Number(target?.saldo_actual ?? 0);
+  const nextSaldo = Math.round((currentSaldo + delta) * 100) / 100;
+
+  const upd = await supabase
+    .from('finance_cash_accounts')
+    .update({ saldo_actual: nextSaldo })
+    .eq('id', accountId);
+
+  if (upd.error) {
+    await (supabase as any)
+      .schema('finance')
+      .from('cash_accounts')
+      .update({ saldo_actual: nextSaldo })
+      .eq('id', accountId);
+  }
 }
 
 /**
@@ -134,31 +491,59 @@ export async function fetchBudgets(periodo = currentMonth()): Promise<{ budgets:
 }
 
 /**
- * Obtener Transacciones del libro diario
+ * Obtener Transacciones del libro diario (paginando para no topar en 1,000)
  */
-export async function fetchMoneyTransactions(limit = 100): Promise<{ transactions: MoneyTransaction[]; isRealDb: boolean }> {
+export async function fetchMoneyTransactions(
+  limit = 5000
+): Promise<{ transactions: MoneyTransaction[]; isRealDb: boolean }> {
+  const PAGE_SIZE = 1000;
   try {
-    const res = await supabase
-      .from('finance_money_transactions')
-      .select('*')
-      .order('fecha', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(limit);
+    const allPublic: MoneyTransaction[] = [];
+    let publicFailed = false;
 
-    if (!res.error && res.data) {
-      return { transactions: res.data as MoneyTransaction[], isRealDb: true };
+    for (let offset = 0; offset < limit; offset += PAGE_SIZE) {
+      const batchEnd = Math.min(offset + PAGE_SIZE - 1, limit - 1);
+      const res = await supabase
+        .from('finance_money_transactions')
+        .select('*')
+        .order('fecha', { ascending: false })
+        .order('created_at', { ascending: false })
+        .range(offset, batchEnd);
+
+      if (res.error) {
+        publicFailed = true;
+        break;
+      }
+      const rows = (res.data || []) as MoneyTransaction[];
+      allPublic.push(...rows);
+      if (rows.length < PAGE_SIZE) break;
     }
 
-    const schemaRes = await (supabase as any)
-      .schema('finance')
-      .from('money_transactions')
-      .select('*')
-      .order('fecha', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(limit);
+    if (!publicFailed) {
+      localTransactions = allPublic;
+      return { transactions: allPublic, isRealDb: true };
+    }
 
-    if (!schemaRes.error && schemaRes.data) {
-      return { transactions: schemaRes.data as MoneyTransaction[], isRealDb: true };
+    const allSchema: MoneyTransaction[] = [];
+    for (let offset = 0; offset < limit; offset += PAGE_SIZE) {
+      const batchEnd = Math.min(offset + PAGE_SIZE - 1, limit - 1);
+      const schemaRes = await (supabase as any)
+        .schema('finance')
+        .from('money_transactions')
+        .select('*')
+        .order('fecha', { ascending: false })
+        .order('created_at', { ascending: false })
+        .range(offset, batchEnd);
+
+      if (schemaRes.error) break;
+      const rows = (schemaRes.data || []) as MoneyTransaction[];
+      allSchema.push(...rows);
+      if (rows.length < PAGE_SIZE) break;
+    }
+
+    if (allSchema.length > 0) {
+      localTransactions = allSchema;
+      return { transactions: allSchema, isRealDb: true };
     }
   } catch {
     // fallback
@@ -167,20 +552,85 @@ export async function fetchMoneyTransactions(limit = 100): Promise<{ transaction
 }
 
 /**
- * Ajustar saldo de una cuenta manualmente
+ * Ajustar saldo de una cuenta manualmente (con asiento opcional de conciliación)
  */
-export async function updateCashAccountBalance(id: string, nuevoSaldo: number): Promise<boolean> {
+export async function updateCashAccountBalance(
+  id: string,
+  nuevoSaldo: number,
+  options?: { recordAdjustmentTx?: boolean; motivo?: string }
+): Promise<boolean> {
+  const { accounts: freshAccounts, isRealDb } = await fetchCashAccounts();
+  const targetAcc = freshAccounts.find(a => a.id === id);
+  const previousSaldo = Number(targetAcc?.saldo_actual ?? 0);
+  const cleanNuevoSaldo = Math.round((Number(nuevoSaldo) || 0) * 100) / 100;
+  const delta = Math.round((cleanNuevoSaldo - previousSaldo) * 100) / 100;
+
   try {
-    await supabase.from('finance_cash_accounts').update({ saldo_actual: nuevoSaldo }).eq('id', id);
+    const upd1 = await supabase
+      .from('finance_cash_accounts')
+      .update({ saldo_actual: cleanNuevoSaldo })
+      .eq('id', id);
+
+    if (upd1.error) {
+      await (supabase as any)
+        .schema('finance')
+        .from('cash_accounts')
+        .update({ saldo_actual: cleanNuevoSaldo })
+        .eq('id', id);
+    }
+
+    if (options?.recordAdjustmentTx !== false && Math.abs(delta) >= 0.01 && isRealDb) {
+      const tipo: TransactionType = delta > 0 ? 'income' : 'expense';
+      const today = new Date().toISOString().slice(0, 10);
+      const motivo = options?.motivo?.trim();
+      const desc = motivo
+        ? `Conciliación ${targetAcc?.nombre || id}: ${motivo}`
+        : `Ajuste de saldo (${targetAcc?.nombre || id}: ${previousSaldo.toFixed(2)} → ${cleanNuevoSaldo.toFixed(2)})`;
+
+      const ins = await supabase
+        .from('finance_money_transactions')
+        .insert({
+          account_id: id,
+          tipo,
+          categoria: 'ajuste_saldo',
+          monto: Math.abs(delta),
+          descripcion: desc,
+          fecha: today,
+          es_manual: true,
+        })
+        .select()
+        .single();
+
+      if (!ins.error && ins.data) {
+        try {
+          await emitOsEvent({
+            type: delta > 0 ? 'finance.income.created' : 'finance.expense.created',
+            source_table: 'finance_money_transactions',
+            source_id: String(ins.data.id),
+            payload: {
+              transaction_id: ins.data.id,
+              account_id: id,
+              categoria: 'ajuste_saldo',
+              monto: Math.abs(delta),
+              saldo_anterior: previousSaldo,
+              saldo_nuevo: cleanNuevoSaldo,
+            },
+          });
+        } catch {}
+      }
+    }
   } catch {
     // fallback
   }
-  localAccounts = localAccounts.map(a => a.id === id ? { ...a, saldo_actual: nuevoSaldo } : a);
+
+  localAccounts = localAccounts.map(a =>
+    a.id === id ? { ...a, saldo_actual: cleanNuevoSaldo } : a
+  );
   return true;
 }
 
 /**
- * Registrar un Gasto o Pago Manual
+ * Registrar un Ingreso o Gasto Manual (o liquidación vinculada a pedido)
  */
 export async function addManualTransaction(params: {
   account_id: string;
@@ -191,9 +641,12 @@ export async function addManualTransaction(params: {
   fecha: string;
   codigo_anuncio?: string;
   comprobante_url?: string;
+  source_table?: string;
+  source_id?: string;
 }): Promise<{ success: boolean; transaction: MoneyTransaction; isRealDb: boolean }> {
-  const account = localAccounts.find(a => a.id === params.account_id) || localAccounts[0];
-  
+  const { accounts: freshAccounts } = await fetchCashAccounts();
+  const account = freshAccounts.find(a => a.id === params.account_id) || freshAccounts[0];
+
   const newTx: MoneyTransaction = {
     id: Date.now(),
     account_id: params.account_id,
@@ -203,49 +656,56 @@ export async function addManualTransaction(params: {
     monto: Math.abs(params.monto),
     descripcion: params.descripcion.trim(),
     fecha: params.fecha,
+    source_table: params.source_table || null,
+    source_id: params.source_id || null,
     comprobante_url: params.comprobante_url || null,
     es_manual: true,
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
   };
 
   let isRealDb = false;
 
-  // Intentar guardar en Supabase
   try {
-    const res = await supabase
+    const insertPayload: Record<string, any> = {
+      account_id: newTx.account_id,
+      tipo: newTx.tipo,
+      categoria: newTx.categoria,
+      monto: newTx.monto,
+      descripcion: newTx.descripcion,
+      fecha: newTx.fecha,
+      es_manual: true,
+    };
+    if (params.source_table) insertPayload.source_table = params.source_table;
+    if (params.source_id) insertPayload.source_id = params.source_id;
+
+    let res = await supabase
       .from('finance_money_transactions')
-      .insert({
-        account_id: newTx.account_id,
-        tipo: newTx.tipo,
-        categoria: newTx.categoria,
-        monto: newTx.monto,
-        descripcion: newTx.descripcion,
-        fecha: newTx.fecha,
-        es_manual: true
-      })
+      .insert(insertPayload)
       .select()
       .single();
+
+    if (res.error) {
+      res = await (supabase as any)
+        .schema('finance')
+        .from('money_transactions')
+        .insert(insertPayload)
+        .select()
+        .single();
+    }
 
     if (!res.error && res.data) {
       newTx.id = res.data.id;
       isRealDb = true;
 
-      // Actualizar saldo en cuenta en Supabase
       const delta = newTx.tipo === 'income' ? newTx.monto : -newTx.monto;
-      await (supabase as any).rpc('update_account_balance', {
-        p_account_id: newTx.account_id,
-        p_delta: delta
-      });
+      await applyBalanceDeltaInDb(newTx.account_id, delta, freshAccounts);
     }
   } catch {
     // local fallback
   }
 
-  // Actualizar store en memoria
   localTransactions = [newTx, ...localTransactions];
-
-  // Actualizar saldo de la cuenta local
-  localAccounts = localAccounts.map(acc => {
+  localAccounts = freshAccounts.map(acc => {
     if (acc.id === params.account_id) {
       const nuevoSaldo = acc.saldo_actual + (params.tipo === 'income' ? newTx.monto : -newTx.monto);
       return { ...acc, saldo_actual: nuevoSaldo };
@@ -253,7 +713,6 @@ export async function addManualTransaction(params: {
     return acc;
   });
 
-  // Si es un gasto, actualizar monto gastado del presupuesto
   if (params.tipo === 'expense') {
     localBudgets = localBudgets.map(b => {
       if (b.categoria.toLowerCase().includes(params.categoria.toLowerCase()) || params.categoria === 'pauta_publicidad') {
@@ -263,12 +722,11 @@ export async function addManualTransaction(params: {
     });
   }
 
-  // Emitir evento al OS Event Store para trazabilidad total
   try {
     await emitOsEvent({
       type: params.tipo === 'income' ? 'finance.income.created' : 'finance.expense.created',
-      source_table: 'manual_transactions',
-      source_id: String(newTx.id),
+      source_table: params.source_table || 'manual_transactions',
+      source_id: params.source_id || String(newTx.id),
       payload: {
         transaction_id: newTx.id,
         account_id: newTx.account_id,
@@ -276,14 +734,95 @@ export async function addManualTransaction(params: {
         monto: newTx.monto,
         descripcion: newTx.descripcion,
         fecha: newTx.fecha,
-        es_manual: true
-      }
+        es_manual: true,
+      },
     });
   } catch {
     // ignorar
   }
 
   return { success: true, transaction: newTx, isRealDb };
+}
+
+/**
+ * Liquidación unificada e idempotente de un pedido (usada desde Pedidos y Finanzas).
+ */
+export async function liquidateOrderInFinances(params: {
+  order: {
+    id: string;
+    pedido_codigo?: string | null;
+    nombre_cliente?: string | null;
+    total?: number | null;
+    estado?: string | null;
+    liquidado?: boolean | null;
+  };
+  accountId: string;
+  onSyncInventory?: (prevEstado: NormalizedOrderStatus) => Promise<void>;
+}): Promise<{ success: boolean; alreadyLiquidated?: boolean; error?: string }> {
+  const { order, accountId, onSyncInventory } = params;
+  if (!order?.id) return { success: false, error: 'Pedido inválido' };
+
+  try {
+    // Verificar estado real en DB para evitar doble cobro
+    const { data: freshOrder, error: readErr } = await supabase
+      .from('whatsapp_orders')
+      .select('id, pedido_codigo, nombre_cliente, total, estado, liquidado')
+      .eq('id', order.id)
+      .maybeSingle();
+
+    if (readErr) {
+      return { success: false, error: readErr.message };
+    }
+    if (freshOrder?.liquidado === true) {
+      return { success: true, alreadyLiquidated: true };
+    }
+
+    const prevEstado = normalizeOrderStatus(freshOrder?.estado ?? order.estado);
+    const monto = Number(freshOrder?.total ?? order.total ?? 0);
+    const codigo =
+      freshOrder?.pedido_codigo ||
+      order.pedido_codigo ||
+      `#${order.id.slice(0, 8).toUpperCase()}`;
+    const cliente = freshOrder?.nombre_cliente || order.nombre_cliente || 'Cliente';
+
+    const { error: updErr } = await supabase
+      .from('whatsapp_orders')
+      .update({
+        liquidado: true,
+        liquidado_at: new Date().toISOString(),
+        cuenta_liquidacion: accountId,
+        estado: 'entregado',
+      })
+      .eq('id', order.id);
+
+    if (updErr) {
+      return { success: false, error: updErr.message };
+    }
+
+    if (monto > 0) {
+      await addManualTransaction({
+        account_id: accountId,
+        tipo: 'income',
+        categoria: 'venta_contraentrega',
+        monto,
+        descripcion: `Liquidación pedido ${codigo} (${cliente})`,
+        fecha: new Date().toISOString().slice(0, 10),
+        source_table: 'whatsapp_orders',
+        source_id: order.id,
+      });
+    }
+
+    if (prevEstado !== 'entregado' && onSyncInventory) {
+      await onSyncInventory(prevEstado);
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Error al liquidar el pedido',
+    };
+  }
 }
 
 /**
@@ -305,7 +844,7 @@ export async function addAccountTransfer(params: {
   if (params.origen_id === params.destino_id) {
     return {
       success: false,
-      error: 'La cuenta de origen y destino no pueden ser la misma.'
+      error: 'La cuenta de origen y destino no pueden ser la misma.',
     };
   }
 
@@ -313,12 +852,13 @@ export async function addAccountTransfer(params: {
   if (monto <= 0) {
     return {
       success: false,
-      error: 'El monto a transferir debe ser mayor a 0.'
+      error: 'El monto a transferir debe ser mayor a 0.',
     };
   }
 
-  const origenAcc = localAccounts.find(a => a.id === params.origen_id);
-  const destinoAcc = localAccounts.find(a => a.id === params.destino_id);
+  const { accounts: freshAccounts } = await fetchCashAccounts();
+  const origenAcc = freshAccounts.find(a => a.id === params.origen_id);
+  const destinoAcc = freshAccounts.find(a => a.id === params.destino_id);
 
   const descBase = params.descripcion?.trim() ? `${params.descripcion.trim()} ` : '';
   const descSalida = `${descBase}⇄ Transferencia hacia ${destinoAcc?.nombre || params.destino_id}`.trim();
@@ -336,7 +876,7 @@ export async function addAccountTransfer(params: {
     descripcion: descSalida,
     fecha: params.fecha,
     es_manual: true,
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
   };
 
   const destinoTx: MoneyTransaction = {
@@ -349,12 +889,11 @@ export async function addAccountTransfer(params: {
     descripcion: descEntrada,
     fecha: params.fecha,
     es_manual: true,
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
   };
 
   let isRealDb = false;
 
-  // 1. Guardar en Supabase si está disponible
   try {
     const { data: insertedData, error: insertErr } = await supabase
       .from('finance_money_transactions')
@@ -366,7 +905,7 @@ export async function addAccountTransfer(params: {
           monto: origenTx.monto,
           descripcion: origenTx.descripcion,
           fecha: origenTx.fecha,
-          es_manual: true
+          es_manual: true,
         },
         {
           account_id: destinoTx.account_id,
@@ -375,8 +914,8 @@ export async function addAccountTransfer(params: {
           monto: destinoTx.monto,
           descripcion: destinoTx.descripcion,
           fecha: destinoTx.fecha,
-          es_manual: true
-        }
+          es_manual: true,
+        },
       ])
       .select();
 
@@ -385,34 +924,17 @@ export async function addAccountTransfer(params: {
       destinoTx.id = insertedData[1].id;
       isRealDb = true;
 
-      // Actualizar saldos en Supabase vía RPC o update directo
-      try {
-        await Promise.all([
-          (supabase as any).rpc('update_account_balance', {
-            p_account_id: origenTx.account_id,
-            p_delta: -monto
-          }),
-          (supabase as any).rpc('update_account_balance', {
-            p_account_id: destinoTx.account_id,
-            p_delta: monto
-          })
-        ]);
-      } catch {
-        // Fallback update directo
-        await Promise.all([
-          supabase.from('finance_cash_accounts').update({ saldo_actual: (origenAcc?.saldo_actual || 0) - monto }).eq('id', origenTx.account_id),
-          supabase.from('finance_cash_accounts').update({ saldo_actual: (destinoAcc?.saldo_actual || 0) + monto }).eq('id', destinoTx.account_id)
-        ]);
-      }
+      await Promise.all([
+        applyBalanceDeltaInDb(origenTx.account_id, -monto, freshAccounts),
+        applyBalanceDeltaInDb(destinoTx.account_id, monto, freshAccounts),
+      ]);
     }
   } catch {
     // fallback local
   }
 
-  // 2. Actualizar memoria local
   localTransactions = [destinoTx, origenTx, ...localTransactions];
-
-  localAccounts = localAccounts.map(acc => {
+  localAccounts = freshAccounts.map(acc => {
     if (acc.id === params.origen_id) {
       return { ...acc, saldo_actual: acc.saldo_actual - monto };
     }
@@ -422,7 +944,6 @@ export async function addAccountTransfer(params: {
     return acc;
   });
 
-  // 3. Emitir evento OS
   try {
     await emitOsEvent({
       type: 'finance.transfer.created',
@@ -433,8 +954,8 @@ export async function addAccountTransfer(params: {
         destino_id: params.destino_id,
         monto,
         fecha: params.fecha,
-        descripcion: params.descripcion || ''
-      }
+        descripcion: params.descripcion || '',
+      },
     });
   } catch {}
 
@@ -449,7 +970,7 @@ export async function saveBudget(budget: Omit<Budget, 'id'> & { id?: string }): 
   const fullBudget: Budget = {
     ...budget,
     id: budgetId,
-    monto_gastado: budget.monto_gastado || 0
+    monto_gastado: budget.monto_gastado || 0,
   };
 
   try {
@@ -473,7 +994,6 @@ export async function saveBudget(budget: Omit<Budget, 'id'> & { id?: string }): 
  */
 export async function deleteMoneyTransaction(id: number | string): Promise<{ success: boolean; error?: string }> {
   try {
-    // 1. Obtener los datos de la transacción antes de eliminarla para conocer el monto y la cuenta
     let txToDelete: MoneyTransaction | undefined = localTransactions.find(t => String(t.id) === String(id));
 
     try {
@@ -489,39 +1009,27 @@ export async function deleteMoneyTransaction(id: number | string): Promise<{ suc
       // continuar con txToDelete local
     }
 
-    // 2. Eliminar de Supabase
     try {
       await supabase.from('finance_money_transactions').delete().eq('id', id);
     } catch {
       // continuar
     }
 
-    // 3. Revertir saldo de la cuenta:
-    //    Si era gasto (-) o transferencia de salida (-), revertir suma (+).
-    //    Si era ingreso (+) o transferencia de entrada (+), revertir resta (-).
     if (txToDelete) {
+      const { accounts: freshAccounts } = await fetchCashAccounts();
       const montoNum = Number(txToDelete.monto) || 0;
       const esEntrada = txToDelete.tipo === 'income' || txToDelete.categoria === 'transferencia_entrada';
       const deltaReversion = esEntrada ? -montoNum : montoNum;
 
-      try {
-        await (supabase as any).rpc('update_account_balance', {
-          p_account_id: txToDelete.account_id,
-          p_delta: deltaReversion
-        });
-      } catch {
-        // fallback
-      }
+      await applyBalanceDeltaInDb(txToDelete.account_id, deltaReversion, freshAccounts);
 
-      // Revertir localmente
-      localAccounts = localAccounts.map(acc => {
+      localAccounts = freshAccounts.map(acc => {
         if (acc.id === txToDelete!.account_id) {
           return { ...acc, saldo_actual: acc.saldo_actual + deltaReversion };
         }
         return acc;
       });
 
-      // Si estaba enlazada a un gasto de publicidad, opcionalmente limpiar de gastos_publicidad
       if (txToDelete.source_table === 'gastos_publicidad' && txToDelete.source_id) {
         try {
           await supabase.from('gastos_publicidad').delete().eq('id', txToDelete.source_id);
@@ -531,9 +1039,7 @@ export async function deleteMoneyTransaction(id: number | string): Promise<{ suc
       }
     }
 
-    // 4. Actualizar store en memoria
     localTransactions = localTransactions.filter(t => String(t.id) !== String(id));
-
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err?.message || 'Error al eliminar transacción' };
@@ -541,7 +1047,7 @@ export async function deleteMoneyTransaction(id: number | string): Promise<{ suc
 }
 
 /* ========================================================================== */
-/* CORTE LIMPIO DESDE AHORA (BORRADO DE LEGACY FINANCIERO)                    */
+/* CORTE LIMPIO DEL LIBRO DIARIO Y ARCHIVO LEGACY EXPLÍCITO                   */
 /* ========================================================================== */
 
 const FINANCE_CUTOFF_KEY = 'todoenuno_finance_cutoff_v1';
@@ -563,10 +1069,11 @@ export function setFinanceCutoffDate(iso: string | null): void {
   }
 }
 
+/**
+ * Sincroniza siempre con la base de datos (os_events) para que todos los
+ * navegadores/dispositivos compartan el mismo estado de corte financiero.
+ */
 export async function hydrateFinanceCutoffFromOsEvents(supabaseClient: any = supabase): Promise<string | null> {
-  const local = getFinanceCutoffDate();
-  if (local) return local;
-
   try {
     const { data, error } = await supabaseClient
       .from('os_events')
@@ -577,16 +1084,24 @@ export async function hydrateFinanceCutoffFromOsEvents(supabaseClient: any = sup
 
     if (!error && Array.isArray(data) && data.length > 0) {
       const latest = data[0];
+      if (latest.type === 'system.finance_cutoff_cleared') {
+        setFinanceCutoffDate(null);
+        return null;
+      }
       if (latest.type === 'system.finance_reset') {
-        const cutoff = latest.payload?.finance_cutoff || latest.occurred_at || null;
-        if (cutoff) setFinanceCutoffDate(cutoff);
-        return cutoff;
+        const cutoff = latest.payload?.finance_cutoff || null;
+        if (cutoff) {
+          setFinanceCutoffDate(cutoff);
+          return cutoff;
+        }
+        setFinanceCutoffDate(null);
+        return null;
       }
     }
   } catch {
     // os_events opcional
   }
-  return local;
+  return getFinanceCutoffDate();
 }
 
 export function isRecordBeforeFinanceCutoff(
@@ -620,7 +1135,7 @@ export async function resetFinancesFromNow(options: {
   const {
     wipeTransactions = true,
     resetBalancesToZero = true,
-    setOrdersCutoff = true
+    setOrdersCutoff = true,
   } = options;
 
   const nowIso = new Date().toISOString();
@@ -665,8 +1180,8 @@ export async function resetFinancesFromNow(options: {
       payload: {
         finance_cutoff: setOrdersCutoff ? nowIso : null,
         wiped_transactions: wipeTransactions,
-        reset_balances: resetBalancesToZero
-      }
+        reset_balances: resetBalancesToZero,
+      },
     });
   } catch {
     // os_events opcional
@@ -675,7 +1190,7 @@ export async function resetFinancesFromNow(options: {
   return {
     success: true,
     cutoffIso: nowIso,
-    warning: warnings.length > 0 ? warnings.join(' · ') : undefined
+    warning: warnings.length > 0 ? warnings.join(' · ') : undefined,
   };
 }
 
@@ -686,7 +1201,7 @@ export async function clearFinanceCutoff(): Promise<void> {
       type: 'system.finance_cutoff_cleared',
       source_table: 'finance_money_transactions',
       source_id: new Date().toISOString(),
-      payload: {}
+      payload: {},
     });
   } catch {
     // os_events opcional
@@ -694,8 +1209,8 @@ export async function clearFinanceCutoff(): Promise<void> {
 }
 
 /**
- * Cierra únicamente los pedidos ya marcados como `entregado` que quedaron
- * sin liquidar (legacy) para que no aparezcan como "por liquidar",
+ * Cierra únicamente los pedidos ya marcados como `entregado` (o variantes equivalentes)
+ * que quedaron sin liquidar (legacy) para que no aparezcan como "por liquidar",
  * SIN modificar saldos de cuentas ni borrar movimientos financieros.
  */
 export async function clearLegacyDeliveredPending(): Promise<{
@@ -706,25 +1221,19 @@ export async function clearLegacyDeliveredPending(): Promise<{
 }> {
   const nowIso = new Date().toISOString();
   try {
-    const { data: legacyRows, error: fetchErr } = await supabase
-      .from('whatsapp_orders')
-      .select('id, total, liquidado')
-      .eq('estado', 'entregado')
-      .or('liquidado.is.null,liquidado.eq.false');
-
+    const { orders: pendingOrders, error: fetchErr } = await fetchPendingStreetOrders();
     if (fetchErr) {
-      return { success: false, clearedCount: 0, clearedTotal: 0, error: fetchErr.message };
+      return { success: false, clearedCount: 0, clearedTotal: 0, error: fetchErr };
     }
 
-    const rows = legacyRows || [];
-    if (rows.length === 0) {
+    const deliveredRows = pendingOrders.filter(o => o.estadoNormalizado === 'entregado');
+    if (deliveredRows.length === 0) {
       return { success: true, clearedCount: 0, clearedTotal: 0 };
     }
 
-    const ids = rows.map((r: any) => r.id);
-    const clearedTotal = rows.reduce((sum: number, r: any) => sum + (Number(r.total) || 0), 0);
+    const ids = deliveredRows.map(r => r.id);
+    const clearedTotal = deliveredRows.reduce((sum, r) => sum + (Number(r.total) || 0), 0);
 
-    // Actualizar en lotes de 80 para evitar límites de longitud en PostgREST
     for (let i = 0; i < ids.length; i += 80) {
       const chunk = ids.slice(i, i + 80);
       const { error: updErr } = await supabase
@@ -732,7 +1241,7 @@ export async function clearLegacyDeliveredPending(): Promise<{
         .update({
           liquidado: true,
           liquidado_at: nowIso,
-          cuenta_liquidacion: 'corte_legacy'
+          cuenta_liquidacion: 'corte_legacy',
         })
         .in('id', chunk);
 
@@ -747,22 +1256,21 @@ export async function clearLegacyDeliveredPending(): Promise<{
         source_table: 'whatsapp_orders',
         source_id: nowIso,
         payload: {
-          cleared_count: rows.length,
-          cleared_total: clearedTotal
-        }
+          cleared_count: deliveredRows.length,
+          cleared_total: clearedTotal,
+        },
       });
     } catch {
       // os_events opcional
     }
 
-    return { success: true, clearedCount: rows.length, clearedTotal };
+    return { success: true, clearedCount: deliveredRows.length, clearedTotal };
   } catch (err: any) {
     return {
       success: false,
       clearedCount: 0,
       clearedTotal: 0,
-      error: err?.message || 'Error limpiando pedidos entregados legacy'
+      error: err?.message || 'Error limpiando pedidos entregados legacy',
     };
   }
 }
-

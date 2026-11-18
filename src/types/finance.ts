@@ -15,8 +15,10 @@ export type TransactionType = 'income' | 'expense' | 'transfer';
 
 export type IncomeCategory = 
   | 'venta_pedido' 
+  | 'venta_contraentrega'
   | 'abono_manual' 
   | 'devolucion_proveedor' 
+  | 'ajuste_saldo'
   | 'otro_ingreso';
 
 export type ExpenseCategory = 
@@ -29,6 +31,7 @@ export type ExpenseCategory =
   | 'alquiler_servicios' 
   | 'comision_pasarela' 
   | 'gasto_manual'
+  | 'ajuste_saldo'
   | 'otro_gasto';
 
 export interface MoneyTransaction {
