@@ -672,40 +672,44 @@ export async function backfillMissingOsEvents(days = 30): Promise<{
       .select('id,pedido_codigo,nombre_cliente,telefono,sku,catalogo_sku,total,estado,codigo_anuncio,departamento,metodo_pago,created_at,liquidado_at')
       .gte('created_at', sinceIso)
       .order('created_at', { ascending: false })
-      .limit(300),
+      .limit(1000),
     supabase
       .from('gastos_publicidad')
       .select('id,fecha,codigo_anuncio,plataforma,monto,notas')
       .gte('fecha', sinceDate)
-      .limit(200),
+      .limit(1000),
     supabase
       .from('finance_money_transactions')
       .select('id,tipo,categoria,monto,descripcion,fecha,account_id,source_id')
       .gte('fecha', sinceDate)
-      .limit(200),
+      .limit(1000),
     supabase
       .from('whatsapp_state')
       .select('telefono,paso_actual,last_sku,last_nombre,last_precio,last_detalle,updated_at')
       .gte('updated_at', sinceIso)
-      .limit(200),
+      .limit(500),
     supabase
       .from('os_events')
-      .select('type,source_table,source_id,idempotency_key')
+      .select('type,source_table,source_id,idempotency_key,payload')
       .order('id', { ascending: false })
-      .limit(2000),
+      .limit(5000),
   ]);
 
   const existingKeys = new Set<string>();
   const existingOrderStates = new Set<string>();
   const existingAdIds = new Set<string>();
+  const existingAdDayCodes = new Set<string>();
   const existingTxIds = new Set<string>();
   for (const row of existingRes.data || []) {
     if (row.idempotency_key) existingKeys.add(row.idempotency_key);
     if (row.source_table === 'whatsapp_orders' && row.source_id && row.type) {
       existingOrderStates.add(`${row.source_id}:${row.type}`);
     }
-    if (row.source_table === 'gastos_publicidad' && row.source_id && row.type === 'marketing.ad.expense') {
-      existingAdIds.add(String(row.source_id));
+    if (row.source_table === 'gastos_publicidad' && row.type === 'marketing.ad.expense') {
+      if (row.source_id) existingAdIds.add(String(row.source_id));
+      const f = String(row.payload?.fecha || row.payload?.date || '').slice(0, 10);
+      const c = String(row.payload?.codigo_anuncio || '').trim().toUpperCase();
+      if (f && c) existingAdDayCodes.add(`${f}:${c}`);
     }
     if (row.source_table === 'finance_money_transactions' && row.source_id) {
       existingTxIds.add(String(row.source_id));
@@ -793,7 +797,13 @@ export async function backfillMissingOsEvents(days = 30): Promise<{
 
   for (const g of adsRes.data || []) {
     const k = `backfill:gastos_publicidad:${g.id}`;
-    if (existingKeys.has(k) || existingAdIds.has(String(g.id))) {
+    const adDayCode = `${String(g.fecha || '').slice(0, 10)}:${String(g.codigo_anuncio || '').trim().toUpperCase()}`;
+    if (
+      existingKeys.has(k) ||
+      existingAdIds.has(String(g.id)) ||
+      existingAdIds.has(adDayCode) ||
+      existingAdDayCodes.has(adDayCode)
+    ) {
       skippedExisting++;
       continue;
     }

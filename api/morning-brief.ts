@@ -55,12 +55,20 @@ async function emitBestEffortOsEvent(
 interface OsMemorySnapshot {
   daysLoaded: number;
   eventsLoaded: number;
+  svTodayIso: string;
+  d7StartIso: string;
+  d14StartIso: string;
+  d14EndIso: string;
   orders7d: number;
   ordersPrev7d: number;
   delivered7d: number;
   deliveredPrev7d: number;
+  inProgress7d: number;
+  inProgressPrev7d: number;
   cancelled7d: number;
   cancelledPrev7d: number;
+  grossSales7d: number;
+  grossSalesPrev7d: number;
   revenue7d: number;
   revenuePrev7d: number;
   adSpend7d: number;
@@ -69,8 +77,11 @@ interface OsMemorySnapshot {
   chatsOut7d: number;
   closeRate7d: number | null;
   cancelRate7d: number | null;
+  cancelRatePrev7d: number | null;
   roas7d: number | null;
   roasPrev7d: number | null;
+  roasGross7d: number | null;
+  roasGrossPrev7d: number | null;
   topInquiredNoClose: Array<{ sku: string; inquiries: number; orders: number }>;
   topCancelReasons: Array<{ reason: string; count: number }>;
   recentChanges: string[];
@@ -134,14 +145,36 @@ async function loadOsMemorySnapshotServer(
 
   const todayDate = new Date(`${svTodayIso}T12:00:00Z`);
   const d7Cutoff = new Date(todayDate.getTime() - 6 * 86400000).toISOString().slice(0, 10);
+  const d14End = new Date(todayDate.getTime() - 7 * 86400000).toISOString().slice(0, 10);
   const d14Cutoff = new Date(todayDate.getTime() - 13 * 86400000).toISOString().slice(0, 10);
+  const d14StartUtc = `${d14Cutoff}T06:00:00.000Z`;
+
+  // Consultar fuentes reales deduplicadas (whatsapp_orders + gastos_publicidad) para que 7d vs 7d ant. cuadre 1:1 con Rentabilidad/Pedidos
+  const [realOrders14Res, realAds14Res] = await Promise.all([
+    supabase
+      .from('whatsapp_orders')
+      .select('id,estado,total,created_at')
+      .gte('created_at', d14StartUtc)
+      .order('created_at', { ascending: false })
+      .limit(2500),
+    supabase
+      .from('gastos_publicidad')
+      .select('fecha,monto')
+      .gte('fecha', d14Cutoff)
+      .lte('fecha', svTodayIso)
+      .limit(2500),
+  ]);
 
   let orders7d = 0;
   let ordersPrev7d = 0;
   let delivered7d = 0;
   let deliveredPrev7d = 0;
+  let inProgress7d = 0;
+  let inProgressPrev7d = 0;
   let cancelled7d = 0;
   let cancelledPrev7d = 0;
+  let grossSales7d = 0;
+  let grossSalesPrev7d = 0;
   let revenue7d = 0;
   let revenuePrev7d = 0;
   let adSpend7d = 0;
@@ -194,6 +227,75 @@ async function loadOsMemorySnapshotServer(
     }
   }
 
+  // Sobrescribir métricas de pedidos y pauta con las tablas fuente reales cuando respondan sin error
+  if (!realOrders14Res.error && Array.isArray(realOrders14Res.data)) {
+    const normEst = (raw?: string | null) => {
+      const s = String(raw || '').trim().toLowerCase();
+      if (['entregado', 'entregada', 'completado', 'completada'].includes(s)) return 'entregado';
+      if (['cancelado', 'cancelada', 'rechazado', 'devuelto'].includes(s)) return 'cancelado';
+      return 'activo';
+    };
+
+    orders7d = 0;
+    ordersPrev7d = 0;
+    delivered7d = 0;
+    deliveredPrev7d = 0;
+    inProgress7d = 0;
+    inProgressPrev7d = 0;
+    cancelled7d = 0;
+    cancelledPrev7d = 0;
+    grossSales7d = 0;
+    grossSalesPrev7d = 0;
+    revenue7d = 0;
+    revenuePrev7d = 0;
+
+    for (const o of realOrders14Res.data) {
+      if (!o.created_at) continue;
+      const svDay = new Date(new Date(o.created_at).getTime() - 6 * 3600000).toISOString().slice(0, 10);
+      const est = normEst(o.estado);
+      const total = Number(o.total) || 0;
+
+      if (svDay >= d7Cutoff && svDay <= svTodayIso) {
+        orders7d += 1;
+        if (est === 'cancelado') {
+          cancelled7d += 1;
+        } else {
+          grossSales7d += total;
+          if (est === 'entregado') {
+            delivered7d += 1;
+            revenue7d += total;
+          } else {
+            inProgress7d += 1;
+          }
+        }
+      } else if (svDay >= d14Cutoff && svDay < d7Cutoff) {
+        ordersPrev7d += 1;
+        if (est === 'cancelado') {
+          cancelledPrev7d += 1;
+        } else {
+          grossSalesPrev7d += total;
+          if (est === 'entregado') {
+            deliveredPrev7d += 1;
+            revenuePrev7d += total;
+          } else {
+            inProgressPrev7d += 1;
+          }
+        }
+      }
+    }
+  }
+
+  if (!realAds14Res.error && Array.isArray(realAds14Res.data)) {
+    adSpend7d = 0;
+    adSpendPrev7d = 0;
+    for (const g of realAds14Res.data) {
+      const f = String(g.fecha || '').slice(0, 10);
+      const m = Number(g.monto) || 0;
+      if (f >= d7Cutoff && f <= svTodayIso) adSpend7d += m;
+      else if (f >= d14Cutoff && f < d7Cutoff) adSpendPrev7d += m;
+    }
+  }
+
   const productStats = new Map<string, { inquiries: number; orders: number }>();
   const cancelReasons = new Map<string, number>();
   const recentChanges: string[] = [];
@@ -235,10 +337,16 @@ async function loadOsMemorySnapshotServer(
     .slice(0, 3);
 
   const resolvedOrders = delivered7d + cancelled7d;
+  const resolvedPrevOrders = deliveredPrev7d + cancelledPrev7d;
   const closeRate7d = chatsIn7d > 0 ? Math.round((orders7d / Math.max(chatsIn7d / 3, 1)) * 1000) / 10 : null;
   const cancelRate7d = resolvedOrders > 0 ? Math.round((cancelled7d / resolvedOrders) * 1000) / 10 : null;
+  const cancelRatePrev7d =
+    resolvedPrevOrders > 0 ? Math.round((cancelledPrev7d / resolvedPrevOrders) * 1000) / 10 : null;
   const roas7d = adSpend7d > 0 ? Math.round((revenue7d / adSpend7d) * 100) / 100 : null;
   const roasPrev7d = adSpendPrev7d > 0 ? Math.round((revenuePrev7d / adSpendPrev7d) * 100) / 100 : null;
+  const roasGross7d = adSpend7d > 0 ? Math.round((grossSales7d / adSpend7d) * 100) / 100 : null;
+  const roasGrossPrev7d =
+    adSpendPrev7d > 0 ? Math.round((grossSalesPrev7d / adSpendPrev7d) * 100) / 100 : null;
 
   const dailyLines = memoryRows
     .slice(0, 14)
@@ -283,12 +391,20 @@ async function loadOsMemorySnapshotServer(
   return {
     daysLoaded: memoryRows.length,
     eventsLoaded: recentEvents.length,
+    svTodayIso,
+    d7StartIso: d7Cutoff,
+    d14StartIso: d14Cutoff,
+    d14EndIso: d14End,
     orders7d,
     ordersPrev7d,
     delivered7d,
     deliveredPrev7d,
+    inProgress7d,
+    inProgressPrev7d,
     cancelled7d,
     cancelledPrev7d,
+    grossSales7d: Math.round(grossSales7d * 100) / 100,
+    grossSalesPrev7d: Math.round(grossSalesPrev7d * 100) / 100,
     revenue7d: Math.round(revenue7d * 100) / 100,
     revenuePrev7d: Math.round(revenuePrev7d * 100) / 100,
     adSpend7d: Math.round(adSpend7d * 100) / 100,
@@ -297,8 +413,11 @@ async function loadOsMemorySnapshotServer(
     chatsOut7d,
     closeRate7d,
     cancelRate7d,
+    cancelRatePrev7d,
     roas7d,
     roasPrev7d,
+    roasGross7d,
+    roasGrossPrev7d,
     topInquiredNoClose,
     topCancelReasons,
     recentChanges,
@@ -3774,15 +3893,17 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
   if (!cleanQuestion) {
     const summaryLines = [
       `🧠 <b>MEMORIA HISTÓRICA · TODOENUNO OS</b>`,
-      `🗓 <i>${escapeHtml(svToday)} · ${mem.daysLoaded} días consolidados · ${mem.eventsLoaded} eventos recientes</i>`,
+      `🗓 <i>${escapeHtml(mem.d7StartIso)} → ${escapeHtml(mem.svTodayIso)} vs ${escapeHtml(mem.d14StartIso)} → ${escapeHtml(mem.d14EndIso)}</i>`,
       `━━━━━━━━━━━━━━`,
-      `📊 <b>SEMANA ACTUAL vs ANTERIOR (7D)</b>`,
-      `• Pedidos: <b>${mem.orders7d}</b> vs ${mem.ordersPrev7d} (${formatDeltaBadge(mem.orders7d, mem.ordersPrev7d)})`,
-      `• Entregados: <b>${mem.delivered7d}</b> vs ${mem.deliveredPrev7d} · Cancelados: <b>${mem.cancelled7d}</b> vs ${mem.cancelledPrev7d}`,
-      `• Cobrado: <b>${fmtMoney(mem.revenue7d)}</b> vs ${fmtMoney(mem.revenuePrev7d)} (${formatDeltaBadge(mem.revenue7d, mem.revenuePrev7d, true)})`,
+      `📊 <b>SEMANA ACTUAL vs ANTERIOR (7D reales)</b>`,
+      `• Pedidos creados: <b>${mem.orders7d}</b> vs ${mem.ordersPrev7d} (${formatDeltaBadge(mem.orders7d, mem.ordersPrev7d)})`,
+      `• Entregados: <b>${mem.delivered7d}</b> vs ${mem.deliveredPrev7d} · En ruta/proceso: <b>${mem.inProgress7d}</b> vs ${mem.inProgressPrev7d} · Cancelados: <b>${mem.cancelled7d}</b> vs ${mem.cancelledPrev7d}`,
+      `• Facturado (no canc.): <b>${fmtMoney(mem.grossSales7d)}</b> vs ${fmtMoney(mem.grossSalesPrev7d)} · Cobrado (entr.): <b>${fmtMoney(mem.revenue7d)}</b> vs ${fmtMoney(mem.revenuePrev7d)}`,
       `• Pauta Meta: <b>${fmtMoney(mem.adSpend7d)}</b> vs ${fmtMoney(mem.adSpendPrev7d)}${
-        mem.roas7d !== null ? ` · ROAS: <b>${mem.roas7d.toFixed(2)}x</b>` : ''
-      }${mem.roasPrev7d !== null ? ` (prev ${mem.roasPrev7d.toFixed(2)}x)` : ''}`,
+        mem.roas7d !== null ? ` · ROAS cobrado: <b>${mem.roas7d.toFixed(2)}x</b>` : ''
+      }${mem.roasPrev7d !== null ? ` (prev ${mem.roasPrev7d.toFixed(2)}x)` : ''}${
+        mem.roasGross7d !== null ? ` · ROAS venta: <b>${mem.roasGross7d.toFixed(2)}x</b>` : ''
+      }`,
       '',
       `💰 <b>PULSO EN VIVO</b>`,
       cashSummary.hasNegativeCard && cashSummary.cashAndBankTotal !== totalCash
@@ -3799,7 +3920,7 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
             .join(', ')}`
         : '',
       mem.dailyLines.length > 0
-        ? `\n📅 <b>Últimos días</b>\n${mem.dailyLines
+        ? `\n📅 <b>Últimos días (Bitácora OS)</b>\n${mem.dailyLines
             .slice(0, 5)
             .map((l) => `• ${escapeHtml(l)}`)
             .join('\n')}`
@@ -3818,8 +3939,8 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
       [
         `🧠 <b>ANÁLISIS DESDE MEMORIA OS</b>`,
         `━━━━━━━━━━━━━━`,
-        `• 7d vs prev: <b>${mem.orders7d}</b> vs ${mem.ordersPrev7d} ped. · <b>${mem.delivered7d}</b> vs ${mem.deliveredPrev7d} entr.`,
-        `• Cobrado: <b>${fmtMoney(mem.revenue7d)}</b> vs ${fmtMoney(mem.revenuePrev7d)} · Pauta: <b>${fmtMoney(mem.adSpend7d)}</b>`,
+        `• 7d vs prev: <b>${mem.orders7d}</b> vs ${mem.ordersPrev7d} ped. · <b>${mem.delivered7d}</b> vs ${mem.deliveredPrev7d} entr. (${mem.inProgress7d} en ruta/proceso)`,
+        `• Facturado: <b>${fmtMoney(mem.grossSales7d)}</b> vs ${fmtMoney(mem.grossSalesPrev7d)} · Cobrado: <b>${fmtMoney(mem.revenue7d)}</b> vs ${fmtMoney(mem.revenuePrev7d)} · Pauta: <b>${fmtMoney(mem.adSpend7d)}</b>`,
         mem.deterministicInsight ? `<blockquote>📌 ${escapeHtml(mem.deterministicInsight)}</blockquote>` : '',
         mem.dailyLines.slice(0, 4).map((l) => `• ${escapeHtml(l)}`).join('\n'),
       ]
@@ -3832,8 +3953,9 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
 
   const contextBlock = [
     `Fecha hoy SV: ${svToday}`,
-    `SEMANA ACTUAL (últimos 7d): pedidos=${mem.orders7d}, entregados=${mem.delivered7d}, cancelados=${mem.cancelled7d}, cobrado=$${mem.revenue7d.toFixed(2)}, pauta=$${mem.adSpend7d.toFixed(2)}, roas=${mem.roas7d ?? 'N/A'}, chats_in=${mem.chatsIn7d}, chats_out=${mem.chatsOut7d}`,
-    `SEMANA ANTERIOR (días -14 a -8): pedidos=${mem.ordersPrev7d}, entregados=${mem.deliveredPrev7d}, cancelados=${mem.cancelledPrev7d}, cobrado=$${mem.revenuePrev7d.toFixed(2)}, pauta=$${mem.adSpendPrev7d.toFixed(2)}, roas=${mem.roasPrev7d ?? 'N/A'}`,
+    `NOTA METODOLÓGICA: Las cifras semanales vienen directamente de pedidos reales por fecha de creación (entregados + en_proceso + cancelados = total pedidos) y de gastos_publicidad sin duplicados.`,
+    `SEMANA ACTUAL (${mem.d7StartIso} a ${mem.svTodayIso}): pedidos=${mem.orders7d}, entregados=${mem.delivered7d}, en_proceso_o_ruta=${mem.inProgress7d}, cancelados=${mem.cancelled7d}, tasa_cancelacion_resueltos=${mem.cancelRate7d ?? 'N/A'}%, facturado_no_cancelado=$${mem.grossSales7d.toFixed(2)}, cobrado_entregado=$${mem.revenue7d.toFixed(2)}, pauta_meta=$${mem.adSpend7d.toFixed(2)}, roas_cobrado=${mem.roas7d ?? 'N/A'}, roas_facturado=${mem.roasGross7d ?? 'N/A'}, chats_in=${mem.chatsIn7d}, chats_out=${mem.chatsOut7d}`,
+    `SEMANA ANTERIOR (${mem.d14StartIso} a ${mem.d14EndIso}): pedidos=${mem.ordersPrev7d}, entregados=${mem.deliveredPrev7d}, en_proceso_o_ruta=${mem.inProgressPrev7d}, cancelados=${mem.cancelledPrev7d}, tasa_cancelacion_resueltos=${mem.cancelRatePrev7d ?? 'N/A'}%, facturado_no_cancelado=$${mem.grossSalesPrev7d.toFixed(2)}, cobrado_entregado=$${mem.revenuePrev7d.toFixed(2)}, pauta_meta=$${mem.adSpendPrev7d.toFixed(2)}, roas_cobrado=${mem.roasPrev7d ?? 'N/A'}, roas_facturado=${mem.roasGrossPrev7d ?? 'N/A'}`,
     `ESTADO EN VIVO HOY: liquidez_neta=$${totalCash.toFixed(2)}, cajas_y_bancos=$${cashSummary.cashAndBankTotal.toFixed(2)}, desglose_cuentas="${cashSummary.compactBreakdown}", entregados_sin_depositar=${deliveredUnliq.length} ($${sumArr(deliveredUnliq).toFixed(2)}), en_ruta=${inRouteList.length} ($${sumArr(inRouteList).toFixed(2)})`,
     `STOCK EN RIESGO (ritmo 7d vs disponible): ${runwayAlerts.join(' | ') || 'ninguno en alerta'}`,
     `SIN STOCK ACTUALMENTE: ${zeroStock.join(', ') || 'ninguno'}`,
@@ -3843,7 +3965,7 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
     `MOTIVOS CANCELACIÓN (30d pedidos): ${topCancels30.join(' | ') || 'sin motivos registrados'}`,
     `MOTIVOS CANCELACIÓN/INCIDENCIA (eventos): ${JSON.stringify(mem.topCancelReasons)}`,
     ``,
-    `MEMORIA DIARIA (os_daily_memory):`,
+    `BITÁCORA DIARIA OS (solo referencia de chats/eventos):`,
     mem.dailyLines.join('\n') || '(sin filas diarias aún)',
     ``,
     `EVENTOS RECIENTES (os_events últimos ${mem.recentEventLines.length}):`,
@@ -3861,12 +3983,12 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         temperature: 0.25,
-        max_tokens: 680,
+        max_tokens: 720,
         messages: [
           {
             role: 'system',
             content:
-              'Eres el Cerebro Analítico IA de TODOENUNO OS (tienda ecommerce contra entrega en El Salvador). Responde en español usando SOLO HTML básico de Telegram (<b>, <i>, <code>, <blockquote>) — PROHIBIDO usar markdown como ** o ###. Organiza la respuesta de forma visual y fácil de escanear en celular: usa emojis de sección (📊, 💰, 📦, 🎯, ⚡), viñetas (•) con cifras en <b>negrita</b> y termina con un <blockquote>⚡ <b>Conclusión / Acción:</b> ...</blockquote> breve y accionable. Usa EXCLUSIVAMENTE los datos reales proporcionados; si un dato falta, dilo directo y nunca inventes cifras.',
+              'Eres el Cerebro Analítico IA de TODOENUNO OS (tienda ecommerce contra entrega en El Salvador). Responde en español usando SOLO HTML básico de Telegram (<b>, <i>, <code>, <blockquote>) — PROHIBIDO usar markdown como ** o ###. Organiza la respuesta de forma visual y fácil de escanear en celular: usa emojis de sección (📊, 💰, 📦, 🎯, ⚡), viñetas (•) con cifras en <b>negrita</b> y termina con un <blockquote>⚡ <b>Conclusión / Acción:</b> ...</blockquote> breve y accionable. Cuando compares semanas, usa los bloques SEMANA ACTUAL vs SEMANA ANTERIOR (incluyendo pedidos en proceso/ruta y tanto facturado como cobrado para no distorsionar días recientes que aún están en entrega). Usa EXCLUSIVAMENTE los datos reales proporcionados; si un dato falta, dilo directo y nunca inventes cifras.',
           },
           {
             role: 'user',
