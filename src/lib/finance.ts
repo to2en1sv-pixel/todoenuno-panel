@@ -46,10 +46,25 @@ const DEFAULT_ACCOUNTS: CashAccount[] = [
   },
 ];
 
-const currentMonth = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-};
+function svTodayYmd(refDate: Date = new Date()): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/El_Salvador',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(refDate);
+    const y = parts.find(p => p.type === 'year')?.value;
+    const m = parts.find(p => p.type === 'month')?.value;
+    const d = parts.find(p => p.type === 'day')?.value;
+    if (y && m && d) return `${y}-${m}-${d}`;
+  } catch {
+    // fallback
+  }
+  return new Date(refDate.getTime() - 6 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+const currentMonth = () => svTodayYmd().slice(0, 7);
 
 const DEFAULT_BUDGETS: Budget[] = [
   {
@@ -581,7 +596,7 @@ export async function updateCashAccountBalance(
 
     if (options?.recordAdjustmentTx !== false && Math.abs(delta) >= 0.01 && isRealDb) {
       const tipo: TransactionType = delta > 0 ? 'income' : 'expense';
-      const today = new Date().toISOString().slice(0, 10);
+      const today = svTodayYmd();
       const motivo = options?.motivo?.trim();
       const desc = motivo
         ? `Conciliación ${targetAcc?.nombre || id}: ${motivo}`
@@ -800,16 +815,32 @@ export async function liquidateOrderInFinances(params: {
     }
 
     if (monto > 0) {
-      await addManualTransaction({
+      const txRes = await addManualTransaction({
         account_id: accountId,
         tipo: 'income',
         categoria: 'venta_contraentrega',
         monto,
         descripcion: `Liquidación pedido ${codigo} (${cliente})`,
-        fecha: new Date().toISOString().slice(0, 10),
+        fecha: svTodayYmd(),
         source_table: 'whatsapp_orders',
         source_id: order.id,
       });
+
+      if (!txRes.isRealDb) {
+        await supabase
+          .from('whatsapp_orders')
+          .update({
+            liquidado: false,
+            liquidado_at: null,
+            cuenta_liquidacion: null,
+          })
+          .eq('id', order.id);
+        return {
+          success: false,
+          error:
+            'No se pudo asentar el ingreso en Finanzas; la liquidación fue revertida para evitar descuadre.',
+        };
+      }
     }
 
     if (prevEstado !== 'entregado' && onSyncInventory) {
@@ -1029,14 +1060,6 @@ export async function deleteMoneyTransaction(id: number | string): Promise<{ suc
         }
         return acc;
       });
-
-      if (txToDelete.source_table === 'gastos_publicidad' && txToDelete.source_id) {
-        try {
-          await supabase.from('gastos_publicidad').delete().eq('id', txToDelete.source_id);
-        } catch {
-          // continuar
-        }
-      }
     }
 
     localTransactions = localTransactions.filter(t => String(t.id) !== String(id));

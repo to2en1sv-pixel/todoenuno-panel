@@ -375,7 +375,7 @@ export function FinanzasPage() {
   const [manualDescripcion, setManualDescripcion] = useState('');
   const [manualCategoria, setManualCategoria] = useState('gasto_manual');
   const [manualAccountId, setManualAccountId] = useState('caja_chica');
-  const [manualFecha, setManualFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [manualFecha, setManualFecha] = useState(() => getSvTodayStr());
   const [manualCodigoAnuncio, setManualCodigoAnuncio] = useState('');
   const [isSavingManual, setIsSavingManual] = useState(false);
 
@@ -385,7 +385,7 @@ export function FinanzasPage() {
   const [transferDestinoId, setTransferDestinoId] = useState('tarjeta_pauta');
   const [transferMonto, setTransferMonto] = useState('');
   const [transferDescripcion, setTransferDescripcion] = useState('');
-  const [transferFecha, setTransferFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [transferFecha, setTransferFecha] = useState(() => getSvTodayStr());
   const [isSavingTransfer, setIsSavingTransfer] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
 
@@ -907,7 +907,7 @@ export function FinanzasPage() {
       categoria: 'suscripciones',
       monto: pago.monto,
       descripcion: `Pago recurrente ${pago.nombre}`,
-      fecha: new Date().toISOString().slice(0, 10),
+      fecha: getSvTodayStr(),
     });
 
     await loadFinanceData(true);
@@ -1085,6 +1085,12 @@ export function FinanzasPage() {
                 <span className="font-medium text-[var(--tx)]">{periodRange.label}</span>
                 <span aria-hidden="true">·</span>
                 <span>{periodMetrics.transactionsCount} movimientos</span>
+                {cutoffLabel && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>Corte desde {cutoffLabel}</span>
+                  </>
+                )}
                 {periodRange.comparisonLabel && (
                   <>
                     <span aria-hidden="true">·</span>

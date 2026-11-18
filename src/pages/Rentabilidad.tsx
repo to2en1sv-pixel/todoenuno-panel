@@ -100,7 +100,15 @@ export function RentabilidadPage() {
     setError(null)
     setExito(null)
     try {
-      const res = await fetch('/api/meta-ads-sync?action=sync&days=2', { method: 'POST' })
+      const hoy = hoyLocal()
+      const since = rango.fechaInicio
+      const until = rango.fechaFin < hoy ? rango.fechaFin : hoy
+      if (since > hoy) {
+        setError('No se puede sincronizar un mes futuro.')
+        return
+      }
+      const qs = new URLSearchParams({ action: 'sync', since, until })
+      const res = await fetch(`/api/meta-ads-sync?${qs.toString()}`, { method: 'POST' })
       const ct = res.headers.get('content-type') || ''
       if (!ct.includes('application/json')) {
         setError('La sincronización con Meta Ads requiere el servidor API desplegado en Vercel.')
