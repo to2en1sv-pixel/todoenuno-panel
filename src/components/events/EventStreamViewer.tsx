@@ -170,13 +170,17 @@ insert into os.state_event_map (source_table, estado, event_type) values
   ('whatsapp_orders', 'devuelto',    'order.cancelled')
 on conflict (source_table, estado) do update set event_type = excluded.event_type;
 
--- 4. Emisor seguro con auto-registro de tipos y RPC público
+-- 4. Emisor seguro con auto-registro de tipos y fecha histórica
+drop function if exists public.emit_os_event(text, text, text, text, jsonb);
+drop function if exists os.emit_event(text, text, text, text, jsonb);
+
 create or replace function os.emit_event(
   p_type            text,
   p_source_table    text,
   p_source_id       text,
   p_idempotency_key text,
-  p_payload         jsonb default '{}'::jsonb
+  p_payload         jsonb default '{}'::jsonb,
+  p_occurred_at     timestamptz default null
 ) returns bigint
 language plpgsql security definer set search_path = os, public as $$
 declare
@@ -198,8 +202,15 @@ begin
   values (p_type, v_domain, 'Auto-registrado por emisor del OS', true)
   on conflict (type) do nothing;
 
-  insert into os.events (type, source_table, source_id, idempotency_key, payload)
-  values (p_type, p_source_table, p_source_id, p_idempotency_key, coalesce(p_payload, '{}'::jsonb))
+  insert into os.events (type, occurred_at, source_table, source_id, idempotency_key, payload)
+  values (
+    p_type,
+    coalesce(p_occurred_at, now()),
+    p_source_table,
+    p_source_id,
+    p_idempotency_key,
+    coalesce(p_payload, '{}'::jsonb)
+  )
   on conflict (idempotency_key) do nothing
   returning id into v_id;
 
@@ -212,10 +223,11 @@ create or replace function public.emit_os_event(
   p_source_table    text,
   p_source_id       text,
   p_idempotency_key text,
-  p_payload         jsonb default '{}'::jsonb
+  p_payload         jsonb default '{}'::jsonb,
+  p_occurred_at     timestamptz default null
 ) returns bigint
 language sql security definer set search_path = os, public as $$
-  select os.emit_event(p_type, p_source_table, p_source_id, p_idempotency_key, p_payload);
+  select os.emit_event(p_type, p_source_table, p_source_id, p_idempotency_key, p_payload, p_occurred_at);
 $$;
 
 -- 5. Triggers automáticos sobre whatsapp_orders, bb_messages, bb_conversations y fb_leads
@@ -578,8 +590,8 @@ grant usage on schema os to anon, authenticated, service_role;
 grant select, insert on os.events to anon, authenticated, service_role;
 grant select, insert, update on os.event_types, os.event_consumers, os.daily_memory to anon, authenticated, service_role;
 grant select on os.state_event_map to anon, authenticated, service_role;
-grant execute on function os.emit_event(text, text, text, text, jsonb) to anon, authenticated, service_role;
-grant execute on function public.emit_os_event(text, text, text, text, jsonb) to anon, authenticated, service_role;
+grant execute on function os.emit_event(text, text, text, text, jsonb, timestamptz) to anon, authenticated, service_role;
+grant execute on function public.emit_os_event(text, text, text, text, jsonb, timestamptz) to anon, authenticated, service_role;
 grant execute on function os.rebuild_daily_memory(int) to anon, authenticated, service_role;
 grant execute on function public.rebuild_os_memory(int) to anon, authenticated, service_role;
 
@@ -626,6 +638,54 @@ begin
     end if;
   end if;
 end $$;
+
+-- 8. Reparar fechas históricas y eliminar cualquier duplicado previo de backfill
+delete from os.events b
+where b.idempotency_key like 'backfill:whatsapp_orders:%'
+  and exists (
+    select 1 from os.events r
+    where r.source_table = 'whatsapp_orders'
+      and r.source_id = b.source_id
+      and r.type = b.type
+      and r.idempotency_key not like 'backfill:%'
+  );
+
+update os.events e
+set occurred_at = coalesce(
+  case when e.type = 'order.created' then o.created_at
+       else coalesce((to_jsonb(o)->>'liquidado_at')::timestamptz, o.created_at)
+  end,
+  e.occurred_at
+)
+from public.whatsapp_orders o
+where e.source_table = 'whatsapp_orders'
+  and e.source_id = o.id::text
+  and (e.idempotency_key like 'backfill:%' or coalesce((e.payload->>'backfill')::boolean, false) = true);
+
+update os.events e
+set occurred_at = (g.fecha::text || ' 18:00:00-06')::timestamptz
+from public.gastos_publicidad g
+where e.source_table = 'gastos_publicidad'
+  and e.source_id = g.id::text
+  and e.idempotency_key like 'backfill:gastos_publicidad:%'
+  and g.fecha is not null;
+
+update os.events e
+set occurred_at = (tx.fecha::text || ' 18:00:00-06')::timestamptz
+from public.finance_money_transactions tx
+where e.source_table = 'finance_money_transactions'
+  and e.source_id = tx.id::text
+  and e.idempotency_key like 'backfill:finance_tx:%'
+  and tx.fecha is not null;
+
+update os.events e
+set occurred_at = coalesce(ws.updated_at, e.occurred_at)
+from public.whatsapp_state ws
+where e.source_table = 'whatsapp_state'
+  and e.source_id = ws.telefono
+  and e.idempotency_key like 'backfill:funnel:%';
+
+delete from os.daily_memory;
 
 select public.rebuild_os_memory(30) as sprint12_resultado;`;
 
@@ -681,6 +741,11 @@ export function EventStreamViewer() {
     setIsRealDb(result.isRealDb);
     setDbError(result.error || null);
     setLastDiagnostic(getLastEmitDiagnostic());
+    window.dispatchEvent(
+      new CustomEvent('os-events-synced', {
+        detail: { totalCount: result.totalCount, events: result.events },
+      })
+    );
 
     const [typesData, consumersData, memoryData] = await Promise.all([
       fetchOsEventTypes(),
@@ -750,8 +815,12 @@ export function EventStreamViewer() {
       await loadData(true);
 
       if (mem.ok) {
+        const prefix =
+          backfill.newlyInserted > 0
+            ? `Agregados ${backfill.newlyInserted} eventos nuevos (escaneados: ${backfill.scannedOrders} pedidos, ${backfill.scannedAds} pautas, ${backfill.scannedFinances} movs, ${backfill.scannedFunnels} chats)`
+            : `Todo al día: 0 eventos nuevos (${backfill.skippedExisting} ya existían sin duplicar)`;
         setSyncStatus(
-          `Sincronizados ${backfill.scannedOrders} pedidos, ${backfill.scannedAds} pautas, ${backfill.scannedFinances} movs y ${backfill.scannedFunnels} chats · Memoria IA consolidada (${mem.daysUpdated} días · hasta evento #${mem.lastEventId}).`
+          `${prefix} · Memoria IA consolidada (${mem.daysUpdated} días · hasta evento #${mem.lastEventId}).`
         );
       } else {
         setSyncStatus(

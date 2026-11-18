@@ -86,5 +86,6 @@ export interface EmitEventParams {
   source_table: string;
   source_id: string;
   idempotency_key?: string;
+  occurred_at?: string;
   payload: Record<string, any>;
 }

@@ -15,6 +15,17 @@ export function EventStreamPage() {
       setTotalCount(res.totalCount);
     });
 
+    const handleSynced = (e: Event) => {
+      const detail = (e as CustomEvent<{ totalCount?: number; events?: OsEvent[] }>).detail;
+      if (typeof detail?.totalCount === 'number') {
+        setTotalCount(detail.totalCount);
+      }
+      if (Array.isArray(detail?.events)) {
+        setEvents(detail.events.slice(0, 120));
+      }
+    };
+    window.addEventListener('os-events-synced', handleSynced);
+
     const unsubscribe = subscribeToOsEvents((newEvent) => {
       setEvents((prev) => {
         if (
@@ -31,7 +42,10 @@ export function EventStreamPage() {
       });
     });
 
-    return () => unsubscribe();
+    return () => {
+      window.removeEventListener('os-events-synced', handleSynced);
+      unsubscribe();
+    };
   }, []);
 
   return (

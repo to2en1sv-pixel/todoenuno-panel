@@ -397,15 +397,23 @@ export async function fetchOsConsumers(): Promise<OsEventConsumer[]> {
  */
 export async function emitOsEvent(
   params: EmitEventParams
-): Promise<{ success: boolean; event: OsEvent; isRealDb: boolean; error?: string }> {
+): Promise<{
+  success: boolean;
+  duplicate?: boolean;
+  event: OsEvent;
+  isRealDb: boolean;
+  error?: string;
+}> {
   const idempotency_key =
     params.idempotency_key ||
     `${params.source_table}:${params.source_id}:${params.type}:${Date.now()}`;
 
+  const effectiveOccurredAt = params.occurred_at || new Date().toISOString();
+
   const newEvent: OsEvent = {
     id: Date.now(),
     type: params.type,
-    occurred_at: new Date().toISOString(),
+    occurred_at: effectiveOccurredAt,
     source_table: params.source_table,
     source_id: params.source_id,
     idempotency_key,
@@ -414,33 +422,53 @@ export async function emitOsEvent(
   };
 
   let isRealDb = false;
+  let duplicate = false;
   let dbErrMsg: string | undefined;
 
   try {
-    const rpcRes = await supabase.rpc('emit_os_event', {
+    let rpcRes = await supabase.rpc('emit_os_event', {
       p_type: newEvent.type,
       p_source_table: newEvent.source_table,
       p_source_id: newEvent.source_id,
       p_idempotency_key: newEvent.idempotency_key,
       p_payload: newEvent.payload,
+      ...(params.occurred_at ? { p_occurred_at: params.occurred_at } : {}),
     });
 
+    // Compatibilidad si la BD aún tiene la firma de 5 argumentos
+    if (rpcRes.error && params.occurred_at) {
+      rpcRes = await supabase.rpc('emit_os_event', {
+        p_type: newEvent.type,
+        p_source_table: newEvent.source_table,
+        p_source_id: newEvent.source_id,
+        p_idempotency_key: newEvent.idempotency_key,
+        p_payload: newEvent.payload,
+      });
+    }
+
     if (!rpcRes.error && typeof rpcRes.data === 'number') {
-      if (rpcRes.data > 0) newEvent.id = rpcRes.data;
+      if (rpcRes.data > 0) {
+        newEvent.id = rpcRes.data;
+      } else if (rpcRes.data === -1) {
+        duplicate = true;
+      }
       isRealDb = true;
       lastEmitDiagnostic = null;
     } else {
       dbErrMsg = rpcRes.error?.message;
+      const insertRow: Record<string, any> = {
+        type: newEvent.type,
+        source_table: newEvent.source_table,
+        source_id: newEvent.source_id,
+        idempotency_key: newEvent.idempotency_key,
+        payload: newEvent.payload,
+      };
+      if (params.occurred_at) insertRow.occurred_at = params.occurred_at;
+
       const schemaRes = await (supabase as any)
         .schema('os')
         .from('events')
-        .insert({
-          type: newEvent.type,
-          source_table: newEvent.source_table,
-          source_id: newEvent.source_id,
-          idempotency_key: newEvent.idempotency_key,
-          payload: newEvent.payload,
-        })
+        .insert(insertRow)
         .select()
         .single();
 
@@ -448,23 +476,25 @@ export async function emitOsEvent(
         newEvent.id = schemaRes.data.id;
         isRealDb = true;
         lastEmitDiagnostic = null;
+      } else if (schemaRes.error?.code === '23505') {
+        isRealDb = true;
+        duplicate = true;
+        lastEmitDiagnostic = null;
       } else {
         dbErrMsg = schemaRes.error?.message || dbErrMsg;
         const viewRes = await supabase
           .from('os_events')
-          .insert({
-            type: newEvent.type,
-            source_table: newEvent.source_table,
-            source_id: newEvent.source_id,
-            idempotency_key: newEvent.idempotency_key,
-            payload: newEvent.payload,
-          })
+          .insert(insertRow)
           .select()
           .single();
 
         if (!viewRes.error && viewRes.data) {
           newEvent.id = viewRes.data.id;
           isRealDb = true;
+          lastEmitDiagnostic = null;
+        } else if (viewRes.error?.code === '23505') {
+          isRealDb = true;
+          duplicate = true;
           lastEmitDiagnostic = null;
         } else {
           dbErrMsg = viewRes.error?.message || dbErrMsg;
@@ -480,10 +510,18 @@ export async function emitOsEvent(
     console.warn('emitOsEvent fallback local:', lastEmitDiagnostic);
   }
 
-  localEvents = [newEvent, ...localEvents.slice(0, 299)];
-  subscribers.forEach((cb) => cb(newEvent));
+  // Solo notificar al stream local si el evento realmente es nuevo (no duplicado en BD)
+  if (!duplicate) {
+    const alreadyLocal = localEvents.some(
+      (e) => e.idempotency_key === newEvent.idempotency_key
+    );
+    if (!alreadyLocal) {
+      localEvents = [newEvent, ...localEvents.slice(0, 299)];
+      subscribers.forEach((cb) => cb(newEvent));
+    }
+  }
 
-  return { success: true, event: newEvent, isRealDb, error: dbErrMsg };
+  return { success: true, duplicate, event: newEvent, isRealDb, error: dbErrMsg };
 }
 
 /**
@@ -593,7 +631,8 @@ export async function rebuildOsMemory(
     await emitOsEvent({
       type: 'system.memory.consolidated',
       source_table: 'os_daily_memory',
-      source_id: `sync:${Date.now()}`,
+      source_id: `sync:${new Date().toISOString().slice(0, 10)}`,
+      idempotency_key: `system:memory:consolidated:${new Date().toISOString().slice(0, 13)}`,
       payload: {
         days_updated: updated,
         last_event_id: maxId,
@@ -613,10 +652,12 @@ export async function rebuildOsMemory(
 }
 
 /**
- * Reconstruye eventos faltantes idempotentes de pedidos, pauta, transacciones y estados recientes
+ * Reconstruye eventos faltantes idempotentes respetando fechas reales y sin duplicar triggers previos
  */
 export async function backfillMissingOsEvents(days = 30): Promise<{
+  newlyInserted: number;
   insertedEstimate: number;
+  skippedExisting: number;
   scannedOrders: number;
   scannedAds: number;
   scannedFinances: number;
@@ -625,10 +666,10 @@ export async function backfillMissingOsEvents(days = 30): Promise<{
   const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
   const sinceDate = sinceIso.slice(0, 10);
 
-  const [ordersRes, adsRes, txRes, stateRes] = await Promise.all([
+  const [ordersRes, adsRes, txRes, stateRes, existingRes] = await Promise.all([
     supabase
       .from('whatsapp_orders')
-      .select('id,pedido_codigo,nombre_cliente,telefono,sku,catalogo_sku,total,estado,codigo_anuncio,departamento,metodo_pago,created_at')
+      .select('id,pedido_codigo,nombre_cliente,telefono,sku,catalogo_sku,total,estado,codigo_anuncio,departamento,metodo_pago,created_at,liquidado_at')
       .gte('created_at', sinceIso)
       .order('created_at', { ascending: false })
       .limit(300),
@@ -647,35 +688,63 @@ export async function backfillMissingOsEvents(days = 30): Promise<{
       .select('telefono,paso_actual,last_sku,last_nombre,last_precio,last_detalle,updated_at')
       .gte('updated_at', sinceIso)
       .limit(200),
+    supabase
+      .from('os_events')
+      .select('type,source_table,source_id,idempotency_key')
+      .order('id', { ascending: false })
+      .limit(2000),
   ]);
 
-  let emitted = 0;
+  const existingKeys = new Set<string>();
+  const existingOrderStates = new Set<string>();
+  for (const row of existingRes.data || []) {
+    if (row.idempotency_key) existingKeys.add(row.idempotency_key);
+    if (row.source_table === 'whatsapp_orders' && row.source_id && row.type) {
+      existingOrderStates.add(`${row.source_id}:${row.type}`);
+    }
+  }
+
+  let newlyInserted = 0;
+  let skippedExisting = 0;
 
   for (const o of ordersRes.data || []) {
     const estado = String(o.estado || 'nuevo').toLowerCase();
-    const res1 = await emitOsEvent({
-      type: 'order.created',
-      source_table: 'whatsapp_orders',
-      source_id: String(o.id),
-      idempotency_key: `whatsapp_orders:${o.id}:order.created`,
-      payload: {
-        order_id: o.id,
-        pedido_codigo: o.pedido_codigo || `PED-${String(o.id).slice(0, 8)}`,
-        nombre_cliente: o.nombre_cliente,
-        telefono: o.telefono,
-        sku: o.sku,
-        catalogo_sku: o.catalogo_sku,
-        total: Number(o.total || 0),
-        estado,
-        codigo_anuncio: o.codigo_anuncio,
-        departamento: o.departamento,
-        metodo_pago: o.metodo_pago,
-        backfill: true,
-      },
-    });
-    if (res1.isRealDb) emitted++;
+    const createdKey = `whatsapp_orders:${o.id}:order.created`;
 
-    if (estado === 'entregado' || estado === 'cancelado' || estado === 'en_camino' || estado === 'por_empacar') {
+    if (existingKeys.has(createdKey) || existingOrderStates.has(`${o.id}:order.created`)) {
+      skippedExisting++;
+    } else {
+      const res1 = await emitOsEvent({
+        type: 'order.created',
+        source_table: 'whatsapp_orders',
+        source_id: String(o.id),
+        idempotency_key: createdKey,
+        occurred_at: o.created_at || undefined,
+        payload: {
+          order_id: o.id,
+          pedido_codigo: o.pedido_codigo || `PED-${String(o.id).slice(0, 8)}`,
+          nombre_cliente: o.nombre_cliente,
+          telefono: o.telefono,
+          sku: o.sku,
+          catalogo_sku: o.catalogo_sku,
+          total: Number(o.total || 0),
+          estado,
+          codigo_anuncio: o.codigo_anuncio,
+          departamento: o.departamento,
+          metodo_pago: o.metodo_pago,
+          backfill: true,
+        },
+      });
+      if (res1.isRealDb && !res1.duplicate) newlyInserted++;
+      else skippedExisting++;
+    }
+
+    if (
+      estado === 'entregado' ||
+      estado === 'cancelado' ||
+      estado === 'en_camino' ||
+      estado === 'por_empacar'
+    ) {
       const mapType: Record<string, string> = {
         por_empacar: 'order.confirmed',
         en_camino: 'order.shipped',
@@ -683,35 +752,50 @@ export async function backfillMissingOsEvents(days = 30): Promise<{
         cancelado: 'order.cancelled',
       };
       const t = mapType[estado];
+      const stateKey = `backfill:whatsapp_orders:${o.id}:${t}`;
       if (t) {
-        await emitOsEvent({
-          type: t,
-          source_table: 'whatsapp_orders',
-          source_id: String(o.id),
-          idempotency_key: `backfill:whatsapp_orders:${o.id}:${t}`,
-          payload: {
-            order_id: o.id,
-            pedido_codigo: o.pedido_codigo || `PED-${String(o.id).slice(0, 8)}`,
-            nombre_cliente: o.nombre_cliente,
-            telefono: o.telefono,
-            sku: o.sku,
-            catalogo_sku: o.catalogo_sku,
-            total: Number(o.total || 0),
-            estado,
-            codigo_anuncio: o.codigo_anuncio,
-            backfill: true,
-          },
-        });
+        if (existingKeys.has(stateKey) || existingOrderStates.has(`${o.id}:${t}`)) {
+          skippedExisting++;
+        } else {
+          const res2 = await emitOsEvent({
+            type: t,
+            source_table: 'whatsapp_orders',
+            source_id: String(o.id),
+            idempotency_key: stateKey,
+            occurred_at: o.liquidado_at || o.created_at || undefined,
+            payload: {
+              order_id: o.id,
+              pedido_codigo: o.pedido_codigo || `PED-${String(o.id).slice(0, 8)}`,
+              nombre_cliente: o.nombre_cliente,
+              telefono: o.telefono,
+              sku: o.sku,
+              catalogo_sku: o.catalogo_sku,
+              total: Number(o.total || 0),
+              estado,
+              codigo_anuncio: o.codigo_anuncio,
+              backfill: true,
+            },
+          });
+          if (res2.isRealDb && !res2.duplicate) newlyInserted++;
+          else skippedExisting++;
+        }
       }
     }
   }
 
   for (const g of adsRes.data || []) {
-    await emitOsEvent({
+    const k = `backfill:gastos_publicidad:${g.id}`;
+    if (existingKeys.has(k)) {
+      skippedExisting++;
+      continue;
+    }
+    const adTs = g.fecha ? `${String(g.fecha).slice(0, 10)}T18:00:00-06:00` : undefined;
+    const res = await emitOsEvent({
       type: 'marketing.ad.expense',
       source_table: 'gastos_publicidad',
       source_id: String(g.id),
-      idempotency_key: `backfill:gastos_publicidad:${g.id}`,
+      idempotency_key: k,
+      occurred_at: adTs,
       payload: {
         fecha: g.fecha,
         codigo_anuncio: g.codigo_anuncio,
@@ -721,21 +805,29 @@ export async function backfillMissingOsEvents(days = 30): Promise<{
         backfill: true,
       },
     });
-    emitted++;
+    if (res.isRealDb && !res.duplicate) newlyInserted++;
+    else skippedExisting++;
   }
 
   for (const tx of txRes.data || []) {
+    const k = `backfill:finance_tx:${tx.id}`;
+    if (existingKeys.has(k)) {
+      skippedExisting++;
+      continue;
+    }
     const tType =
       tx.tipo === 'income'
         ? 'finance.income.created'
         : tx.categoria?.includes('transferencia')
           ? 'finance.transfer.created'
           : 'finance.expense.created';
-    await emitOsEvent({
+    const txTs = tx.fecha ? `${String(tx.fecha).slice(0, 10)}T18:00:00-06:00` : undefined;
+    const res = await emitOsEvent({
       type: tType,
       source_table: 'finance_money_transactions',
       source_id: String(tx.id),
-      idempotency_key: `backfill:finance_tx:${tx.id}`,
+      idempotency_key: k,
+      occurred_at: txTs,
       payload: {
         account_id: tx.account_id,
         categoria: tx.categoria,
@@ -745,15 +837,22 @@ export async function backfillMissingOsEvents(days = 30): Promise<{
         backfill: true,
       },
     });
-    emitted++;
+    if (res.isRealDb && !res.duplicate) newlyInserted++;
+    else skippedExisting++;
   }
 
   for (const st of stateRes.data || []) {
-    await emitOsEvent({
+    const k = `backfill:funnel:${st.telefono}:${st.paso_actual || 'inicio'}:${st.last_sku || 'na'}`;
+    if (existingKeys.has(k)) {
+      skippedExisting++;
+      continue;
+    }
+    const res = await emitOsEvent({
       type: 'chat.funnel.progressed',
       source_table: 'whatsapp_state',
       source_id: String(st.telefono),
-      idempotency_key: `backfill:funnel:${st.telefono}:${st.paso_actual || 'inicio'}:${st.last_sku || 'na'}`,
+      idempotency_key: k,
+      occurred_at: st.updated_at || undefined,
       payload: {
         telefono: st.telefono,
         paso_actual: st.paso_actual || 'inicio',
@@ -764,11 +863,14 @@ export async function backfillMissingOsEvents(days = 30): Promise<{
         backfill: true,
       },
     });
-    emitted++;
+    if (res.isRealDb && !res.duplicate) newlyInserted++;
+    else skippedExisting++;
   }
 
   return {
-    insertedEstimate: emitted,
+    newlyInserted,
+    insertedEstimate: newlyInserted,
+    skippedExisting,
     scannedOrders: ordersRes.data?.length || 0,
     scannedAds: adsRes.data?.length || 0,
     scannedFinances: txRes.data?.length || 0,
