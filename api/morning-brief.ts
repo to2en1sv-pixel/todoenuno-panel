@@ -85,7 +85,7 @@ async function loadOsMemorySnapshotServer(
   daysWindow = 30
 ): Promise<OsMemorySnapshot> {
   try {
-    await supabase.rpc('rebuild_os_memory', { p_days: 14 });
+    await supabase.rpc('rebuild_os_memory', { p_days: Math.min(Math.max(daysWindow, 14), 30) });
   } catch {}
 
   let memoryRows: any[] = [];
@@ -651,8 +651,32 @@ export default async function handler(req: any, res: any) {
   const last48hIso = new Date(nowMs - 48 * 60 * 60 * 1000).toISOString();
 
   try {
+    const streetAndActiveStatuses = [
+      'nuevo',
+      'programado',
+      'encargo',
+      'agendado',
+      'por_empacar',
+      'empacado',
+      'confirmado',
+      'en_empaque',
+      'por empacar',
+      'en_camino',
+      'en_ruta',
+      'en ruta',
+      'despachado',
+      'enviado',
+      'ruta',
+      'en camino',
+      'entregado',
+      'entregada',
+      'completado',
+      'completada',
+    ];
+
     const [
       ordersRes,
+      monthOrdersRes,
       unliqOrdersRes,
       convRes,
       msgsRes,
@@ -664,39 +688,48 @@ export default async function handler(req: any, res: any) {
       notasRes,
       bizDocRes,
       catDocRes,
-      accountsRes,
+      accountsRowsRaw,
       txTodayRes,
     ] = await Promise.all([
       supabase
         .from('whatsapp_orders')
         .select(
-          'id,pedido_codigo,nombre_cliente,sku,catalogo_sku,items,total,estado,liquidado,es_encargo,fecha_programada,codigo_anuncio,notas,created_at'
+          'id,pedido_codigo,nombre_cliente,sku,catalogo_sku,items,cantidad,total,estado,liquidado,es_encargo,fecha_programada,codigo_anuncio,notas,created_at'
         )
         .order('created_at', { ascending: false })
         .limit(800),
       supabase
         .from('whatsapp_orders')
         .select(
-          'id,pedido_codigo,nombre_cliente,sku,catalogo_sku,items,total,estado,liquidado,es_encargo,fecha_programada,codigo_anuncio,notas,created_at'
+          'id,pedido_codigo,nombre_cliente,sku,catalogo_sku,items,cantidad,total,estado,liquidado,es_encargo,fecha_programada,codigo_anuncio,notas,created_at'
         )
+        .gte('created_at', dateInfo.svMonthStartUtc)
+        .order('created_at', { ascending: false })
+        .limit(2500),
+      supabase
+        .from('whatsapp_orders')
+        .select(
+          'id,pedido_codigo,nombre_cliente,sku,catalogo_sku,items,cantidad,total,estado,liquidado,es_encargo,fecha_programada,codigo_anuncio,notas,created_at'
+        )
+        .in('estado', streetAndActiveStatuses)
         .or('liquidado.is.null,liquidado.eq.false')
         .order('created_at', { ascending: false })
-        .limit(1000),
+        .limit(2000),
       supabase
         .from('bb_conversations')
         .select('id,instance_id,contact_name,contact_phone,last_message,updated_at,status')
         .order('updated_at', { ascending: false })
-        .limit(200),
+        .limit(250),
       supabase
         .from('bb_messages')
         .select('conversation_id,from_me,created_at')
         .order('created_at', { ascending: false })
-        .limit(500),
+        .limit(2000),
       supabase
         .from('whatsapp_state')
         .select('last_sku,last_nombre,last_detalle,paso_actual,updated_at')
         .gte('updated_at', last48hIso)
-        .limit(150),
+        .limit(200),
       supabase
         .from('inventory_stock')
         .select('sku,nombre,template_id,costo_unitario,stock_disponible,stock_minimo_alerta,activo,activo_todd')
@@ -721,7 +754,7 @@ export default async function handler(req: any, res: any) {
         .select('contenido')
         .eq('titulo', '__SYSTEM_TODD_CATALOG_SETTINGS_V1__')
         .maybeSingle(),
-      supabase.from('finance_cash_accounts').select('nombre,saldo_actual,activo'),
+      fetchCashAccounts(supabase, { allowFallbackMock: false }),
       supabase
         .from('finance_money_transactions')
         .select('tipo,categoria,monto,fecha')
@@ -772,6 +805,25 @@ export default async function handler(req: any, res: any) {
         }
       }
     });
+
+    const nonDupStockSkus = new Set(
+      stockRows
+        .filter((item: any) => !duplicateChildSkus.has(String(item.sku || '').trim().toUpperCase()))
+        .map((item: any) => String(item.sku || '').trim().toUpperCase())
+        .filter(Boolean)
+    );
+    for (const item of stockRows) {
+      const skuUpper = String(item.sku || '').trim().toUpperCase();
+      if (!skuUpper || duplicateChildSkus.has(skuUpper)) continue;
+      if (variantSkuSet.has(skuUpper)) {
+        for (const pSku of nonDupStockSkus) {
+          if (pSku !== skuUpper && skuUpper.startsWith(`${pSku}-`)) {
+            duplicateChildSkus.add(skuUpper);
+            break;
+          }
+        }
+      }
+    }
 
     const costBySku = new Map<string, number>();
     const nameBySku = new Map<string, string>();
@@ -891,6 +943,9 @@ export default async function handler(req: any, res: any) {
     for (const o of Array.isArray(ordersRes.data) ? ordersRes.data : []) {
       ordersMap.set(o.id, o);
     }
+    for (const o of Array.isArray(monthOrdersRes.data) ? monthOrdersRes.data : []) {
+      if (!ordersMap.has(o.id)) ordersMap.set(o.id, o);
+    }
     for (const o of Array.isArray(unliqOrdersRes.data) ? unliqOrdersRes.data : []) {
       if (!ordersMap.has(o.id)) ordersMap.set(o.id, o);
     }
@@ -970,17 +1025,42 @@ export default async function handler(req: any, res: any) {
     const adSalesToday = new Map<string, { chats: number; orders: number; revenue: number }>();
 
     for (const o of ventasHoyOrders) {
-      const qty = Array.isArray(o.items) && o.items.length > 0
-        ? o.items.reduce((acc: number, it: any) => acc + Math.max(1, Number(it?.cantidad ?? it?.qty ?? 1) || 1), 0)
-        : inferOrderQty(o.sku);
-      const resolved = resolveOrderUnitCost(o);
-      if (resolved.found) {
-        cogsHoyTotal += resolved.cost * qty;
+      let orderCogs = 0;
+      let resolvedLabel = '';
+      let resolvedAnyCost = false;
+
+      if (Array.isArray(o.items) && o.items.length > 0) {
+        for (const it of o.items) {
+          const itemQty = Math.max(1, Number(it?.cantidad ?? it?.qty ?? 1) || 1);
+          const itemResolved = resolveOrderUnitCost({
+            catalogo_sku: it?.catalogo_sku || o.catalogo_sku,
+            sku: it?.variante_sku || it?.sku || o.sku,
+            items: [it],
+          });
+          if (!resolvedLabel) resolvedLabel = itemResolved.label;
+          if (itemResolved.found) {
+            orderCogs += itemResolved.cost * itemQty;
+            resolvedAnyCost = true;
+          }
+        }
+      } else {
+        const qty =
+          Number(o.cantidad) > 0 ? Math.round(Number(o.cantidad)) : inferOrderQty(o.sku);
+        const resolved = resolveOrderUnitCost(o);
+        resolvedLabel = resolved.label;
+        if (resolved.found) {
+          orderCogs = resolved.cost * qty;
+          resolvedAnyCost = true;
+        }
+      }
+
+      if (resolvedAnyCost) {
+        cogsHoyTotal += orderCogs;
       } else {
         ordersHoySinCosto++;
       }
 
-      const prodLabel = resolved.label || 'Producto';
+      const prodLabel = resolvedLabel || 'Producto';
       const curProd = topProductTodayMap.get(prodLabel) || { orders: 0, revenue: 0 };
       curProd.orders += 1;
       curProd.revenue += Number(o.total) || 0;
@@ -1113,10 +1193,9 @@ export default async function handler(req: any, res: any) {
       .filter((p: any) => p.diff !== null && p.diff >= -2 && p.diff <= 3)
       .sort((a: any, b: any) => a.diff - b.diff);
 
-    const accountsRows = Array.isArray(accountsRes.data) ? accountsRes.data : [];
-    const totalLiquidity = accountsRows
-      .filter((a: any) => a.activo !== false)
-      .reduce((s: number, a: any) => s + (Number(a.saldo_actual) || 0), 0);
+    const accountsRows = Array.isArray(accountsRowsRaw) ? accountsRowsRaw : [];
+    const liquidityInfo = summarizeCashAccounts(accountsRows);
+    const totalLiquidity = liquidityInfo.netTotal;
 
     /* 5. CONFIG TODD & NOTAS */
     let allowBackorderGlobal = false;
@@ -1274,8 +1353,20 @@ export default async function handler(req: any, res: any) {
       lines.push(
         `• Por liquidar (entregados): <b>${fmtMoney(totalPorLiquidar)}</b> (${porLiquidar.length} guías)`
       );
+      if (enRuta.length > 0) {
+        lines.push(`• En ruta por cobrar: <b>${fmtMoney(totalEnRuta)}</b> (${enRuta.length} guías)`);
+      }
       if (accountsRows.length > 0) {
-        lines.push(`• Liquidez en cuentas: <b>${fmtMoney(totalLiquidity)}</b>`);
+        if (liquidityInfo.hasNegativeCard && liquidityInfo.cashAndBankTotal !== liquidityInfo.netTotal) {
+          lines.push(
+            `• Liquidez neta en cuentas: <b>${fmtMoney(totalLiquidity)}</b> (Cajas/Bancos: <b>${fmtMoney(liquidityInfo.cashAndBankTotal)}</b>)`
+          );
+        } else {
+          lines.push(`• Liquidez en cuentas: <b>${fmtMoney(totalLiquidity)}</b>`);
+        }
+        if (liquidityInfo.compactBreakdown) {
+          lines.push(`  <i>(${escapeHtml(liquidityInfo.compactBreakdown)})</i>`);
+        }
       }
       if (otherExpensesToday > 0) {
         lines.push(`• Otros gastos hoy: ${fmtMoney(otherExpensesToday)}`);
@@ -1396,10 +1487,21 @@ export default async function handler(req: any, res: any) {
         );
       }
       lines.push(
-        `• Por liquidar: <b>${fmtMoney(totalPorLiquidar)}</b> (${porLiquidar.length} guías)`
+        `• Por liquidar: <b>${fmtMoney(totalPorLiquidar)}</b> (${porLiquidar.length} guías)${
+          enRuta.length > 0 ? ` · En ruta: ${fmtMoney(totalEnRuta)} (${enRuta.length})` : ''
+        }`
       );
       if (accountsRows.length > 0) {
-        lines.push(`• Liquidez en cuentas: <b>${fmtMoney(totalLiquidity)}</b>`);
+        if (liquidityInfo.hasNegativeCard && liquidityInfo.cashAndBankTotal !== liquidityInfo.netTotal) {
+          lines.push(
+            `• Liquidez neta en cuentas: <b>${fmtMoney(totalLiquidity)}</b> (Cajas/Bancos: <b>${fmtMoney(liquidityInfo.cashAndBankTotal)}</b>)`
+          );
+        } else {
+          lines.push(`• Liquidez en cuentas: <b>${fmtMoney(totalLiquidity)}</b>`);
+        }
+        if (liquidityInfo.compactBreakdown) {
+          lines.push(`  <i>(${escapeHtml(liquidityInfo.compactBreakdown)})</i>`);
+        }
       }
       if (pagosUrgentes.length > 0) {
         const pagosTxt = pagosUrgentes
@@ -1998,30 +2100,75 @@ async function fetchActiveStockCatalog(supabase: any) {
     });
 }
 
-async function fetchCashAccounts(supabase: any) {
+async function fetchCashAccounts(
+  supabase: any,
+  options: { allowFallbackMock?: boolean } = {}
+) {
+  const { allowFallbackMock = true } = options;
   try {
     const res = await supabase
       .from('finance_cash_accounts')
-      .select('id,nombre,tipo,saldo_actual')
+      .select('id,nombre,tipo,saldo_actual,activo')
       .order('nombre');
     if (!res.error && Array.isArray(res.data) && res.data.length > 0) {
-      return res.data;
+      return res.data.filter((a: any) => a.activo !== false);
     }
 
     const schemaRes = await supabase
       .schema('finance')
       .from('cash_accounts')
-      .select('id,nombre,tipo,saldo_actual')
+      .select('id,nombre,tipo,saldo_actual,activo')
       .order('nombre');
     if (!schemaRes.error && Array.isArray(schemaRes.data) && schemaRes.data.length > 0) {
-      return schemaRes.data;
+      return schemaRes.data.filter((a: any) => a.activo !== false);
     }
   } catch {}
 
+  if (!allowFallbackMock) return [];
+
   return [
-    { id: 'caja_chica', nombre: 'Caja Chica / Efectivo Bodega', tipo: 'cash', saldo_actual: 0 },
-    { id: 'banco_principal', nombre: 'Banco Principal', tipo: 'bank', saldo_actual: 0 },
+    { id: 'caja_chica', nombre: 'Caja Chica / Efectivo Bodega', tipo: 'cash', saldo_actual: 0, activo: true },
+    { id: 'banco_principal', nombre: 'Banco Principal', tipo: 'bank', saldo_actual: 0, activo: true },
   ];
+}
+
+function summarizeCashAccounts(accounts: any[]) {
+  const active = (Array.isArray(accounts) ? accounts : []).filter((a: any) => a.activo !== false);
+  const netTotal = Math.round(
+    active.reduce((s: number, a: any) => s + (Number(a.saldo_actual) || 0), 0) * 100
+  ) / 100;
+
+  const isNegativeCard = (a: any) =>
+    (String(a.tipo || '') === 'credit_card' || String(a.id || '') === 'tarjeta_pauta') &&
+    Number(a.saldo_actual || 0) < 0;
+
+  const hasNegativeCard = active.some(isNegativeCard);
+  const cashAndBankTotal =
+    Math.round(
+      active
+        .filter((a: any) => !isNegativeCard(a))
+        .reduce((s: number, a: any) => s + (Number(a.saldo_actual) || 0), 0) * 100
+    ) / 100;
+
+  const shortAccountLabel = (a: any): string => {
+    const id = String(a.id || '');
+    if (id === 'banco_principal') return 'Banco';
+    if (id === 'caja_efectivo') return 'Efectivo Repart.';
+    if (id === 'caja_chica') return 'Caja Chica';
+    if (id === 'tarjeta_pauta') return 'Tarjeta Pauta';
+    return String(a.nombre || id || 'Cuenta').split('(')[0].trim().slice(0, 22);
+  };
+
+  const compactBreakdown = active
+    .map((a: any) => `${shortAccountLabel(a)} ${fmtMoney(Number(a.saldo_actual) || 0)}`)
+    .join(' · ');
+
+  return {
+    netTotal,
+    cashAndBankTotal,
+    hasNegativeCard,
+    compactBreakdown,
+  };
 }
 
 function findBestVariantMatch(parentItem: any, rawQuery?: string | null): TelegramCatalogVariant | null {
@@ -3292,6 +3439,29 @@ async function handleOrderSearchQuery(supabase: any, chatId: string | number, qu
 
 async function handlePendingOrdersQuery(supabase: any, chatId: string | number) {
   const todayIso = getElSalvadorDate();
+  const pendingStreetStatuses = [
+    'nuevo',
+    'programado',
+    'encargo',
+    'agendado',
+    'por_empacar',
+    'empacado',
+    'confirmado',
+    'en_empaque',
+    'por empacar',
+    'en_camino',
+    'en_ruta',
+    'en ruta',
+    'despachado',
+    'enviado',
+    'ruta',
+    'en camino',
+    'entregado',
+    'entregada',
+    'completado',
+    'completada',
+  ];
+
   const [recentRes, unliqRes] = await Promise.all([
     supabase
       .from('whatsapp_orders')
@@ -3305,9 +3475,10 @@ async function handlePendingOrdersQuery(supabase: any, chatId: string | number) 
       .select(
         'id,pedido_codigo,nombre_cliente,telefono,departamento,courier,sku,total,estado,liquidado,es_encargo,fecha_programada,created_at'
       )
+      .in('estado', pendingStreetStatuses)
       .or('liquidado.is.null,liquidado.eq.false')
       .order('created_at', { ascending: false })
-      .limit(1000),
+      .limit(2000),
   ]);
 
   if (recentRes.error) {
@@ -3441,18 +3612,19 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
   const [mem, catalog, accounts, pendingRes, orders30Res] = await Promise.all([
     loadOsMemorySnapshotServer(supabase, svToday, 30),
     fetchActiveStockCatalog(supabase),
-    fetchCashAccounts(supabase),
+    fetchCashAccounts(supabase, { allowFallbackMock: false }),
     supabase
       .from('whatsapp_orders')
       .select('estado,total,liquidado')
+      .in('estado', ['en_camino', 'en_ruta', 'en ruta', 'despachado', 'enviado', 'ruta', 'en camino', 'entregado', 'entregada', 'completado', 'completada'])
       .or('liquidado.is.null,liquidado.eq.false')
-      .limit(400),
+      .limit(1500),
     supabase
       .from('whatsapp_orders')
       .select('estado,total,sku,catalogo_sku,departamento,codigo_anuncio,motivo_cancelacion,created_at')
       .gte('created_at', d30CutoffUtc)
       .order('created_at', { ascending: false })
-      .limit(500),
+      .limit(1500),
   ]);
 
   const unliqList = Array.isArray(pendingRes?.data) ? pendingRes.data : [];
@@ -3548,7 +3720,8 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
     .slice(0, 8)
     .map((c: any) => `${c.sku} (${c.nombre})`);
 
-  const totalCash = accounts.reduce((s: number, a: any) => s + (Number(a.saldo_actual) || 0), 0);
+  const cashSummary = summarizeCashAccounts(accounts);
+  const totalCash = cashSummary.netTotal;
   const cleanQuestion = questionRaw.trim();
 
   if (!cleanQuestion) {
@@ -3565,7 +3738,10 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
       }${mem.roasPrev7d !== null ? ` (prev ${mem.roasPrev7d.toFixed(2)}x)` : ''}`,
       '',
       `💰 <b>PULSO EN VIVO</b>`,
-      `• Liquidez en cuentas: <b>${fmtMoney(totalCash)}</b>`,
+      cashSummary.hasNegativeCard && cashSummary.cashAndBankTotal !== totalCash
+        ? `• Liquidez neta: <b>${fmtMoney(totalCash)}</b> (Cajas/Bancos: <b>${fmtMoney(cashSummary.cashAndBankTotal)}</b>)`
+        : `• Liquidez en cuentas: <b>${fmtMoney(totalCash)}</b>`,
+      cashSummary.compactBreakdown ? `  <i>(${escapeHtml(cashSummary.compactBreakdown)})</i>` : '',
       `• Calle hoy: <b>${deliveredUnliq.length} entregados sin depositar</b> (${fmtMoney(sumArr(deliveredUnliq))}) · <b>${inRouteList.length} en ruta</b> (${fmtMoney(sumArr(inRouteList))})`,
       runwayAlerts.length > 0
         ? `• 🚨 Stock en riesgo: <code>${escapeHtml(runwayAlerts[0])}</code>`
@@ -3611,7 +3787,7 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
     `Fecha hoy SV: ${svToday}`,
     `SEMANA ACTUAL (últimos 7d): pedidos=${mem.orders7d}, entregados=${mem.delivered7d}, cancelados=${mem.cancelled7d}, cobrado=$${mem.revenue7d.toFixed(2)}, pauta=$${mem.adSpend7d.toFixed(2)}, roas=${mem.roas7d ?? 'N/A'}, chats_in=${mem.chatsIn7d}, chats_out=${mem.chatsOut7d}`,
     `SEMANA ANTERIOR (días -14 a -8): pedidos=${mem.ordersPrev7d}, entregados=${mem.deliveredPrev7d}, cancelados=${mem.cancelledPrev7d}, cobrado=$${mem.revenuePrev7d.toFixed(2)}, pauta=$${mem.adSpendPrev7d.toFixed(2)}, roas=${mem.roasPrev7d ?? 'N/A'}`,
-    `ESTADO EN VIVO HOY: liquidez_total=$${totalCash.toFixed(2)}, entregados_sin_depositar=${deliveredUnliq.length} ($${sumArr(deliveredUnliq).toFixed(2)}), en_ruta=${inRouteList.length} ($${sumArr(inRouteList).toFixed(2)})`,
+    `ESTADO EN VIVO HOY: liquidez_neta=$${totalCash.toFixed(2)}, cajas_y_bancos=$${cashSummary.cashAndBankTotal.toFixed(2)}, desglose_cuentas="${cashSummary.compactBreakdown}", entregados_sin_depositar=${deliveredUnliq.length} ($${sumArr(deliveredUnliq).toFixed(2)}), en_ruta=${inRouteList.length} ($${sumArr(inRouteList).toFixed(2)})`,
     `STOCK EN RIESGO (ritmo 7d vs disponible): ${runwayAlerts.join(' | ') || 'ninguno en alerta'}`,
     `SIN STOCK ACTUALMENTE: ${zeroStock.join(', ') || 'ninguno'}`,
     `BRECHA BOT (consultas -> pedidos): ${JSON.stringify(mem.topInquiredNoClose)}`,
@@ -4346,7 +4522,8 @@ async function handleTelegramBotRequest(req: any, res: any) {
     }
 
     if (lowerText.startsWith('/cajas')) {
-      const accounts = await fetchCashAccounts(supabase);
+      const accounts = await fetchCashAccounts(supabase, { allowFallbackMock: false });
+      const summary = summarizeCashAccounts(accounts);
       const lines = [
         `🏦 <b>CUENTAS Y CAJAS EN FINANZAS</b>`,
         '',
@@ -4354,6 +4531,11 @@ async function handleTelegramBotRequest(req: any, res: any) {
           (a: any) =>
             `• <b>${escapeHtml(a.nombre)}</b> (<code>${escapeHtml(a.id)}</code>): <b>${fmtMoney(a.saldo_actual)}</b>`
         ),
+        '',
+        `━━━━━━━━━━━━━━`,
+        summary.hasNegativeCard && summary.cashAndBankTotal !== summary.netTotal
+          ? `💰 Cajas y Bancos: <b>${fmtMoney(summary.cashAndBankTotal)}</b>\n💵 Liquidez neta total: <b>${fmtMoney(summary.netTotal)}</b>\n\n<blockquote>ℹ️ La Tarjeta Meta Ads está en negativo por deducciones de pauta y reduce el neto global; puedes fondearla con Transferir o Ajustar saldo en Finanzas.</blockquote>`
+          : `💵 Liquidez total en cuentas: <b>${fmtMoney(summary.netTotal)}</b>`,
       ];
       await sendTgMessage(chatId, lines.join('\n'));
       return res.status(200).json({ ok: true });

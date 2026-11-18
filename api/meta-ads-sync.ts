@@ -364,10 +364,10 @@ export default async function handler(req: any, res: any) {
         dailySpendMap.set(key, cur);
       }
 
-      // Leer filas previas sincronizadas en ese rango para upsert limpio
+      // Leer filas previas sincronizadas en ese rango para upsert limpio y cálculo de delta real
       const { data: existingGastos } = await supabase
         .from('gastos_publicidad')
-        .select('id,fecha,codigo_anuncio,plataforma,notas')
+        .select('id,fecha,codigo_anuncio,plataforma,monto,notas')
         .eq('plataforma', 'Meta')
         .gte('fecha', since)
         .lte('fecha', until);
@@ -380,10 +380,22 @@ export default async function handler(req: any, res: any) {
       }
 
       let upsertedCount = 0;
+      const eventDeltas: Array<{
+        fecha: string;
+        codigo_anuncio: string;
+        delta: number;
+        prevMonto: number;
+        newMonto: number;
+        detalle: string;
+      }> = [];
+
       for (const [key, entry] of dailySpendMap.entries()) {
         if (entry.monto <= 0) continue;
         const noteTag = `[META_SYNC] ${entry.detalle}`.slice(0, 180);
         const prev = existingMap.get(key);
+        const prevMonto = prev ? Math.round((Number(prev.monto) || 0) * 100) / 100 : 0;
+        const delta = Math.round((entry.monto - prevMonto) * 100) / 100;
+
         if (prev?.id) {
           await supabase
             .from('gastos_publicidad')
@@ -399,6 +411,17 @@ export default async function handler(req: any, res: any) {
           });
         }
         upsertedCount++;
+
+        if (delta > 0.009) {
+          eventDeltas.push({
+            fecha: entry.fecha,
+            codigo_anuncio: entry.codigo_anuncio,
+            delta,
+            prevMonto,
+            newMonto: entry.monto,
+            detalle: entry.detalle,
+          });
+        }
       }
 
       // Combinar cache histórica con nuevos registros reemplazando el rango [since, until]
@@ -424,22 +447,22 @@ export default async function handler(req: any, res: any) {
         prevDoc.id
       );
 
-      for (const [, entry] of dailySpendMap.entries()) {
-        if (entry.monto <= 0) continue;
+      for (const d of eventDeltas) {
         await emitServerOsEvent(
           supabase,
           'marketing.ad.expense',
           'gastos_publicidad',
-          `${entry.fecha}:${entry.codigo_anuncio}`,
+          `${d.fecha}:${d.codigo_anuncio}`,
           {
-            fecha: entry.fecha,
-            codigo_anuncio: entry.codigo_anuncio,
+            fecha: d.fecha,
+            codigo_anuncio: d.codigo_anuncio,
             platform: 'meta',
-            amount: entry.monto,
-            detalle: entry.detalle,
+            amount: d.delta,
+            total_acumulado_dia: d.newMonto,
+            detalle: d.detalle,
             origen: 'meta_ads_sync',
           },
-          `meta_sync:${entry.fecha}:${entry.codigo_anuncio}:${Math.round(entry.monto * 100)}`
+          `meta_sync:${d.fecha}:${d.codigo_anuncio}:${Math.round(d.prevMonto * 100)}->${Math.round(d.newMonto * 100)}`
         );
       }
 
