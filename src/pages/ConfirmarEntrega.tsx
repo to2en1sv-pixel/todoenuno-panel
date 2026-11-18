@@ -405,18 +405,30 @@ export function ConfirmarEntregaPage() {
   const cargarDatos = async () => {
     setCargando(true);
 
-    const [, { data: todos }] = await Promise.all([
+    const [, { data: todos }, { data: activosRuta }] = await Promise.all([
       hydrateCutoffsFromOsEvents(supabase),
       supabase
         .from("whatsapp_orders")
         .select("*")
         .order("created_at", { ascending: false })
         .limit(450),
+      supabase
+        .from("whatsapp_orders")
+        .select("*")
+        .in("estado", ["en_camino", "por_empacar"])
+        .order("created_at", { ascending: false })
+        .limit(500),
     ]);
 
-    if (todos) {
-      setTodosLosPedidos(todos);
+    const mergedById = new Map<string, any>();
+    for (const r of todos || []) mergedById.set(r.id, r);
+    for (const r of activosRuta || []) {
+      if (!mergedById.has(r.id)) mergedById.set(r.id, r);
     }
+    const mergedList = Array.from(mergedById.values()).sort(
+      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+    );
+    setTodosLosPedidos(mergedList);
 
     if (id) {
       const p = todos?.find((item) => item.id === id);
@@ -967,8 +979,17 @@ export function ConfirmarEntregaPage() {
   const pedidosDelCourier = useMemo(() => {
     if (activeCourierName === "Todos los Couriers") return todosLosPedidos;
     const target = activeCourierName.trim().toLowerCase();
-    return todosLosPedidos.filter((p) => String(p.courier || "").trim().toLowerCase() === target);
+    return todosLosPedidos.filter((p) => {
+      const rawCourier = String(p.courier || "").trim().toLowerCase();
+      if (rawCourier === target) return true;
+      if (!rawCourier && target === "motorista central 1") return true;
+      return false;
+    });
   }, [todosLosPedidos, activeCourierName]);
+
+  const totalEnRutaGlobal = useMemo(() => {
+    return todosLosPedidos.filter((p) => String(p.estado || "").trim().toLowerCase() === "en_camino").length;
+  }, [todosLosPedidos]);
 
   // Clasificación operativa del día (Tu Ruta = solo en_camino; entregadosHoy y novedades solo para KPIs y Cuadre)
   const { enRutaList, entregadosHoyList, novedadesList } = useMemo(() => {
@@ -977,7 +998,7 @@ export function ConfirmarEntregaPage() {
     const novedades: any[] = [];
 
     for (const p of pedidosDelCourier) {
-      const est = p.estado || "";
+      const est = String(p.estado || "").trim().toLowerCase();
       if (est === "entregado") {
         if (isDeliveredTodaySv(p, todaySv)) {
           entregadosHoy.push(p);
@@ -1403,6 +1424,21 @@ export function ConfirmarEntregaPage() {
                 </button>
               )}
             </div>
+
+              {!isCourierLocked && activeCourierName !== "Todos los Couriers" && totalEnRutaGlobal > enRutaList.length && (
+                <div className="mb-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-800 dark:text-amber-300 flex items-center justify-between gap-2">
+                  <span>
+                    Filtrado por <strong>{activeCourierName}</strong> ({enRutaList.length} de {totalEnRutaGlobal} en ruta).
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCourierChange("Todos los Couriers")}
+                    className="font-semibold underline shrink-0 cursor-pointer"
+                  >
+                    Ver todos ({totalEnRutaGlobal})
+                  </button>
+                </div>
+              )}
 
             {tuRutaFiltrada.length === 0 ? (
               <div className="p-8 text-center text-xs tx-mu bg-cd rounded-xl border border-[var(--bd)]">

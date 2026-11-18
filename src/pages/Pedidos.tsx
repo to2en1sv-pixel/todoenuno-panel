@@ -168,8 +168,15 @@ const DEPARTAMENTOS = [
 ];
 
 const normalizarEstado = (e: string | null | undefined): Estado => {
-  if (!e) return "nuevo";
-  if (ESTADOS.includes(e as Estado)) return e as Estado;
+  const raw = String(e || "").trim().toLowerCase();
+  if (!raw) return "nuevo";
+  if (ESTADOS.includes(raw as Estado)) return raw as Estado;
+  if (raw === "en_ruta" || raw === "en ruta" || raw === "despachado" || raw === "enviado") {
+    return "en_camino";
+  }
+  if (raw === "empacado" || raw === "confirmado") {
+    return "por_empacar";
+  }
   return "nuevo";
 };
 
@@ -342,11 +349,18 @@ export function PedidosPage() {
     else setCargando(true);
     setError(null);
 
-    const [ordersRes, stockRes, kardexMapRes, , finCutoff] = await Promise.all([
+    const [ordersRes, activeOrdersRes, stockRes, kardexMapRes, , finCutoff] = await Promise.all([
       supabase
         .from("whatsapp_orders")
         .select("*")
-        .order("created_at", { ascending: false }),
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      supabase
+        .from("whatsapp_orders")
+        .select("*")
+        .in("estado", ["nuevo", "programado", "por_empacar", "en_camino"])
+        .order("created_at", { ascending: false })
+        .limit(1000),
       fetchStockItems(),
       fetchOrderKardexMap(),
       hydrateCutoffsFromOsEvents(supabase),
@@ -358,7 +372,20 @@ export function PedidosPage() {
     if (ordersRes.error) {
       setError(ordersRes.error.message);
     } else {
-      setPedidos((ordersRes.data ?? []) as Pedido[]);
+      const mergedById = new Map<string, Pedido>();
+      for (const r of (ordersRes.data ?? []) as Pedido[]) {
+        mergedById.set(r.id, r);
+      }
+      if (!activeOrdersRes.error && Array.isArray(activeOrdersRes.data)) {
+        for (const r of activeOrdersRes.data as Pedido[]) {
+          if (!mergedById.has(r.id)) mergedById.set(r.id, r);
+        }
+      }
+      setPedidos(
+        Array.from(mergedById.values()).sort(
+          (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        )
+      );
     }
 
     setStockItems(stockRes.items || []);

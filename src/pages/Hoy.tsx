@@ -189,6 +189,7 @@ export function HoyPage() {
     try {
       const [
         ordersRes,
+        activeOrdersRes,
         unliqRes,
         convRes,
         msgsRes,
@@ -206,6 +207,14 @@ export function HoyPage() {
           )
           .order('created_at', { ascending: false })
           .limit(250),
+        supabase
+          .from('whatsapp_orders')
+          .select(
+            'id,pedido_codigo,nombre_cliente,telefono,direccion,departamento,courier,sku,catalogo_sku,total,estado,metodo_pago,liquidado,es_encargo,fecha_programada,codigo_anuncio,created_at'
+          )
+          .in('estado', ['nuevo', 'programado', 'por_empacar', 'en_camino'])
+          .order('created_at', { ascending: false })
+          .limit(500),
         supabase
           .from('whatsapp_orders')
           .select('id,total,estado,liquidado,created_at')
@@ -237,7 +246,22 @@ export function HoyPage() {
       setFinanceCutoff(cutoff);
 
       if (!ordersRes.error && Array.isArray(ordersRes.data)) {
-        setOrders(ordersRes.data as OrderRow[]);
+        const mergedById = new Map<string, OrderRow>();
+        for (const r of ordersRes.data as OrderRow[]) {
+          mergedById.set(r.id, r);
+        }
+        if (!activeOrdersRes.error && Array.isArray(activeOrdersRes.data)) {
+          for (const r of activeOrdersRes.data as OrderRow[]) {
+            if (!mergedById.has(r.id)) mergedById.set(r.id, r);
+          }
+        }
+        setOrders(
+          Array.from(mergedById.values()).sort(
+            (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+          )
+        );
+      } else if (!activeOrdersRes.error && Array.isArray(activeOrdersRes.data)) {
+        setOrders(activeOrdersRes.data as OrderRow[]);
       }
 
       if (!unliqRes.error && Array.isArray(unliqRes.data)) {
@@ -363,7 +387,8 @@ export function HoyPage() {
 
     for (const o of orders) {
       const total = Number(o.total) || 0;
-      const isCancelled = o.estado === 'cancelado';
+      const estado = String(o.estado || '').trim().toLowerCase();
+      const isCancelled = estado === 'cancelado';
       const createdToday = Boolean(o.created_at && toElSalvadorDateKey(o.created_at) === todayISO);
 
       if (createdToday && !isCancelled) {
@@ -375,18 +400,18 @@ export function HoyPage() {
         recientesHoy.push(o);
       }
 
-      if (o.estado === 'nuevo' || o.estado === 'por_empacar') {
+      if (estado === 'nuevo' || estado === 'por_empacar') {
         porDespachar.push(o);
       }
 
-      if (o.estado === 'en_camino') {
+      if (estado === 'en_camino') {
         enCaminoCount++;
         enRuta.push(o);
       }
 
       if (
         !unliqLoaded &&
-        (o.estado === 'en_camino' || o.estado === 'entregado') &&
+        (estado === 'en_camino' || estado === 'entregado') &&
         !o.liquidado &&
         !isRecordBeforeFinanceCutoff(o.created_at, undefined, financeCutoff)
       ) {
@@ -394,8 +419,8 @@ export function HoyPage() {
       }
 
       const esEncargo =
-        o.estado === 'programado' ||
-        (Boolean(o.es_encargo) && o.estado !== 'cancelado' && o.estado !== 'entregado' && o.estado !== 'en_camino');
+        estado === 'programado' ||
+        (Boolean(o.es_encargo) && estado !== 'cancelado' && estado !== 'entregado' && estado !== 'en_camino');
 
       if (esEncargo) {
         const diffDays = getDiffDaysFromToday(o.fecha_programada);
