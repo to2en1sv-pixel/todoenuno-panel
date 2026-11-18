@@ -160,6 +160,11 @@ declare
   v_id bigint;
   v_domain text;
 begin
+  -- Verificar antes del INSERT para no consumir saltos innecesarios en la secuencia de IDs
+  if exists (select 1 from os.events where idempotency_key = p_idempotency_key) then
+    return -1;
+  end if;
+
   v_domain := coalesce(nullif(split_part(coalesce(p_type, ''), '.', 1), ''), 'system');
   if v_domain = 'product' then
     v_domain := 'inventory';
@@ -663,5 +668,53 @@ where e.source_table = 'whatsapp_state'
 
 delete from os.daily_memory;
 
--- 11. Construir memoria histórica limpia de los últimos 30 días desde os.events
+-- 11. Blindar Finance Projector contra eventos históricos de backfill (solo proyecta eventos en vivo)
+do $$
+begin
+  if to_regnamespace('finance') is not null and to_regclass('finance.money_transactions') is not null then
+    execute $fn$
+      create or replace function finance.project_os_event() returns trigger
+      language plpgsql security definer as $body$
+      declare
+        v_amount numeric;
+        v_campaign text;
+        v_is_backfill boolean;
+      begin
+        v_is_backfill := coalesce((NEW.payload->>'backfill')::boolean, false)
+                         or coalesce(NEW.idempotency_key, '') like 'backfill:%';
+
+        if not v_is_backfill and NEW.type = 'marketing.ad.expense' then
+          v_amount   := coalesce((NEW.payload->>'amount')::numeric, (NEW.payload->>'monto')::numeric, 0);
+          v_campaign := coalesce(NEW.payload->>'codigo_anuncio', NEW.payload->>'campaign_id', 'Campaña');
+
+          if v_amount > 0 and not exists (
+            select 1 from finance.money_transactions where source_event_id = NEW.id
+          ) then
+            insert into finance.money_transactions (
+              account_id, tipo, categoria, monto, descripcion, fecha, source_event_id, source_table, source_id, es_manual
+            ) values (
+              'tarjeta_pauta', 'expense', 'pauta_publicidad', v_amount,
+              'Gasto publicitario diario ' || v_campaign,
+              coalesce((NEW.payload->>'fecha')::date, current_date),
+              NEW.id, NEW.source_table, NEW.source_id, false
+            );
+
+            update finance.cash_accounts
+               set saldo_actual = saldo_actual - v_amount
+             where id = 'tarjeta_pauta';
+          end if;
+        end if;
+
+        update os.event_consumers
+           set last_event_id = NEW.id, updated_at = now()
+         where consumer_name = 'finance_projector';
+
+        return NEW;
+      end;
+      $body$;
+    $fn$;
+  end if;
+end $$;
+
+-- 12. Construir memoria histórica limpia de los últimos 30 días desde os.events
 select public.rebuild_os_memory(30) as sprint12_resultado;

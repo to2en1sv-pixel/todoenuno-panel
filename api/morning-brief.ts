@@ -674,10 +674,13 @@ export default async function handler(req: any, res: any) {
       'completada',
     ];
 
+    const safeOrderCols =
+      'id,pedido_codigo,nombre_cliente,sku,catalogo_sku,items,total,estado,liquidado,es_encargo,fecha_programada,codigo_anuncio,notas,created_at';
+
     const [
-      ordersRes,
-      monthOrdersRes,
-      unliqOrdersRes,
+      ordersResRaw,
+      monthOrdersResRaw,
+      unliqOrdersResRaw,
       convRes,
       msgsRes,
       stateRes,
@@ -693,24 +696,18 @@ export default async function handler(req: any, res: any) {
     ] = await Promise.all([
       supabase
         .from('whatsapp_orders')
-        .select(
-          'id,pedido_codigo,nombre_cliente,sku,catalogo_sku,items,cantidad,total,estado,liquidado,es_encargo,fecha_programada,codigo_anuncio,notas,created_at'
-        )
+        .select(safeOrderCols)
         .order('created_at', { ascending: false })
         .limit(800),
       supabase
         .from('whatsapp_orders')
-        .select(
-          'id,pedido_codigo,nombre_cliente,sku,catalogo_sku,items,cantidad,total,estado,liquidado,es_encargo,fecha_programada,codigo_anuncio,notas,created_at'
-        )
+        .select(safeOrderCols)
         .gte('created_at', dateInfo.svMonthStartUtc)
         .order('created_at', { ascending: false })
         .limit(2500),
       supabase
         .from('whatsapp_orders')
-        .select(
-          'id,pedido_codigo,nombre_cliente,sku,catalogo_sku,items,cantidad,total,estado,liquidado,es_encargo,fecha_programada,codigo_anuncio,notas,created_at'
-        )
+        .select(safeOrderCols)
         .in('estado', streetAndActiveStatuses)
         .or('liquidado.is.null,liquidado.eq.false')
         .order('created_at', { ascending: false })
@@ -760,6 +757,42 @@ export default async function handler(req: any, res: any) {
         .select('tipo,categoria,monto,fecha')
         .eq('fecha', dateInfo.svTodayIso),
     ]);
+
+    let ordersRes = ordersResRaw;
+    let monthOrdersRes = monthOrdersResRaw;
+    let unliqOrdersRes = unliqOrdersResRaw;
+
+    if (ordersRes.error || monthOrdersRes.error || unliqOrdersRes.error) {
+      const [fbOrders, fbMonth, fbUnliq] = await Promise.all([
+        ordersRes.error
+          ? supabase
+              .from('whatsapp_orders')
+              .select('*')
+              .order('created_at', { ascending: false })
+              .limit(800)
+          : Promise.resolve(ordersRes),
+        monthOrdersRes.error
+          ? supabase
+              .from('whatsapp_orders')
+              .select('*')
+              .gte('created_at', dateInfo.svMonthStartUtc)
+              .order('created_at', { ascending: false })
+              .limit(2500)
+          : Promise.resolve(monthOrdersRes),
+        unliqOrdersRes.error
+          ? supabase
+              .from('whatsapp_orders')
+              .select('*')
+              .in('estado', streetAndActiveStatuses)
+              .or('liquidado.is.null,liquidado.eq.false')
+              .order('created_at', { ascending: false })
+              .limit(2000)
+          : Promise.resolve(unliqOrdersRes),
+      ]);
+      ordersRes = fbOrders;
+      monthOrdersRes = fbMonth;
+      unliqOrdersRes = fbUnliq;
+    }
 
     const osMemory = await loadOsMemorySnapshotServer(supabase, dateInfo.svTodayIso, 14);
 
@@ -961,10 +994,15 @@ export default async function handler(req: any, res: any) {
     const ventasMesOrders: any[] = [];
     let indicacionesPostCierreCount = 0;
 
+    const svTodayStartMs = new Date(dateInfo.svTodayStartUtc).getTime();
+    const svYesterdayStartMs = new Date(dateInfo.svYesterdayStartUtc).getTime();
+    const svMonthStartMs = new Date(dateInfo.svMonthStartUtc).getTime();
+
     for (const o of orders) {
       const estado = normalizeOrderStatusLocal(o.estado);
       const createdAt = String(o.created_at || '');
       const createdMs = createdAt ? new Date(createdAt).getTime() : 0;
+      const validCreatedMs = Number.isFinite(createdMs) && createdMs > 0;
       const isCancelled = estado === 'cancelado';
 
       if (estado === 'nuevo' || estado === 'por_empacar') {
@@ -974,9 +1012,9 @@ export default async function handler(req: any, res: any) {
         }
       }
 
-      if (estado === 'en_camino') {
+      if (estado === 'en_camino' && o.liquidado !== true) {
         enRuta.push(o);
-        if (createdMs > 0 && createdMs < staleRouteThresholdMs) {
+        if (validCreatedMs && createdMs < staleRouteThresholdMs) {
           enRutaRezagados.push(o);
         }
       }
@@ -995,16 +1033,16 @@ export default async function handler(req: any, res: any) {
         }
       }
 
-      if (createdAt >= dateInfo.svTodayStartUtc) {
+      if (validCreatedMs && createdMs >= svTodayStartMs) {
         if (isCancelled) canceladosHoyOrders.push(o);
         else ventasHoyOrders.push(o);
       }
 
-      if (!isCancelled && createdAt >= dateInfo.svYesterdayStartUtc && createdAt < dateInfo.svTodayStartUtc) {
+      if (!isCancelled && validCreatedMs && createdMs >= svYesterdayStartMs && createdMs < svTodayStartMs) {
         ventasAyerOrders.push(o);
       }
 
-      if (!isCancelled && createdAt >= dateInfo.svMonthStartUtc) {
+      if (!isCancelled && validCreatedMs && createdMs >= svMonthStartMs) {
         ventasMesOrders.push(o);
       }
     }
@@ -1044,8 +1082,9 @@ export default async function handler(req: any, res: any) {
           }
         }
       } else {
+        const rawCantidad = Number((o as any).cantidad);
         const qty =
-          Number(o.cantidad) > 0 ? Math.round(Number(o.cantidad)) : inferOrderQty(o.sku);
+          Number.isFinite(rawCantidad) && rawCantidad > 0 ? Math.round(rawCantidad) : inferOrderQty(o.sku);
         const resolved = resolveOrderUnitCost(o);
         resolvedLabel = resolved.label;
         if (resolved.found) {
@@ -1404,7 +1443,11 @@ export default async function handler(req: any, res: any) {
             .slice(0, 4)
             .map((i: any) => `${escapeHtml(i.nombre || i.sku)} (${Number(i.stock_disponible || 0)})`)
             .join(', ');
-          lines.push(`• Stock bajo (${lowStock.length}): ${names}`);
+          lines.push(
+            `• Stock bajo (${lowStock.length}): ${names}${
+              lowStock.length > 4 ? ` y ${lowStock.length - 4} más` : ''
+            }`
+          );
         }
       }
 
@@ -1534,7 +1577,11 @@ export default async function handler(req: any, res: any) {
             .slice(0, 4)
             .map((i: any) => `${escapeHtml(i.nombre || i.sku)} (${Number(i.stock_disponible || 0)})`)
             .join(', ');
-          lines.push(`• Stock bajo (${lowStock.length}): ${names}`);
+          lines.push(
+            `• Stock bajo (${lowStock.length}): ${names}${
+              lowStock.length > 4 ? ` y ${lowStock.length - 4} más` : ''
+            }`
+          );
         }
       }
 

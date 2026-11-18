@@ -697,10 +697,18 @@ export async function backfillMissingOsEvents(days = 30): Promise<{
 
   const existingKeys = new Set<string>();
   const existingOrderStates = new Set<string>();
+  const existingAdIds = new Set<string>();
+  const existingTxIds = new Set<string>();
   for (const row of existingRes.data || []) {
     if (row.idempotency_key) existingKeys.add(row.idempotency_key);
     if (row.source_table === 'whatsapp_orders' && row.source_id && row.type) {
       existingOrderStates.add(`${row.source_id}:${row.type}`);
+    }
+    if (row.source_table === 'gastos_publicidad' && row.source_id && row.type === 'marketing.ad.expense') {
+      existingAdIds.add(String(row.source_id));
+    }
+    if (row.source_table === 'finance_money_transactions' && row.source_id) {
+      existingTxIds.add(String(row.source_id));
     }
   }
 
@@ -785,7 +793,7 @@ export async function backfillMissingOsEvents(days = 30): Promise<{
 
   for (const g of adsRes.data || []) {
     const k = `backfill:gastos_publicidad:${g.id}`;
-    if (existingKeys.has(k)) {
+    if (existingKeys.has(k) || existingAdIds.has(String(g.id))) {
       skippedExisting++;
       continue;
     }
@@ -811,7 +819,7 @@ export async function backfillMissingOsEvents(days = 30): Promise<{
 
   for (const tx of txRes.data || []) {
     const k = `backfill:finance_tx:${tx.id}`;
-    if (existingKeys.has(k)) {
+    if (existingKeys.has(k) || existingTxIds.has(String(tx.id))) {
       skippedExisting++;
       continue;
     }

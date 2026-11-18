@@ -387,6 +387,8 @@ export default async function handler(req: any, res: any) {
         prevMonto: number;
         newMonto: number;
         detalle: string;
+        isUpdate: boolean;
+        insertedId?: string | number;
       }> = [];
 
       for (const [key, entry] of dailySpendMap.entries()) {
@@ -395,6 +397,7 @@ export default async function handler(req: any, res: any) {
         const prev = existingMap.get(key);
         const prevMonto = prev ? Math.round((Number(prev.monto) || 0) * 100) / 100 : 0;
         const delta = Math.round((entry.monto - prevMonto) * 100) / 100;
+        let insertedId: string | number | undefined;
 
         if (prev?.id) {
           await supabase
@@ -402,13 +405,18 @@ export default async function handler(req: any, res: any) {
             .update({ monto: entry.monto, notas: noteTag })
             .eq('id', prev.id);
         } else {
-          await supabase.from('gastos_publicidad').insert({
-            fecha: entry.fecha,
-            codigo_anuncio: entry.codigo_anuncio,
-            plataforma: 'Meta',
-            monto: entry.monto,
-            notas: noteTag,
-          });
+          const { data: insertedRow } = await supabase
+            .from('gastos_publicidad')
+            .insert({
+              fecha: entry.fecha,
+              codigo_anuncio: entry.codigo_anuncio,
+              plataforma: 'Meta',
+              monto: entry.monto,
+              notas: noteTag,
+            })
+            .select('id')
+            .single();
+          if (insertedRow?.id != null) insertedId = insertedRow.id;
         }
         upsertedCount++;
 
@@ -420,6 +428,8 @@ export default async function handler(req: any, res: any) {
             prevMonto,
             newMonto: entry.monto,
             detalle: entry.detalle,
+            isUpdate: Boolean(prev?.id),
+            insertedId,
           });
         }
       }
@@ -448,11 +458,29 @@ export default async function handler(req: any, res: any) {
       );
 
       for (const d of eventDeltas) {
+        // Si fue INSERT nuevo, trg_gastos_publicidad_events ya suele emitir marketing.ad.expense sincrónicamente.
+        // Verificamos antes para no emitir dos veces ni descontar doble de tarjeta_pauta.
+        if (!d.isUpdate && d.insertedId != null) {
+          const { data: existingTriggerEv } = await supabase
+            .from('os_events')
+            .select('id')
+            .eq('source_table', 'gastos_publicidad')
+            .eq('source_id', String(d.insertedId))
+            .limit(1);
+          if (existingTriggerEv && existingTriggerEv.length > 0) {
+            continue;
+          }
+        }
+
+        const idempKey = !d.isUpdate && d.insertedId != null
+          ? `gastos_publicidad:${d.insertedId}:${d.fecha}`
+          : `meta_sync:${d.fecha}:${d.codigo_anuncio}:${Math.round(d.prevMonto * 100)}->${Math.round(d.newMonto * 100)}`;
+
         await emitServerOsEvent(
           supabase,
           'marketing.ad.expense',
           'gastos_publicidad',
-          `${d.fecha}:${d.codigo_anuncio}`,
+          !d.isUpdate && d.insertedId != null ? String(d.insertedId) : `${d.fecha}:${d.codigo_anuncio}`,
           {
             fecha: d.fecha,
             codigo_anuncio: d.codigo_anuncio,
@@ -462,7 +490,7 @@ export default async function handler(req: any, res: any) {
             detalle: d.detalle,
             origen: 'meta_ads_sync',
           },
-          `meta_sync:${d.fecha}:${d.codigo_anuncio}:${Math.round(d.prevMonto * 100)}->${Math.round(d.newMonto * 100)}`
+          idempKey
         );
       }
 

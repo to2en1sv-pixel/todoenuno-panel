@@ -81,18 +81,25 @@ language plpgsql security definer as $$
 declare
   v_amount numeric;
   v_campaign text;
+  v_is_backfill boolean;
 begin
-  if NEW.type = 'marketing.ad.expense' then
-    v_amount   := coalesce((NEW.payload->>'amount')::numeric, 0);
-    v_campaign := coalesce(NEW.payload->>'campaign_id', 'Campaña');
+  v_is_backfill := coalesce((NEW.payload->>'backfill')::boolean, false)
+                   or coalesce(NEW.idempotency_key, '') like 'backfill:%';
 
-    if v_amount > 0 then
+  if not v_is_backfill and NEW.type = 'marketing.ad.expense' then
+    v_amount   := coalesce((NEW.payload->>'amount')::numeric, (NEW.payload->>'monto')::numeric, 0);
+    v_campaign := coalesce(NEW.payload->>'codigo_anuncio', NEW.payload->>'campaign_id', 'Campaña');
+
+    if v_amount > 0 and not exists (
+      select 1 from finance.money_transactions where source_event_id = NEW.id
+    ) then
       insert into finance.money_transactions (
         account_id, tipo, categoria, monto, descripcion, fecha, source_event_id, source_table, source_id, es_manual
       ) values (
         'tarjeta_pauta', 'expense', 'pauta_publicidad', v_amount,
         'Gasto publicitario diario ' || v_campaign,
-        current_date, NEW.id, NEW.source_table, NEW.source_id, false
+        coalesce((NEW.payload->>'fecha')::date, current_date),
+        NEW.id, NEW.source_table, NEW.source_id, false
       );
 
       update finance.cash_accounts
@@ -194,18 +201,25 @@ language plpgsql security definer as $$
 declare
   v_amount numeric;
   v_campaign text;
+  v_is_backfill boolean;
 begin
-  if NEW.type = 'marketing.ad.expense' then
-    v_amount   := coalesce((NEW.payload->>'amount')::numeric, 0);
-    v_campaign := coalesce(NEW.payload->>'campaign_id', 'Campaña');
+  v_is_backfill := coalesce((NEW.payload->>'backfill')::boolean, false)
+                   or coalesce(NEW.idempotency_key, '') like 'backfill:%';
 
-    if v_amount > 0 then
+  if not v_is_backfill and NEW.type = 'marketing.ad.expense' then
+    v_amount   := coalesce((NEW.payload->>'amount')::numeric, (NEW.payload->>'monto')::numeric, 0);
+    v_campaign := coalesce(NEW.payload->>'codigo_anuncio', NEW.payload->>'campaign_id', 'Campaña');
+
+    if v_amount > 0 and not exists (
+      select 1 from finance.money_transactions where source_event_id = NEW.id
+    ) then
       insert into finance.money_transactions (
         account_id, tipo, categoria, monto, descripcion, fecha, source_event_id, source_table, source_id, es_manual
       ) values (
         'tarjeta_pauta', 'expense', 'pauta_publicidad', v_amount,
         'Gasto publicitario diario ' || v_campaign,
-        current_date, NEW.id, NEW.source_table, NEW.source_id, false
+        coalesce((NEW.payload->>'fecha')::date, current_date),
+        NEW.id, NEW.source_table, NEW.source_id, false
       );
 
       update finance.cash_accounts
