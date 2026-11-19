@@ -22,6 +22,7 @@ import {
   formatDurationCompact,
   getSvOffsetIso,
   getSvTodayIso,
+  resolveEffectiveSlaLimits,
   saveDispatchSlaSettings,
   type DispatchSlaSettings,
   type OrderSlaEvaluation,
@@ -76,6 +77,7 @@ interface DelayModalProps {
 }
 
 const MOTIVOS_DEMORA = [
+  'Saturación operativa en despachos',
   'Alta demanda en despacho',
   'Demora logística en ruta / clima',
   'Reasignación de motorista en zona',
@@ -590,9 +592,15 @@ export function EficienciaRetrasosView({
     };
   }, [pedidos, slaSettings, nowMs]);
 
+  const effectiveLimits = useMemo(
+    () => resolveEffectiveSlaLimits(slaSettings),
+    [slaSettings]
+  );
+
   const handleSaveSla = async () => {
     setSavingSla(true);
     const saved = await saveDispatchSlaSettings({
+      ...slaSettings,
       bodegaHours: bodegaInput,
       rutaHours: rutaInput,
     });
@@ -707,18 +715,39 @@ export function EficienciaRetrasosView({
 
         {/* Configuración rápida de Reloj SLA */}
         <div className="p-4 space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-medium uppercase tracking-wider tx-mu flex items-center gap-1">
               <Settings2 size={12} /> Reloj SLA
             </span>
-            {savedFeedback && (
+            {savedFeedback ? (
               <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">Guardado</span>
-            )}
+            ) : effectiveLimits.saturationActive ? (
+              <Link
+                to="/sistema?tab=todd"
+                className="text-[10px] font-semibold hover:underline"
+                style={{ color: 'var(--ac)' }}
+              >
+                Ajustar en Sistema
+              </Link>
+            ) : null}
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          {effectiveLimits.saturationActive && (
+            <div className="px-2.5 py-1.5 rounded-md bg-amber-500/10 border border-amber-500/25 text-[11px] leading-snug text-amber-700 dark:text-amber-300">
+              <div className="font-semibold">
+                Saturación activa ({effectiveLimits.saturationLabel})
+              </div>
+              <div className="font-mono text-[10px] opacity-90">
+                Vigente: Bodega {effectiveLimits.bodegaHours}h · Ruta {effectiveLimits.rutaHours}h
+              </div>
+            </div>
+          )}
+
+          <div className={`grid grid-cols-2 gap-2 ${effectiveLimits.saturationActive ? 'opacity-65' : ''}`}>
             <div>
-              <label className="text-[10px] tx-mu block">Bodega (h)</label>
+              <label className="text-[10px] tx-mu block">
+                {effectiveLimits.saturationActive ? 'Base bodega (h)' : 'Bodega (h)'}
+              </label>
               <input
                 type="number"
                 min={4}
@@ -729,7 +758,9 @@ export function EficienciaRetrasosView({
               />
             </div>
             <div>
-              <label className="text-[10px] tx-mu block">Ruta (h)</label>
+              <label className="text-[10px] tx-mu block">
+                {effectiveLimits.saturationActive ? 'Base ruta (h)' : 'Ruta (h)'}
+              </label>
               <input
                 type="number"
                 min={6}
@@ -747,7 +778,11 @@ export function EficienciaRetrasosView({
             disabled={savingSla}
             className="w-full py-1.5 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 text-[11px] font-semibold transition-opacity"
           >
-            {savingSla ? 'Guardando...' : 'Aplicar tiempos'}
+            {savingSla
+              ? 'Guardando...'
+              : effectiveLimits.saturationActive
+              ? 'Guardar tiempos base'
+              : 'Aplicar tiempos'}
           </button>
         </div>
       </section>
