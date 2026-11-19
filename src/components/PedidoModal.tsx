@@ -174,7 +174,7 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
         direccion: pedido.direccion || "",
         metodo_pago: pedido.metodo_pago || "Contra entrega",
         codigo_anuncio: pedido.codigo_anuncio || "",
-        notas: pedido.notas || "",
+        notas: String(pedido.notas || "").replace(/\s*\[ENTREGADO_HISTORICO\]\s*/g, " ").trim(),
         courier: (pedido as any).courier || "Motorista Central 1",
         departamento: (pedido as any).departamento || "San Salvador",
         es_encargo: esEncargo,
@@ -339,7 +339,14 @@ export default function PedidoModal({ onClose, onSaved, pedido, pedidosExistente
       direccion: form.direccion.trim(),
       metodo_pago: form.metodo_pago,
       codigo_anuncio: form.codigo_anuncio.trim() || null,
-      notas: form.notas.trim() || null,
+      notas: (() => {
+        const cleanNotes = form.notas.replace(/\s*\[ENTREGADO_HISTORICO\]\s*/g, " ").trim();
+        const wasHistorico = Boolean(pedido && String(pedido.notas || "").includes("[ENTREGADO_HISTORICO]"));
+        if (wasHistorico && estadoFinal === "entregado") {
+          return cleanNotes ? `${cleanNotes}\n[ENTREGADO_HISTORICO]` : "[ENTREGADO_HISTORICO]";
+        }
+        return cleanNotes || null;
+      })(),
       estado: estadoFinal,
     };
 

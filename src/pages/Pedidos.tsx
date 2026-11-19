@@ -49,7 +49,8 @@ import {
   ShieldAlert,
   UserX,
   Camera,
-  ClipboardList
+  ClipboardList,
+  Archive
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
@@ -134,24 +135,82 @@ export interface Pedido {
 
 const ESTADOS = ["nuevo", "programado", "por_empacar", "en_camino", "entregado", "cancelado"] as const;
 type Estado = (typeof ESTADOS)[number];
+type KanbanColKey = Estado | "entregado_historico";
 
-const COLUMNAS: { key: Estado; titulo: string; emoji: string; accent: string }[] = [
+const HISTORICO_TAG = "[ENTREGADO_HISTORICO]";
+
+const COLUMNAS: { key: KanbanColKey; titulo: string; emoji: string; accent: string }[] = [
   { key: "nuevo", titulo: "Nuevos Hoy", emoji: "📥", accent: "border-t-sky-500" },
   { key: "programado", titulo: "Encargos / Futuros", emoji: "📅", accent: "border-t-indigo-500" },
   { key: "por_empacar", titulo: "Por Empacar", emoji: "📦", accent: "border-t-amber-500" },
   { key: "en_camino", titulo: "En Camino", emoji: "🛵", accent: "border-t-violet-500" },
   { key: "entregado", titulo: "Entregados", emoji: "✅", accent: "border-t-emerald-500" },
+  { key: "entregado_historico", titulo: "Entregado Histórico", emoji: "🗄️", accent: "border-t-slate-500" },
   { key: "cancelado", titulo: "Cancelados", emoji: "❌", accent: "border-t-rose-500" },
 ];
 
-const ETIQUETA_ESTADO: Record<Estado, string> = {
+const ETIQUETA_ESTADO: Record<KanbanColKey, string> = {
   nuevo: "Nuevo",
   programado: "Encargo / Programado",
   por_empacar: "Por empacar",
   en_camino: "En camino",
-  entregado: "Entregado",
+  entregado: "Entregado (Por revisar)",
+  entregado_historico: "Entregado Histórico",
   cancelado: "Cancelado",
 };
+
+function esEntregadoHistorico(p: Pick<Pedido, "estado" | "notas">): boolean {
+  return normalizeOrderStatus(p.estado) === "entregado" && String(p.notas || "").includes(HISTORICO_TAG);
+}
+
+function limpiarNotasVisibles(notas: string | null | undefined): string {
+  return String(notas || "")
+    .replace(/\s*\[ENTREGADO_HISTORICO\]\s*/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function agregarTagHistorico(notas: string | null | undefined): string {
+  const clean = limpiarNotasVisibles(notas);
+  return clean ? `${clean}\n${HISTORICO_TAG}` : HISTORICO_TAG;
+}
+
+function quitarTagHistorico(notas: string | null | undefined): string | null {
+  const clean = limpiarNotasVisibles(notas);
+  return clean || null;
+}
+
+function columnaDePedido(p: Pick<Pedido, "estado" | "notas">): KanbanColKey {
+  if (esEntregadoHistorico(p)) return "entregado_historico";
+  return normalizeOrderStatus(p.estado);
+}
+
+function evaluarAuditoriaEntrega(p: Pedido): {
+  liquidadoOk: boolean;
+  deptoOk: boolean;
+  anuncioOk: boolean;
+  listoParaHistorico: boolean;
+  faltantes: string[];
+} {
+  const liquidadoOk = Boolean(p.liquidado);
+  const rawDepto = String(p.departamento || "").trim();
+  const deptoOk = Boolean(rawDepto && rawDepto.toLowerCase() !== "sin asignar");
+  const rawAnuncio = String(p.codigo_anuncio || "").trim();
+  const anuncioOk = Boolean(rawAnuncio);
+
+  const faltantes: string[] = [];
+  if (!liquidadoOk) faltantes.push("Liquidar en Finanzas");
+  if (!deptoOk) faltantes.push("Departamento");
+  if (!anuncioOk) faltantes.push("Código de anuncio");
+
+  return {
+    liquidadoOk,
+    deptoOk,
+    anuncioOk,
+    listoParaHistorico: liquidadoOk && deptoOk && anuncioOk,
+    faltantes,
+  };
+}
 
 const DEPARTAMENTOS = [
   "Todas las Zonas",
@@ -264,10 +323,17 @@ export function PedidosPage() {
     [courierNames]
   );
   const [vista, setVista] = useState<'kanban' | 'tabla' | 'alistado' | 'despacho' | 'eficiencia' | 'lista_negra'>('kanban');
-  const [pestañaEtapa, setPestañaEtapa] = useState<'todas' | Estado>('todas');
+  const [pestañaEtapa, setPestañaEtapa] = useState<'todas' | KanbanColKey>('todas');
   const [filtroEncargos, setFiltroEncargos] = useState<'todos' | 'urgentes' | 'semana' | 'quincena'>('todos');
   const [filtroCourier, setFiltroCourier] = useState("Todos los Couriers");
   const [filtroDepto, setFiltroDepto] = useState("Todas las Zonas");
+
+  // Auditoría y archivo a Entregado Histórico
+  const [pedidoAAuditar, setPedidoAAuditar] = useState<Pedido | null>(null);
+  const [auditDepto, setAuditDepto] = useState("");
+  const [auditAnuncio, setAuditAnuncio] = useState("");
+  const [archivandoHistorico, setArchivandoHistorico] = useState(false);
+  const [archivandoLoteHistorico, setArchivandoLoteHistorico] = useState(false);
 
   // Reloj de Despacho (SLA) y Eficiencia Operativa
   const [slaSettings, setSlaSettings] = useState<DispatchSlaSettings>(() => getCachedDispatchSlaSettings());
@@ -522,11 +588,11 @@ export function PedidosPage() {
     if (pestañaEtapa === 'todas') return pedidosFiltrados;
 
     let filtrados = pedidosFiltrados.filter(p => {
-      const st = normalizarEstado(p.estado);
+      const col = columnaDePedido(p);
       if (pestañaEtapa === 'programado') {
-        return st === 'programado' || esPedidoEncargo(p);
+        return col === 'programado' || (col !== 'entregado' && col !== 'entregado_historico' && col !== 'cancelado' && esPedidoEncargo(p));
       }
-      return st === pestañaEtapa;
+      return col === pestañaEtapa;
     });
 
     // Subfiltro específico de encargos
@@ -565,25 +631,31 @@ export function PedidosPage() {
   }, [pedidos, slaSettings, nowMs]);
 
   const porEstado = useMemo(() => {
-    const map: Record<Estado, Pedido[]> = {
+    const map: Record<KanbanColKey, Pedido[]> = {
       nuevo: [],
       programado: [],
       por_empacar: [],
       en_camino: [],
       entregado: [],
+      entregado_historico: [],
       cancelado: [],
     };
     for (const p of pedidosFiltrados) {
-      const st = normalizarEstado(p.estado);
-      map[st].push(p);
+      const col = columnaDePedido(p);
+      map[col].push(p);
     }
     return map;
   }, [pedidosFiltrados]);
 
+  const entregadosListosParaHistorico = useMemo(
+    () => porEstado.entregado.filter((p) => evaluarAuditoriaEntrega(p).listoParaHistorico),
+    [porEstado.entregado]
+  );
+
   const totalFiltrados = pedidosFiltrados.length;
   const columnasVisibles = mostrarHistorial
     ? COLUMNAS
-    : COLUMNAS.filter((c) => c.key !== "entregado" && c.key !== "cancelado");
+    : COLUMNAS.filter((c) => c.key !== "entregado_historico" && c.key !== "cancelado");
 
   /* --------------------------- Transición Unificada + Inventario --------------------------- */
   const abrirModalCancelar = (pedido: Pedido) => {
@@ -705,6 +777,178 @@ export function PedidosPage() {
   /* --------------------------- Cambiar Estado Directo (Jump) --------------------------- */
   const cambiarEstadoDirecto = async (pedido: Pedido, nuevoEstado: Estado) => {
     await ejecutarCambioEstado(pedido, nuevoEstado);
+  };
+
+  /* --------------------------- Auditoría y Archivo a Entregado Histórico --------------------------- */
+  const abrirModalAuditoriaHistorico = (pedido: Pedido) => {
+    setAuditDepto(String(pedido.departamento || "").trim());
+    setAuditAnuncio(String(pedido.codigo_anuncio || "").trim());
+    setPedidoAAuditar(pedido);
+  };
+
+  const moverAHistoricoDirecto = async (pedido: Pedido, abrirModalSiFalta = true) => {
+    if (normalizarEstado(pedido.estado) !== "entregado") {
+      showInvToast("warn", "Primero marca el pedido como Entregado antes de pasarlo a Histórico.");
+      return;
+    }
+
+    const audit = evaluarAuditoriaEntrega(pedido);
+    if (abrirModalSiFalta && !audit.listoParaHistorico) {
+      abrirModalAuditoriaHistorico(pedido);
+      return;
+    }
+
+    setMoviendoId(pedido.id);
+    try {
+      const nuevasNotas = agregarTagHistorico(pedido.notas);
+      const { error: updErr } = await supabase
+        .from("whatsapp_orders")
+        .update({ notas: nuevasNotas })
+        .eq("id", pedido.id);
+
+      if (updErr) {
+        setError(`No se pudo archivar en histórico: ${updErr.message}`);
+        return;
+      }
+
+      setPedidos((prev) =>
+        prev.map((item) => (item.id === pedido.id ? { ...item, notas: nuevasNotas } : item))
+      );
+      showInvToast("ok", `Pedido de ${pedido.nombre_cliente || "cliente"} movido a Entregado Histórico.`);
+    } finally {
+      setMoviendoId(null);
+    }
+  };
+
+  const restaurarDeHistorico = async (pedido: Pedido) => {
+    setMoviendoId(pedido.id);
+    try {
+      const nuevasNotas = quitarTagHistorico(pedido.notas);
+      const { error: updErr } = await supabase
+        .from("whatsapp_orders")
+        .update({ notas: nuevasNotas })
+        .eq("id", pedido.id);
+
+      if (updErr) {
+        setError(`No se pudo devolver a Entregados: ${updErr.message}`);
+        return;
+      }
+
+      setPedidos((prev) =>
+        prev.map((item) => (item.id === pedido.id ? { ...item, notas: nuevasNotas } : item))
+      );
+      showInvToast("ok", "Pedido devuelto a la bandeja de Entregados.");
+    } finally {
+      setMoviendoId(null);
+    }
+  };
+
+  const confirmarAuditoriaYArchivar = async () => {
+    if (!pedidoAAuditar) return;
+    if (!pedidoAAuditar.liquidado) {
+      showInvToast("warn", "Liquida primero este pedido en Finanzas antes de moverlo a Histórico.");
+      return;
+    }
+
+    const cleanDepto = auditDepto.trim();
+    const cleanAnuncio = auditAnuncio.trim();
+    if (!cleanDepto || !cleanAnuncio) {
+      showInvToast("warn", "Completa el departamento y el código de anuncio (o marca Orgánico).");
+      return;
+    }
+
+    setArchivandoHistorico(true);
+    try {
+      const nuevasNotas = agregarTagHistorico(pedidoAAuditar.notas);
+      const { error: updErr } = await supabase
+        .from("whatsapp_orders")
+        .update({
+          departamento: cleanDepto,
+          codigo_anuncio: cleanAnuncio,
+          notas: nuevasNotas,
+        })
+        .eq("id", pedidoAAuditar.id);
+
+      if (updErr) {
+        setError(`Error al guardar auditoría: ${updErr.message}`);
+        return;
+      }
+
+      setPedidos((prev) =>
+        prev.map((item) =>
+          item.id === pedidoAAuditar.id
+            ? {
+                ...item,
+                departamento: cleanDepto,
+                codigo_anuncio: cleanAnuncio,
+                notas: nuevasNotas,
+              }
+            : item
+        )
+      );
+      showInvToast(
+        "ok",
+        `Datos verificados y pedido de ${pedidoAAuditar.nombre_cliente || "cliente"} archivado en Entregado Histórico.`
+      );
+      setPedidoAAuditar(null);
+    } finally {
+      setArchivandoHistorico(false);
+    }
+  };
+
+  const archivarEntregadosListos = async () => {
+    if (entregadosListosParaHistorico.length === 0 || archivandoLoteHistorico) return;
+    setArchivandoLoteHistorico(true);
+    try {
+      const updatedMap = new Map<string, string>();
+      for (const p of entregadosListosParaHistorico) {
+        const nuevasNotas = agregarTagHistorico(p.notas);
+        const { error: updErr } = await supabase
+          .from("whatsapp_orders")
+          .update({ notas: nuevasNotas })
+          .eq("id", p.id);
+        if (!updErr) {
+          updatedMap.set(p.id, nuevasNotas);
+        }
+      }
+
+      if (updatedMap.size > 0) {
+        setPedidos((prev) =>
+          prev.map((item) =>
+            updatedMap.has(item.id) ? { ...item, notas: updatedMap.get(item.id)! } : item
+          )
+        );
+        showInvToast(
+          "ok",
+          `${updatedMap.size} pedido(s) liquidado(s) y auditado(s) pasaron a Entregado Histórico.`
+        );
+      }
+    } finally {
+      setArchivandoLoteHistorico(false);
+    }
+  };
+
+  const cambiarFaseKanban = async (pedido: Pedido, destino: KanbanColKey) => {
+    if (destino === "entregado_historico") {
+      await moverAHistoricoDirecto(pedido, true);
+      return;
+    }
+
+    if (esEntregadoHistorico(pedido)) {
+      if (destino === "entregado") {
+        await restaurarDeHistorico(pedido);
+        return;
+      }
+      const notasLimpias = quitarTagHistorico(pedido.notas);
+      await supabase
+        .from("whatsapp_orders")
+        .update({ notas: notasLimpias })
+        .eq("id", pedido.id);
+      await ejecutarCambioEstado({ ...pedido, notas: notasLimpias }, destino);
+      return;
+    }
+
+    await ejecutarCambioEstado(pedido, destino);
   };
 
   /* --------------------------- Confirmar Cancelación y Devolución --------------------------- */
@@ -1044,10 +1288,10 @@ export function PedidosPage() {
                 ? "border-[var(--tx)] bg-sf text-[var(--tx)] font-semibold"
                 : "border-[var(--bd)] bg-cd text-[var(--tx)] hover:bg-sf"
             }`}
-            title="Mostrar/ocultar pedidos entregados y cancelados antiguos"
+            title="Mostrar/ocultar columnas de Entregado Histórico y Cancelados"
           >
             {mostrarHistorial ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-            <span>{mostrarHistorial ? "Ocultar Historial" : "Historial"}</span>
+            <span>{mostrarHistorial ? "Ocultar Histórico" : "Ver Histórico"}</span>
           </button>
 
           <button
@@ -1269,6 +1513,7 @@ export function PedidosPage() {
             { id: 'por_empacar' as const, label: 'Por Empacar', count: porEstado.por_empacar.length },
             { id: 'en_camino' as const, label: 'En Camino', count: porEstado.en_camino.length },
             { id: 'entregado' as const, label: 'Entregados', count: porEstado.entregado.length },
+            { id: 'entregado_historico' as const, label: 'Entregado Histórico', count: porEstado.entregado_historico.length },
             { id: 'cancelado' as const, label: 'Cancelados', count: porEstado.cancelado.length },
           ].map((stage) => (
             <button
@@ -1475,13 +1720,31 @@ export function PedidosPage() {
                 key={col.key}
                 className={`flex flex-col shrink-0 min-w-[300px] w-[300px] xl:w-auto xl:flex-1 rounded-xl border border-[var(--bd)] border-t-2 ${col.accent} bg-cd`}
               >
-                <header className="flex items-center justify-between px-4 py-3 border-b border-[var(--bd)]">
-                  <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--tx)]">
-                    {col.titulo}
-                  </h2>
-                  <span className="text-xs font-mono tabular-nums font-semibold tx-mu">
-                    {porEstado[col.key].length}
-                  </span>
+                <header className="flex items-center justify-between gap-2 px-4 py-3 border-b border-[var(--bd)]">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--tx)] truncate">
+                      {col.titulo}
+                    </h2>
+                    <span className="text-xs font-mono tabular-nums font-semibold tx-mu">
+                      {porEstado[col.key].length}
+                    </span>
+                  </div>
+                  {col.key === 'entregado' && entregadosListosParaHistorico.length > 0 && (
+                    <button
+                      type="button"
+                      disabled={archivandoLoteHistorico}
+                      onClick={archivarEntregadosListos}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--bd)] bg-sf hover:border-[var(--tx)] text-[10px] font-semibold text-[var(--tx)] transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                      title="Mover a Entregado Histórico todos los pedidos ya liquidados con departamento y anuncio completos"
+                    >
+                      {archivandoLoteHistorico ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Archive className="w-3 h-3" />
+                      )}
+                      <span>Archivar ({entregadosListosParaHistorico.length})</span>
+                    </button>
+                  )}
                 </header>
 
                 <div className="p-3 space-y-2.5 overflow-y-auto min-h-[160px] max-h-[calc(100vh-380px)]">
@@ -1504,7 +1767,9 @@ export function PedidosPage() {
                         onGuia={(p) => setPedidosGuia([p as GuiaPedido])}
                         onDetalle={setPedidoDetalle}
                         onMover={moverPedido}
-                        onCambiarDirecto={cambiarEstadoDirecto}
+                        onCambiarFase={cambiarFaseKanban}
+                        onArchivarHistorico={(p) => moverAHistoricoDirecto(p, true)}
+                        onRestaurarHistorico={restaurarDeHistorico}
                         onEditar={setPedidoAEditar}
                         onBorrar={borrarPedido}
                         onLiquidar={setPedidoALiquidar}
@@ -1520,7 +1785,7 @@ export function PedidosPage() {
         ) : (
           /* Vista Kanban Enfocada por Etapa */
           <div className="flex-1 flex flex-col">
-            <div className="flex items-center justify-between mb-3 px-1">
+            <div className="flex items-center justify-between gap-2 mb-3 px-1 flex-wrap">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-bold text-[var(--tx)]">
                   Fase: {ETIQUETA_ESTADO[pestañaEtapa]}
@@ -1529,15 +1794,32 @@ export function PedidosPage() {
                   ({pedidosParaVista.length} pedidos)
                 </span>
               </div>
-              {pedidosParaVista.length > 0 && (
-                <button
-                  type="button"
-                  onClick={seleccionarTodos}
-                  className="text-xs font-medium text-[var(--tx)] hover:underline"
-                >
-                  {seleccionados.size === pedidosParaVista.length ? 'Deseleccionar todos' : 'Seleccionar todos en esta etapa'}
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                {pestañaEtapa === 'entregado' && entregadosListosParaHistorico.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={archivandoLoteHistorico}
+                    onClick={archivarEntregadosListos}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 text-xs font-semibold transition-opacity cursor-pointer disabled:opacity-50"
+                  >
+                    {archivandoLoteHistorico ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Archive className="w-3.5 h-3.5" />
+                    )}
+                    <span>Archivar listos ({entregadosListosParaHistorico.length})</span>
+                  </button>
+                )}
+                {pedidosParaVista.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={seleccionarTodos}
+                    className="text-xs font-medium text-[var(--tx)] hover:underline"
+                  >
+                    {seleccionados.size === pedidosParaVista.length ? 'Deseleccionar todos' : 'Seleccionar todos en esta etapa'}
+                  </button>
+                )}
+              </div>
             </div>
 
             {pedidosParaVista.length === 0 ? (
@@ -1564,7 +1846,9 @@ export function PedidosPage() {
                     onGuia={(p) => setPedidosGuia([p as GuiaPedido])}
                     onDetalle={setPedidoDetalle}
                     onMover={moverPedido}
-                    onCambiarDirecto={cambiarEstadoDirecto}
+                    onCambiarFase={cambiarFaseKanban}
+                    onArchivarHistorico={(p) => moverAHistoricoDirecto(p, true)}
+                    onRestaurarHistorico={restaurarDeHistorico}
                     onEditar={setPedidoAEditar}
                     onBorrar={borrarPedido}
                     onLiquidar={setPedidoALiquidar}
@@ -1687,17 +1971,28 @@ export function PedidosPage() {
                           </div>
                           <span className="text-[10px] tx-mu font-mono">{p.telefono || "—"}</span>
                           <span className="text-[10px] tx-mu block truncate max-w-xs">{p.direccion || "—"}</span>
-                          {p.notas && (
+                          {limpiarNotasVisibles(p.notas) && (
                             <span className="text-[10px] italic text-indigo-500/80 block truncate max-w-xs">
-                              💬 {p.notas}
+                              💬 {limpiarNotasVisibles(p.notas)}
                             </span>
                           )}
                         </td>
                         <td className="p-3">
-                          <span className="text-xs font-semibold block">{p.departamento || "San Salvador"}</span>
+                          <span className={`text-xs font-semibold block ${!String(p.departamento || "").trim() ? "text-rose-600 dark:text-rose-400" : ""}`}>
+                            {String(p.departamento || "").trim() || "Sin depto"}
+                          </span>
                           <span className="text-[10px] tx-mu flex items-center gap-1">
                             <Truck size={10} /> {p.courier || "Motorista Central 1"}
                           </span>
+                          {p.codigo_anuncio ? (
+                            <span className="text-[10px] font-mono tx-mu block mt-0.5">
+                              Anuncio: {p.codigo_anuncio}
+                            </span>
+                          ) : normalizarEstado(p.estado) === "entregado" && !esEntregadoHistorico(p) ? (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 block mt-0.5">
+                              Sin código de anuncio
+                            </span>
+                          ) : null}
                         </td>
                         <td className="p-3">
                           <span className="font-mono font-semibold text-xs text-[var(--tx)] block">{p.sku || "—"}</span>
@@ -1721,8 +2016,8 @@ export function PedidosPage() {
                         <td className="p-3 text-center">
                           <div className="relative inline-block mb-1">
                             <select
-                              value={normalizarEstado(p.estado)}
-                              onChange={(e) => cambiarEstadoDirecto(p, e.target.value as Estado)}
+                              value={columnaDePedido(p)}
+                              onChange={(e) => cambiarFaseKanban(p, e.target.value as KanbanColKey)}
                               className="py-1 pl-2 pr-6 rounded-lg text-[10px] font-bold bg-sf border border-[var(--bd)] uppercase cursor-pointer outline-none focus:border-indigo-500 appearance-none shadow-sm block"
                             >
                               <option value="nuevo">📥 Nuevo</option>
@@ -1730,6 +2025,7 @@ export function PedidosPage() {
                               <option value="por_empacar">📦 Empacar</option>
                               <option value="en_camino">🛵 En Camino</option>
                               <option value="entregado">✅ Entregado</option>
+                              <option value="entregado_historico">🗄️ Entregado Histórico</option>
                               <option value="cancelado">❌ Cancelado</option>
                             </select>
                             <div className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 opacity-50">
@@ -1779,6 +2075,15 @@ export function PedidosPage() {
                                 title="Pasar inmediatamente a empaque en bodega"
                               >
                                 <Zap size={12} /> Empacar
+                              </button>
+                            )}
+                            {normalizarEstado(p.estado) === 'entregado' && !esEntregadoHistorico(p) && (
+                              <button
+                                onClick={() => moverAHistoricoDirecto(p, true)}
+                                className="p-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:border-[var(--tx)] text-[var(--tx)]"
+                                title="Auditar datos y pasar a Entregado Histórico"
+                              >
+                                <Archive size={14} />
                               </button>
                             )}
                             <button
@@ -2324,6 +2629,124 @@ export function PedidosPage() {
           }}
         />
       )}
+
+      {/* MODAL 9: AUDITORÍA DE DATOS ANTES DE PASAR A ENTREGADO HISTÓRICO */}
+      {pedidoAAuditar && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <div className="bg-cd border border-[var(--bd)] rounded-xl max-w-md w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3 border-b border-[var(--bd)] pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-[var(--tx)]">
+                  Verificar datos antes de Entregado Histórico
+                </h3>
+                <p className="text-xs tx-mu mt-0.5">
+                  {pedidoAAuditar.nombre_cliente || "Sin nombre"} · {dinero(pedidoAAuditar.total)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPedidoAAuditar(null)}
+                aria-label="Cerrar auditoría"
+                className="p-1.5 rounded-lg border border-[var(--bd)] bg-sf tx-mu hover:text-[var(--tx)] cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 1. Estado de liquidación */}
+            <div className="flex items-center justify-between gap-2 py-2 border-b border-[var(--bd)] text-xs">
+              <span className="font-medium text-[var(--tx)]">1. Liquidación en Finanzas</span>
+              {pedidoAAuditar.liquidado ? (
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                  Liquidado
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = pedidoAAuditar;
+                    setPedidoAAuditar(null);
+                    setPedidoALiquidar(target);
+                  }}
+                  className="px-2.5 py-1 rounded-md bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 text-[11px] font-semibold cursor-pointer"
+                >
+                  Liquidar ahora
+                </button>
+              )}
+            </div>
+
+            {/* 2. Departamento */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--tx)] block">
+                2. Departamento (para Analítica geográfica)
+              </label>
+              <select
+                value={auditDepto}
+                onChange={(e) => setAuditDepto(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-[var(--bd)] bg-sf text-xs text-[var(--tx)] focus:outline-none focus:border-[var(--tx)]"
+              >
+                <option value="">Seleccionar departamento...</option>
+                {DEPARTAMENTOS.filter((d) => d !== "Todas las Zonas").map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 3. Código de anuncio */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-[var(--tx)]">
+                  3. Código de anuncio (para ROAS / Analítica)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setAuditAnuncio("ORGANICO")}
+                  className="text-[11px] font-medium tx-mu hover:text-[var(--tx)] underline cursor-pointer"
+                >
+                  Marcar Orgánico
+                </button>
+              </div>
+              <input
+                type="text"
+                value={auditAnuncio}
+                onChange={(e) => setAuditAnuncio(e.target.value)}
+                placeholder="Ej. ASIS01, PORTABB1 o ORGANICO"
+                className="w-full px-3 py-2 rounded-lg border border-[var(--bd)] bg-sf text-xs font-mono text-[var(--tx)] placeholder:tx-mu focus:outline-none focus:border-[var(--tx)]"
+              />
+            </div>
+
+            <div className="pt-2 border-t border-[var(--bd)] flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPedidoAAuditar(null)}
+                className="px-3.5 py-2 rounded-lg border border-[var(--bd)] bg-sf text-xs font-medium text-[var(--tx)] hover:bg-cd cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={
+                  archivandoHistorico ||
+                  !pedidoAAuditar.liquidado ||
+                  !auditDepto.trim() ||
+                  !auditAnuncio.trim()
+                }
+                onClick={confirmarAuditoriaYArchivar}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 disabled:opacity-40 text-xs font-semibold cursor-pointer"
+              >
+                {archivandoHistorico ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Archive className="w-3.5 h-3.5" />
+                )}
+                <span>Guardar y pasar a Histórico</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2478,7 +2901,9 @@ function PedidoCard({
   onGuia,
   onDetalle,
   onMover,
-  onCambiarDirecto,
+  onCambiarFase,
+  onArchivarHistorico,
+  onRestaurarHistorico,
   onEditar,
   onBorrar,
   onLiquidar,
@@ -2498,7 +2923,9 @@ function PedidoCard({
   onGuia: (p: Pedido) => void;
   onDetalle: (p: Pedido) => void;
   onMover: (p: Pedido, dir: -1 | 1) => void;
-  onCambiarDirecto?: (p: Pedido, destino: Estado) => void;
+  onCambiarFase?: (p: Pedido, destino: KanbanColKey) => void;
+  onArchivarHistorico?: (p: Pedido) => void;
+  onRestaurarHistorico?: (p: Pedido) => void;
   onEditar: (p: Pedido) => void;
   onBorrar: (p: Pedido) => void;
   onLiquidar: (p: Pedido) => void;
@@ -2506,7 +2933,10 @@ function PedidoCard({
   onOpenDelayModal: (p: Pedido) => void;
 }) {
   const estado = normalizarEstado(pedido.estado);
-  const idx = ESTADOS.indexOf(estado);
+  const colActual = columnaDePedido(pedido);
+  const isHistorico = colActual === "entregado_historico";
+  const auditEntrega = useMemo(() => evaluarAuditoriaEntrega(pedido), [pedido]);
+  const notasVisibles = limpiarNotasVisibles(pedido.notas);
   const encargo = esPedidoEncargo(pedido);
   const encargoInfo = encargo ? infoEncargo(pedido) : null;
   const risk = useMemo(() => evaluateCustomerRisk(pedido.telefono, allOrders || []), [pedido.telefono, allOrders]);
@@ -2617,8 +3047,8 @@ function PedidoCard({
 
       {/* Zona, Courier y Liquidación */}
       <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] tx-mu">
-        <span className="inline-flex items-center gap-1">
-          <MapPin size={10} /> {pedido.departamento || "San Salvador"}
+        <span className={`inline-flex items-center gap-1 ${!String(pedido.departamento || "").trim() ? "text-rose-600 dark:text-rose-400 font-medium" : ""}`}>
+          <MapPin size={10} /> {String(pedido.departamento || "").trim() || "Sin depto"}
         </span>
         <span className="inline-flex items-center gap-1">
           <Truck size={10} /> {pedido.courier || "Motorista Central 1"}
@@ -2629,6 +3059,23 @@ function PedidoCard({
           </span>
         )}
       </div>
+
+      {/* Chequeo de calidad de datos para pedidos en bandeja Entregados */}
+      {estado === "entregado" && !isHistorico && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] pt-1.5 border-t border-[var(--bd)]/70">
+          <span className={auditEntrega.liquidadoOk ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-amber-600 dark:text-amber-400 font-medium"}>
+            {auditEntrega.liquidadoOk ? "Liquidado" : "Sin liquidar"}
+          </span>
+          <span className="tx-mu" aria-hidden="true">·</span>
+          <span className={auditEntrega.deptoOk ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400 font-medium"}>
+            {auditEntrega.deptoOk ? "Depto OK" : "Falta depto"}
+          </span>
+          <span className="tx-mu" aria-hidden="true">·</span>
+          <span className={auditEntrega.anuncioOk ? "text-emerald-600 dark:text-emerald-400 font-mono" : "text-amber-600 dark:text-amber-400 font-medium"}>
+            {auditEntrega.anuncioOk ? pedido.codigo_anuncio : "Falta anuncio"}
+          </span>
+        </div>
+      )}
 
       {/* Encargo / Programación */}
       {encargoInfo && (
@@ -2648,16 +3095,16 @@ function PedidoCard({
       )}
 
       {/* Notas del cliente */}
-      {pedido.notas && (
+      {notasVisibles && (
         <p className="mt-2 text-[11px] tx-mu truncate bg-sf px-2 py-1 rounded-md border border-[var(--bd)]">
-          {pedido.notas}
+          {notasVisibles}
         </p>
       )}
 
       {/* Botón directo de "Pasar a Empacar" para encargos listos */}
-      {(estado === "programado" || (encargo && estado === "nuevo")) && onCambiarDirecto && (
+      {(estado === "programado" || (encargo && estado === "nuevo")) && onCambiarFase && (
         <button
-          onClick={() => onCambiarDirecto(pedido, 'por_empacar')}
+          onClick={() => onCambiarFase(pedido, 'por_empacar')}
           className="mt-2.5 w-full py-1.5 bg-sf hover:border-[var(--tx)] text-[var(--tx)] rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors border border-[var(--bd)]"
           title="Mover inmediatamente a Por Empacar en Bodega"
         >
@@ -2712,9 +3159,42 @@ function PedidoCard({
       {(estado === "en_camino" || estado === "entregado") && !pedido.liquidado && (
         <button
           onClick={() => onLiquidar(pedido)}
-          className="mt-2 w-full py-1.5 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1 transition-opacity"
+          className="mt-2 w-full py-1.5 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1 transition-opacity cursor-pointer"
         >
           <DollarSign size={12} /> Liquidar {dinero(pedido.total)}
+        </button>
+      )}
+
+      {/* Botón rápido para auditar y pasar a Entregado Histórico */}
+      {estado === "entregado" && !isHistorico && onArchivarHistorico && (
+        <button
+          type="button"
+          disabled={moviendo}
+          onClick={() => onArchivarHistorico(pedido)}
+          className={`mt-2 w-full py-1.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 ${
+            auditEntrega.listoParaHistorico
+              ? "bg-sf border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+              : "bg-sf border border-[var(--bd)] text-[var(--tx)] hover:border-[var(--tx)]"
+          }`}
+        >
+          <Archive size={12} />
+          <span>
+            {auditEntrega.listoParaHistorico
+              ? "Pasar a Entregado Histórico"
+              : "Revisar datos y archivar"}
+          </span>
+        </button>
+      )}
+
+      {isHistorico && onRestaurarHistorico && (
+        <button
+          type="button"
+          disabled={moviendo}
+          onClick={() => onRestaurarHistorico(pedido)}
+          className="mt-2 w-full py-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:border-[var(--tx)] text-[11px] font-medium tx-mu hover:text-[var(--tx)] flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40"
+        >
+          <RotateCcw size={11} />
+          <span>Devolver a Entregados</span>
         </button>
       )}
 
@@ -2732,12 +3212,12 @@ function PedidoCard({
         </div>
         <div className="relative">
           <select
-            value={estado}
+            value={colActual}
             disabled={moviendo}
             onChange={(e) => {
-              const nuevo = e.target.value as Estado;
-              if (nuevo !== estado && onCambiarDirecto) {
-                onCambiarDirecto(pedido, nuevo);
+              const nuevo = e.target.value as KanbanColKey;
+              if (nuevo !== colActual && onCambiarFase) {
+                onCambiarFase(pedido, nuevo);
               }
             }}
             className="w-full py-1.5 pl-2.5 pr-8 rounded-lg text-xs font-medium bg-sf border border-[var(--bd)] text-[var(--tx)] transition-colors outline-none cursor-pointer appearance-none focus:border-[var(--tx)]"
@@ -2746,7 +3226,8 @@ function PedidoCard({
             <option value="programado">Encargo / Programado</option>
             <option value="por_empacar">Por Empacar (Bodega)</option>
             <option value="en_camino">En Camino (Ruta)</option>
-            <option value="entregado">Entregado</option>
+            <option value="entregado">Entregado (Por revisar)</option>
+            <option value="entregado_historico">Entregado Histórico</option>
             <option value="cancelado">Cancelado / Novedad</option>
           </select>
           <div className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 opacity-60">
@@ -2776,7 +3257,7 @@ function DetallePedido({ pedido, onClose }: { pedido: Pedido; onClose: () => voi
     { icon: <Package className="w-4 h-4" />, label: "SKU / Producto", valor: pedido.sku || "—" },
     { icon: <CreditCard className="w-4 h-4" />, label: "Método de pago", valor: pedido.metodo_pago || "Contra entrega" },
     { icon: <Hash className="w-4 h-4" />, label: "Código anuncio", valor: pedido.codigo_anuncio || "—" },
-    { icon: <StickyNote className="w-4 h-4" />, label: "Notas", valor: pedido.notas || "Sin notas" },
+    { icon: <StickyNote className="w-4 h-4" />, label: "Notas", valor: limpiarNotasVisibles(pedido.notas) || "Sin notas" },
   ];
 
   if (pedido.fecha_programada || esPedidoEncargo(pedido)) {
