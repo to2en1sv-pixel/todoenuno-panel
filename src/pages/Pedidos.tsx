@@ -48,7 +48,8 @@ import {
   ArrowRight,
   ShieldAlert,
   UserX,
-  Camera
+  Camera,
+  ClipboardList
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
@@ -68,6 +69,7 @@ import {
   EficienciaRetrasosView,
 } from "@/components/pedidos/EficienciaRetrasosView";
 import { DespachoGuiasView } from "@/components/pedidos/DespachoGuiasView";
+import { AlistadoProductosView } from "@/components/pedidos/AlistadoProductosView";
 import {
   evaluateOrderSla,
   fetchDispatchSlaSettings,
@@ -261,7 +263,7 @@ export function PedidosPage() {
     () => ["Todos los Couriers", ...courierNames],
     [courierNames]
   );
-  const [vista, setVista] = useState<'kanban' | 'tabla' | 'despacho' | 'eficiencia' | 'lista_negra'>('kanban');
+  const [vista, setVista] = useState<'kanban' | 'tabla' | 'alistado' | 'despacho' | 'eficiencia' | 'lista_negra'>('kanban');
   const [pestañaEtapa, setPestañaEtapa] = useState<'todas' | Estado>('todas');
   const [filtroEncargos, setFiltroEncargos] = useState<'todos' | 'urgentes' | 'semana' | 'quincena'>('todos');
   const [filtroCourier, setFiltroCourier] = useState("Todos los Couriers");
@@ -1082,6 +1084,24 @@ export function PedidosPage() {
         </button>
 
         <button
+          onClick={() => setVista('alistado')}
+          className={`pb-3 text-xs font-medium border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer -mb-px ${
+            vista === 'alistado'
+              ? 'border-[var(--tx)] text-[var(--tx)] font-semibold'
+              : 'border-transparent tx-mu hover:text-[var(--tx)]'
+          }`}
+          title="Resumen consolidado de productos necesarios para armar los paquetes"
+        >
+          <ClipboardList size={13} />
+          <span>Alistado</span>
+          {porEstado.nuevo.length + porEstado.por_empacar.length > 0 && (
+            <span className="font-mono tabular-nums text-[11px] tx-mu">
+              ({porEstado.nuevo.length + porEstado.por_empacar.length})
+            </span>
+          )}
+        </button>
+
+        <button
           onClick={() => setVista('despacho')}
           className={`pb-3 text-xs font-medium border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer -mb-px ${
             vista === 'despacho'
@@ -1340,6 +1360,14 @@ export function PedidosPage() {
           <Loader2 className="w-8 h-8 animate-spin mb-3" />
           <p className="text-sm">Cargando pedidos logísticos...</p>
         </div>
+      ) : vista === 'alistado' ? (
+        <AlistadoProductosView
+          pedidos={pedidos}
+          stockItems={stockItems}
+          couriers={courierNames}
+          onOpenPedido={(p) => setPedidoAEditar(p as Pedido)}
+          onCambiarEstadoDirecto={(p, destino) => cambiarEstadoDirecto(p as Pedido, destino as Estado)}
+        />
       ) : vista === 'despacho' ? (
         <DespachoGuiasView
           pedidos={pedidos}
