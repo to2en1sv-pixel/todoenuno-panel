@@ -766,7 +766,6 @@ export default async function handler(req: any, res: any) {
   });
 
   const nowMs = Date.now();
-  const staleRouteThresholdMs = nowMs - 36 * 60 * 60 * 1000;
   const last48hIso = new Date(nowMs - 48 * 60 * 60 * 1000).toISOString();
 
   try {
@@ -848,7 +847,7 @@ export default async function handler(req: any, res: any) {
         .limit(200),
       supabase
         .from('inventory_stock')
-        .select('sku,nombre,template_id,costo_unitario,stock_disponible,stock_minimo_alerta,activo,activo_todd')
+        .select('sku,nombre,template_id,costo_unitario,precio_venta,stock_fisico,stock_disponible,stock_minimo_alerta,activo,activo_todd')
         .order('stock_disponible', { ascending: true }),
       supabase
         .from('productos_variantes')
@@ -1113,6 +1112,23 @@ export default async function handler(req: any, res: any) {
     const ventasMesOrders: any[] = [];
     let indicacionesPostCierreCount = 0;
 
+    let staleRouteHours = 36;
+    let activeSaturationLabel = '';
+    try {
+      if (bizDocRes.data?.contenido) {
+        const b = JSON.parse(bizDocRes.data.contenido);
+        if (b?.operationalSaturationEnabled !== false) {
+          const is34 = b?.operationalSaturationDays === '3-4';
+          activeSaturationLabel = is34 ? '3 - 4 días' : '2 - 3 días';
+          staleRouteHours = is34 ? 96 : 72;
+        }
+      } else {
+        activeSaturationLabel = '2 - 3 días';
+        staleRouteHours = 72;
+      }
+    } catch {}
+    const staleRouteThresholdMs = nowMs - staleRouteHours * 60 * 60 * 1000;
+
     const svTodayStartMs = new Date(dateInfo.svTodayStartUtc).getTime();
     const svYesterdayStartMs = new Date(dateInfo.svYesterdayStartUtc).getTime();
     const svMonthStartMs = new Date(dateInfo.svMonthStartUtc).getTime();
@@ -1355,6 +1371,15 @@ export default async function handler(req: any, res: any) {
     const liquidityInfo = summarizeCashAccounts(accountsRows);
     const totalLiquidity = liquidityInfo.netTotal;
 
+    const finHealth = await computeServerFinancialHealthSnapshot(supabase, dateInfo.svTodayIso, {
+      accounts: accountsRows,
+      stockRows,
+      variantRows,
+      pagosRows,
+      deliveredUnliq: porLiquidar,
+      inRouteList: enRuta,
+    });
+
     /* 5. CONFIG TODD & NOTAS */
     let allowBackorderGlobal = false;
     try {
@@ -1365,13 +1390,9 @@ export default async function handler(req: any, res: any) {
     } catch {}
 
     let activeHolidayNotice = '';
-    let activeSaturationLabel = '';
     try {
       if (bizDocRes.data?.contenido) {
         const b = JSON.parse(bizDocRes.data.contenido);
-        if (b?.operationalSaturationEnabled !== false) {
-          activeSaturationLabel = b?.operationalSaturationDays === '3-4' ? '3 - 4 días' : '2 - 3 días';
-        }
         const msg = String(b?.holidayMessage || '').trim();
         const start = String(b?.holidayStartDate || '').trim().slice(0, 10);
         const end = String(b?.holidayEndDate || '').trim().slice(0, 10);
@@ -1381,12 +1402,14 @@ export default async function handler(req: any, res: any) {
           (!start || dateInfo.svTodayIso >= start) &&
           (!end || dateInfo.svTodayIso <= end);
         if (activeToday) activeHolidayNotice = msg;
-      } else {
-        activeSaturationLabel = '2 - 3 días';
       }
     } catch {}
 
     const notasRows = Array.isArray(notasRes.data) ? notasRes.data : [];
+
+    const healthEmoji =
+      finHealth.estado === 'Saludable' ? '🟢' : finHealth.estado === 'Atención' ? '🟡' : '🔴';
+    const runwayText = finHealth.runwayDias !== null ? `${finHealth.runwayDias}d` : 'N/A';
 
     /* 6. ARMAR MENSAJE SEGÚN TIPO ('morning' | 'evening' | 'full') */
     const lines: string[] = [];
@@ -1424,8 +1447,11 @@ export default async function handler(req: any, res: any) {
       }
       lines.push(
         `• En ruta ahora: <b>${enRuta.length} guías</b> (${fmtMoney(totalEnRuta)})${
-          enRutaRezagados.length > 0 ? ` · ⚠️ <b>${enRutaRezagados.length} con +36h</b>` : ''
+          enRutaRezagados.length > 0 ? ` · ⚠️ <b>${enRutaRezagados.length} con +${staleRouteHours}h</b>` : ''
         }`
+      );
+      lines.push(
+        `• Salud financiera: <b>${healthEmoji} ${finHealth.score}/100 (${finHealth.estado})</b> · Valor real: <b>${fmtMoney(finHealth.valorTotalReal)}</b> · Oxígeno: <b>${runwayText}</b>`
       );
 
       lines.push('');
@@ -1540,6 +1566,17 @@ export default async function handler(req: any, res: any) {
       if (otherExpensesToday > 0) {
         lines.push(`• Otros gastos hoy: ${fmtMoney(otherExpensesToday)}`);
       }
+      lines.push(
+        `• Valor total real: <b>${fmtMoney(finHealth.valorTotalReal)}</b> <i>(Caja ${fmtMoney(finHealth.liquidezNeta)} + Stock ${fmtMoney(finHealth.inventarioCosto)} + Entr. ${fmtMoney(finHealth.entregadosSinLiquidar)})</i>`
+      );
+      lines.push(
+        `• Salud financiera: <b>${healthEmoji} ${finHealth.score}/100 (${finHealth.estado})</b> · Oxígeno: <b>${runwayText}</b> · Margen op.: <b>${finHealth.margenOperativoPct.toFixed(1)}%</b>`
+      );
+      if (finHealth.simulation && finHealth.simulation.mejoraPuntos > 0) {
+        lines.push(
+          `  <i>↳ Liquidar ${fmtMoney(finHealth.simulation.montoPorLiquidar)} sube salud a ${finHealth.simulation.nuevoScore}/100 (${finHealth.simulation.nuevoEstado})</i>`
+        );
+      }
       if (pagosUrgentes.length > 0) {
         const pagosTxt = pagosUrgentes
           .slice(0, 3)
@@ -1614,7 +1651,7 @@ export default async function handler(req: any, res: any) {
       }
       lines.push(
         `• En ruta ahora: <b>${enRuta.length} guías</b> (${fmtMoney(totalEnRuta)})${
-          enRutaRezagados.length > 0 ? ` · ⚠️ <b>${enRutaRezagados.length} con +36h</b>` : ''
+          enRutaRezagados.length > 0 ? ` · ⚠️ <b>${enRutaRezagados.length} con +${staleRouteHours}h</b>` : ''
         }`
       );
 
@@ -1675,6 +1712,17 @@ export default async function handler(req: any, res: any) {
         if (liquidityInfo.compactBreakdown) {
           lines.push(`  <i>(${escapeHtml(liquidityInfo.compactBreakdown)})</i>`);
         }
+      }
+      lines.push(
+        `• Valor total real: <b>${fmtMoney(finHealth.valorTotalReal)}</b> <i>(Caja ${fmtMoney(finHealth.liquidezNeta)} + Stock ${fmtMoney(finHealth.inventarioCosto)} + Entr. ${fmtMoney(finHealth.entregadosSinLiquidar)})</i>`
+      );
+      lines.push(
+        `• Salud financiera: <b>${healthEmoji} ${finHealth.score}/100 (${finHealth.estado})</b> · Oxígeno: <b>${runwayText}</b> · Margen op.: <b>${finHealth.margenOperativoPct.toFixed(1)}%</b>`
+      );
+      if (finHealth.simulation && finHealth.simulation.mejoraPuntos > 0) {
+        lines.push(
+          `  <i>↳ Liquidar ${fmtMoney(finHealth.simulation.montoPorLiquidar)} sube salud a ${finHealth.simulation.nuevoScore}/100 (${finHealth.simulation.nuevoEstado})</i>`
+        );
       }
       if (pagosUrgentes.length > 0) {
         const pagosTxt = pagosUrgentes
@@ -2742,6 +2790,7 @@ REGLAS ESTRICTAS:
    - "consulta_pendientes": pregunta qué hay pendiente por empacar, en ruta, encargos o por liquidar.
    - "consulta_stock": pregunta cuánto stock hay de uno o más productos.
    - "consulta_brief": pide el brief / resumen de ventas del día.
+   - "consulta_salud_financiera": pide específicamente el estado de salud financiera, puntaje financiero, valor total real del negocio, patrimonio, oxígeno de caja, compromisos próximos o resumen financiero del mes ("¿cómo está la salud financiera?", "¿cuál es el valor real del negocio?", "dame mi salud financiera", "estado financiero del mes").
    - "consulta_memoria_ia": pregunta abierta de análisis, tendencias, comparación de días/semanas, por qué bajaron o subieron ventas, ROAS histórico, qué producto preguntan más, motivos de cancelación, recomendaciones o memoria del negocio ("¿qué pasó esta semana?", "¿por qué cancelan?", "¿qué producto preguntan y no compran?", "analiza los últimos días").
    - "otro": saludo simple sin pregunta operativa ni de negocio.
 ${params.intentHint ? `\nPISTA DE CONTEXTO: El usuario inició con el comando ${params.intentHint}.\n` : ''}
@@ -2757,7 +2806,7 @@ ${params.intentHint ? `\nPISTA DE CONTEXTO: El usuario inició con el comando ${
 
 3. Devuelve EXCLUSIVAMENTE JSON válido con esta estructura:
 {
-  "intent": "compra" | "gasto_operativo" | "gasto_pauta" | "ajuste_inventario" | "cambiar_estado_pedido" | "consulta_pedido" | "consulta_pendientes" | "consulta_stock" | "consulta_brief" | "consulta_memoria_ia" | "otro",
+  "intent": "compra" | "gasto_operativo" | "gasto_pauta" | "ajuste_inventario" | "cambiar_estado_pedido" | "consulta_pedido" | "consulta_pendientes" | "consulta_stock" | "consulta_brief" | "consulta_salud_financiera" | "consulta_memoria_ia" | "otro",
   "search_query": "",
   "order_query": "",
   "next_status": "",
@@ -3767,16 +3816,632 @@ function formatDeltaBadge(curr: number, prev: number, isCurrency = false): strin
 const AI_QUICK_KEYBOARD = {
   inline_keyboard: [
     [
+      { text: '🩺 Salud Financiera', callback_data: 'ia_quick:salud' },
       { text: '📊 7d vs Anterior', callback_data: 'ia_quick:compare7d' },
-      { text: '📦 Riesgo Stock', callback_data: 'ia_quick:stock_risk' },
     ],
     [
+      { text: '📦 Riesgo Stock', callback_data: 'ia_quick:stock_risk' },
       { text: '🎯 Brechas Bot', callback_data: 'ia_quick:bot_gaps' },
-      { text: '📣 Top Anuncios', callback_data: 'ia_quick:top_ads' },
     ],
-    [{ text: '☀️ Brief Operativo', callback_data: 'ia_quick:brief' }],
+    [
+      { text: '📣 Top Anuncios', callback_data: 'ia_quick:top_ads' },
+      { text: '☀️ Brief Operativo', callback_data: 'ia_quick:brief' },
+    ],
   ],
 };
+
+interface ServerFinancialHealthSnapshot {
+  periodLabel: string;
+  cutoffIso: string | null;
+  ingresos: number;
+  egresosOperativos: number;
+  comprasInventario: number;
+  utilidadOperativa: number;
+  flujoNetoCaja: number;
+  margenOperativoPct: number;
+  valorTotalReal: number;
+  liquidezNeta: number;
+  liquidezPositiva: number;
+  deudaTarjetaPauta: number;
+  inventarioCosto: number;
+  unidadesFisicas: number;
+  skusActivosCount: number;
+  skusSinCostoCount: number;
+  entregadosSinLiquidar: number;
+  entregadosCount: number;
+  enRutaPotencial: number;
+  enRutaCount: number;
+  score: number;
+  estado: 'Saludable' | 'Atención' | 'Riesgo';
+  runwayDias: number | null;
+  gastoDiarioPromedio: number;
+  compromisos15dTotal: number;
+  compromisos15dCount: number;
+  pagosVencidosCount: number;
+  pctCapitalAtrapado: number;
+  budgetPct: number | null;
+  hasBudgets: boolean;
+  pillars: Array<{
+    id: string;
+    label: string;
+    score: number;
+    maxScore: number;
+    summary: string;
+    status: 'ok' | 'warn' | 'risk';
+  }>;
+  findings: string[];
+  simulation: {
+    montoPorLiquidar: number;
+    nuevaLiquidezNeta: number;
+    nuevoScore: number;
+    nuevoEstado: 'Saludable' | 'Atención' | 'Riesgo';
+    mejoraPuntos: number;
+  } | null;
+}
+
+function addDaysYmdUtc(ymd: string, delta: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, (m || 1) - 1, (d || 1) + delta)).toISOString().slice(0, 10);
+}
+
+function isInventoryPurchaseCatServer(cat?: string | null): boolean {
+  const c = String(cat || '').trim().toLowerCase();
+  return (
+    c === 'pago_proveedor' ||
+    c === 'compra_inventario' ||
+    c === 'compra_mercaderia' ||
+    c.includes('proveedor')
+  );
+}
+
+function evaluateCoreHealthServer(params: {
+  ingresos: number;
+  egresosOperativos: number;
+  utilidadOperativa: number;
+  margenOperativoPct: number;
+  liquidezNeta: number;
+  liquidezPositiva: number;
+  deudaTarjetaPauta: number;
+  entregadosSinLiquidar: number;
+  inventarioCosto: number;
+  compromisos15dTotal: number;
+  compromisos15dCount: number;
+  pagosVencidosCount: number;
+  gastoDiarioPromedio: number;
+  budgetPct: number | null;
+  hasBudgets: boolean;
+}) {
+  const wMargen = params.hasBudgets ? 30 : 35;
+  const wLiquidez = params.hasBudgets ? 30 : 40;
+  const wCalle = params.hasBudgets ? 20 : 25;
+  const wPresupuesto = params.hasBudgets ? 20 : 0;
+
+  // 1. Margen operativo
+  let margenRatio = 0.5;
+  let margenSummary = 'Sin movimientos operativos en el mes';
+  let margenStatus: 'ok' | 'warn' | 'risk' = 'warn';
+  if (params.ingresos > 0 || params.egresosOperativos > 0) {
+    if (params.ingresos === 0 && params.egresosOperativos > 0) {
+      margenRatio = 0.15;
+      margenStatus = 'risk';
+      margenSummary = 'Solo egresos sin cobros liquidados aún';
+    } else {
+      const m = params.margenOperativoPct;
+      if (m >= 25) {
+        margenRatio = 1;
+        margenStatus = 'ok';
+      } else if (m >= 10) {
+        margenRatio = 0.72;
+        margenStatus = 'ok';
+      } else if (m >= 0) {
+        margenRatio = 0.48;
+        margenStatus = 'warn';
+      } else {
+        margenRatio = Math.max(0.05, 0.35 + m / 100);
+        margenStatus = 'risk';
+      }
+      margenSummary = `${m.toFixed(1)}% (${params.utilidadOperativa >= 0 ? '+' : ''}${fmtMoney(params.utilidadOperativa)})`;
+    }
+  }
+  const margenScore = Math.round(wMargen * margenRatio);
+
+  // 2. Liquidez y vencimientos
+  const obligacionesCortoPlazo = params.compromisos15dTotal + params.deudaTarjetaPauta;
+  const coberturaRatio =
+    obligacionesCortoPlazo > 0
+      ? params.liquidezPositiva / obligacionesCortoPlazo
+      : params.liquidezPositiva > 0
+      ? 3
+      : 1;
+  const runwayDias =
+    params.gastoDiarioPromedio > 0.5
+      ? Math.max(0, Math.round(params.liquidezPositiva / params.gastoDiarioPromedio))
+      : null;
+
+  let liqFactor = 0.7;
+  let liqStatus: 'ok' | 'warn' | 'risk' = 'ok';
+  if (params.liquidezNeta <= 0 && obligacionesCortoPlazo > 0) {
+    liqFactor = 0.1;
+    liqStatus = 'risk';
+  } else if (coberturaRatio < 1 || params.pagosVencidosCount > 0) {
+    liqFactor = 0.32;
+    liqStatus = 'risk';
+  } else if (coberturaRatio < 1.5 || (runwayDias !== null && runwayDias < 7)) {
+    liqFactor = 0.62;
+    liqStatus = 'warn';
+  } else if (runwayDias !== null && runwayDias < 14) {
+    liqFactor = 0.8;
+    liqStatus = 'ok';
+  } else {
+    liqFactor = 1;
+    liqStatus = 'ok';
+  }
+  const liqScore = Math.round(wLiquidez * liqFactor);
+  const liqParts: string[] = [];
+  if (runwayDias !== null) liqParts.push(`${runwayDias}d oxígeno`);
+  if (params.compromisos15dCount > 0) liqParts.push(`${fmtMoney(params.compromisos15dTotal)} en 15d`);
+  else liqParts.push('sin vencimientos en 15d');
+  if (params.deudaTarjetaPauta > 0) liqParts.push(`Pauta -${fmtMoney(params.deudaTarjetaPauta)}`);
+
+  // 3. Cobro en calle (COD)
+  const baseEfectivoCalle = Math.max(params.liquidezPositiva, 0) + params.entregadosSinLiquidar;
+  const pctRetenido =
+    baseEfectivoCalle > 0 ? (params.entregadosSinLiquidar / baseEfectivoCalle) * 100 : 0;
+  let calleFactor = 1;
+  let calleStatus: 'ok' | 'warn' | 'risk' = 'ok';
+  if (params.entregadosSinLiquidar <= 0) {
+    calleFactor = 1;
+    calleStatus = 'ok';
+  } else if (pctRetenido >= 55) {
+    calleFactor = 0.2;
+    calleStatus = 'risk';
+  } else if (pctRetenido >= 30) {
+    calleFactor = 0.55;
+    calleStatus = 'warn';
+  } else {
+    calleFactor = 0.85;
+    calleStatus = 'ok';
+  }
+  const calleScore = Math.round(wCalle * calleFactor);
+  const calleSummary =
+    params.entregadosSinLiquidar > 0
+      ? `${fmtMoney(params.entregadosSinLiquidar)} sin depositar (${pctRetenido.toFixed(0)}% del efectivo)`
+      : 'Todo entregado está liquidado';
+
+  const pillars: ServerFinancialHealthSnapshot['pillars'] = [
+    { id: 'margen', label: 'Margen operativo', score: margenScore, maxScore: wMargen, summary: margenSummary, status: margenStatus },
+    { id: 'liquidez', label: 'Liquidez y vencimientos', score: liqScore, maxScore: wLiquidez, summary: liqParts.join(' · '), status: liqStatus },
+    { id: 'calle', label: 'Cobro en calle (COD)', score: calleScore, maxScore: wCalle, summary: calleSummary, status: calleStatus },
+  ];
+
+  let totalScore = margenScore + liqScore + calleScore;
+  if (params.hasBudgets && params.budgetPct !== null) {
+    let budFactor = 1;
+    let budStatus: 'ok' | 'warn' | 'risk' = 'ok';
+    if (params.budgetPct > 100) {
+      budFactor = 0.2;
+      budStatus = 'risk';
+    } else if (params.budgetPct > 85) {
+      budFactor = 0.6;
+      budStatus = 'warn';
+    }
+    const budScore = Math.round(wPresupuesto * budFactor);
+    totalScore += budScore;
+    pillars.push({
+      id: 'presupuesto',
+      label: 'Control presupuestos',
+      score: budScore,
+      maxScore: wPresupuesto,
+      summary: `${params.budgetPct.toFixed(0)}% ejecutado en el mes`,
+      status: budStatus,
+    });
+  }
+
+  const score = Math.max(0, Math.min(100, totalScore));
+  const estado: 'Saludable' | 'Atención' | 'Riesgo' =
+    score >= 75 ? 'Saludable' : score >= 45 ? 'Atención' : 'Riesgo';
+  const basePatrimonio = Math.max(params.liquidezPositiva, 0) + params.inventarioCosto + params.entregadosSinLiquidar;
+  const pctCapitalAtrapado =
+    basePatrimonio > 0 ? ((params.inventarioCosto + params.entregadosSinLiquidar) / basePatrimonio) * 100 : 0;
+
+  return { score, estado, runwayDias, pctCapitalAtrapado, pillars };
+}
+
+async function computeServerFinancialHealthSnapshot(
+  supabase: any,
+  svTodayIso: string,
+  preloaded?: {
+    accounts?: any[];
+    stockRows?: any[];
+    variantRows?: any[];
+    pagosRows?: any[];
+    deliveredUnliq?: any[];
+    inRouteList?: any[];
+  }
+): Promise<ServerFinancialHealthSnapshot> {
+  const monthKey = svTodayIso.slice(0, 7);
+  const monthStart = `${monthKey}-01`;
+  const minus30 = addDaysYmdUtc(svTodayIso, -29);
+  const plus15 = addDaysYmdUtc(svTodayIso, 15);
+  const daysInPeriod = Math.max(Number(svTodayIso.slice(8, 10)) || 1, 1);
+
+  const [accounts, txRes, budgetsRes, stockRows, variantRows, pagosRows, unliqData, cutoffRes] =
+    await Promise.all([
+      preloaded?.accounts
+        ? Promise.resolve(preloaded.accounts)
+        : fetchCashAccounts(supabase, { allowFallbackMock: false }),
+      supabase
+        .from('finance_money_transactions')
+        .select('id,tipo,categoria,monto,fecha,created_at')
+        .order('fecha', { ascending: false })
+        .limit(1500),
+      supabase
+        .from('finance_budgets')
+        .select('categoria,monto_limite,periodo')
+        .eq('periodo', monthKey),
+      preloaded?.stockRows
+        ? Promise.resolve(preloaded.stockRows)
+        : supabase
+            .from('inventory_stock')
+            .select('sku,nombre,template_id,stock_fisico,stock_disponible,costo_unitario,precio_venta,activo')
+            .then((r: any) => (Array.isArray(r?.data) ? r.data : [])),
+      preloaded?.variantRows
+        ? Promise.resolve(preloaded.variantRows)
+        : supabase
+            .from('productos_variantes')
+            .select('variante_id,template_id,sku')
+            .then((r: any) => (Array.isArray(r?.data) ? r.data : [])),
+      preloaded?.pagosRows
+        ? Promise.resolve(preloaded.pagosRows)
+        : supabase
+            .from('panel_pagos')
+            .select('id,nombre,monto,fecha_vencimiento,categoria')
+            .then((r: any) => (Array.isArray(r?.data) ? r.data : [])),
+      preloaded?.deliveredUnliq && preloaded?.inRouteList
+        ? Promise.resolve({
+            delivered: preloaded.deliveredUnliq,
+            inRoute: preloaded.inRouteList,
+          })
+        : supabase
+            .from('whatsapp_orders')
+            .select('estado,total,liquidado')
+            .in('estado', ['en_camino', 'en_ruta', 'en ruta', 'despachado', 'enviado', 'ruta', 'en camino', 'entregado', 'entregada', 'completado', 'completada'])
+            .or('liquidado.is.null,liquidado.eq.false')
+            .limit(1500)
+            .then((r: any) => {
+              const rows = Array.isArray(r?.data) ? r.data : [];
+              return {
+                delivered: rows.filter(
+                  (o: any) => normalizeEstadoOrder(o.estado) === 'entregado' && o.liquidado !== true
+                ),
+                inRoute: rows.filter((o: any) => normalizeEstadoOrder(o.estado) === 'en_camino'),
+              };
+            }),
+      supabase
+        .from('os_events')
+        .select('type,payload,created_at')
+        .in('type', ['system.finance_reset', 'system.finance_cutoff_cleared'])
+        .order('created_at', { ascending: false })
+        .limit(1),
+    ]);
+
+  let cutoffIso: string | null = null;
+  const latestCutoffEv = Array.isArray(cutoffRes?.data) && cutoffRes.data.length > 0 ? cutoffRes.data[0] : null;
+  if (latestCutoffEv && latestCutoffEv.type === 'system.finance_reset' && latestCutoffEv.payload?.finance_cutoff) {
+    cutoffIso = String(latestCutoffEv.payload.finance_cutoff);
+  }
+
+  const allTxsRaw = Array.isArray(txRes?.data) ? txRes.data : [];
+  const activeTxs = cutoffIso
+    ? allTxsRaw.filter((tx: any) => {
+        const cutoffMs = new Date(cutoffIso!).getTime();
+        if (Number.isNaN(cutoffMs)) return true;
+        if (tx.created_at) {
+          const recMs = new Date(tx.created_at).getTime();
+          if (!Number.isNaN(recMs)) return recMs >= cutoffMs;
+        }
+        const txDate = String(tx.fecha || '').slice(0, 10);
+        if (txDate) return txDate >= cutoffIso!.slice(0, 10);
+        return true;
+      })
+    : allTxsRaw;
+
+  const extractYmd = (tx: any): string => {
+    if (tx.fecha && /^\d{4}-\d{2}-\d{2}/.test(String(tx.fecha))) return String(tx.fecha).slice(0, 10);
+    if (tx.created_at) {
+      const ms = new Date(tx.created_at).getTime();
+      if (Number.isFinite(ms)) return new Date(ms - 6 * 3600000).toISOString().slice(0, 10);
+    }
+    return svTodayIso;
+  };
+
+  let ingresos = 0;
+  let egresosOperativos = 0;
+  let comprasInventario = 0;
+  let last30OpEx = 0;
+  const monthExpenseByCat = new Map<string, number>();
+
+  for (const tx of activeTxs) {
+    const ymd = extractYmd(tx);
+    const monto = Number(tx.monto) || 0;
+    const cat = String(tx.categoria || '').trim().toLowerCase();
+    const isTransfer = tx.tipo === 'transfer';
+    const isAdj = cat === 'ajuste_saldo';
+
+    if (ymd >= minus30 && ymd <= svTodayIso && !isTransfer && !isAdj && tx.tipo === 'expense' && !isInventoryPurchaseCatServer(cat)) {
+      last30OpEx += monto;
+    }
+
+    if (ymd >= monthStart && ymd <= svTodayIso) {
+      if (isTransfer || isAdj) continue;
+      if (tx.tipo === 'income') {
+        ingresos += monto;
+      } else if (tx.tipo === 'expense') {
+        monthExpenseByCat.set(cat, (monthExpenseByCat.get(cat) || 0) + monto);
+        if (isInventoryPurchaseCatServer(cat)) comprasInventario += monto;
+        else egresosOperativos += monto;
+      }
+    }
+  }
+
+  const utilidadOperativa = ingresos - egresosOperativos;
+  const flujoNetoCaja = ingresos - egresosOperativos - comprasInventario;
+  const margenOperativoPct =
+    ingresos > 0 ? (utilidadOperativa / ingresos) * 100 : egresosOperativos > 0 ? -100 : 0;
+
+  // Deduplicar filas hijas de variantes en inventario para el valor real al costo
+  const variantSkuSet = new Set(
+    (variantRows || []).map((v: any) => String(v.sku || '').trim().toUpperCase()).filter(Boolean)
+  );
+  const dupChildSkus = new Set<string>();
+  const rowsByTpl = new Map<string, any[]>();
+  for (const s of stockRows || []) {
+    const tId = s.template_id !== undefined && s.template_id !== null ? String(s.template_id).trim() : '';
+    if (!tId) continue;
+    const arr = rowsByTpl.get(tId) || [];
+    arr.push(s);
+    rowsByTpl.set(tId, arr);
+  }
+  rowsByTpl.forEach((rows) => {
+    if (rows.length <= 1) return;
+    const sorted = [...rows].sort((a, b) => {
+      const aV = variantSkuSet.has(String(a.sku || '').trim().toUpperCase()) ? 1 : 0;
+      const bV = variantSkuSet.has(String(b.sku || '').trim().toUpperCase()) ? 1 : 0;
+      if (aV !== bV) return aV - bV;
+      return String(a.sku || '').length - String(b.sku || '').length;
+    });
+    const pSku = String(sorted[0]?.sku || '').trim().toUpperCase();
+    for (let i = 1; i < sorted.length; i++) {
+      const cSku = String(sorted[i]?.sku || '').trim().toUpperCase();
+      if (cSku && (variantSkuSet.has(cSku) || cSku.startsWith(`${pSku}-`))) dupChildSkus.add(cSku);
+    }
+  });
+
+  let inventarioCosto = 0;
+  let unidadesFisicas = 0;
+  let skusActivosCount = 0;
+  let skusSinCostoCount = 0;
+  for (const item of stockRows || []) {
+    const skuU = String(item.sku || '').trim().toUpperCase();
+    if (!skuU || skuU.includes('FEE') || dupChildSkus.has(skuU) || item.activo === false) continue;
+    skusActivosCount++;
+    const fisico = Math.max(Number(item.stock_fisico ?? item.stock_disponible ?? 0) || 0, 0);
+    const costo = Math.max(Number(item.costo_unitario) || 0, 0);
+    unidadesFisicas += fisico;
+    inventarioCosto += fisico * costo;
+    if (fisico > 0 && costo <= 0) skusSinCostoCount++;
+  }
+
+  const liquidezNeta = (accounts || []).reduce((s: number, a: any) => s + (Number(a.saldo_actual) || 0), 0);
+  const liquidezPositiva = (accounts || []).reduce(
+    (s: number, a: any) => s + Math.max(Number(a.saldo_actual) || 0, 0),
+    0
+  );
+  const deudaTarjetaPauta = (accounts || []).reduce((s: number, a: any) => {
+    const v = Number(a.saldo_actual) || 0;
+    return v < 0 ? s + Math.abs(v) : s;
+  }, 0);
+
+  const entregadosList = unliqData.delivered || [];
+  const enRutaList = unliqData.inRoute || [];
+  const entregadosSinLiquidar = entregadosList.reduce((s: number, o: any) => s + (Number(o.total) || 0), 0);
+  const enRutaPotencial = enRutaList.reduce((s: number, o: any) => s + (Number(o.total) || 0), 0);
+  const valorTotalReal = liquidezNeta + inventarioCosto + entregadosSinLiquidar;
+
+  let compromisos15dTotal = 0;
+  let compromisos15dCount = 0;
+  let pagosVencidosCount = 0;
+  for (const p of pagosRows || []) {
+    const fecha = String(p.fecha_vencimiento || '').slice(0, 10);
+    if (!fecha) continue;
+    if (fecha < svTodayIso) {
+      pagosVencidosCount++;
+      compromisos15dTotal += Number(p.monto) || 0;
+      compromisos15dCount++;
+    } else if (fecha <= plus15) {
+      compromisos15dTotal += Number(p.monto) || 0;
+      compromisos15dCount++;
+    }
+  }
+
+  const budgetRows = Array.isArray(budgetsRes?.data) ? budgetsRes.data : [];
+  const totalPresupuestado = budgetRows.reduce((s: number, b: any) => s + (Number(b.monto_limite) || 0), 0);
+  const totalGastadoBudgets = budgetRows.reduce((s: number, b: any) => {
+    const cat = String(b.categoria || '').trim().toLowerCase();
+    return s + (monthExpenseByCat.get(cat) || 0);
+  }, 0);
+  const hasBudgets = totalPresupuestado > 0;
+  const budgetPct = hasBudgets ? (totalGastadoBudgets / totalPresupuestado) * 100 : null;
+
+  const gastoDiarioPromedio =
+    last30OpEx > 0 ? last30OpEx / 30 : egresosOperativos / Math.max(daysInPeriod, 1);
+
+  const core = evaluateCoreHealthServer({
+    ingresos,
+    egresosOperativos,
+    utilidadOperativa,
+    margenOperativoPct,
+    liquidezNeta,
+    liquidezPositiva,
+    deudaTarjetaPauta,
+    entregadosSinLiquidar,
+    inventarioCosto,
+    compromisos15dTotal,
+    compromisos15dCount,
+    pagosVencidosCount,
+    gastoDiarioPromedio,
+    budgetPct,
+    hasBudgets,
+  });
+
+  let simulation: ServerFinancialHealthSnapshot['simulation'] = null;
+  if (entregadosSinLiquidar > 0.5) {
+    const simIng = ingresos + entregadosSinLiquidar;
+    const simUtil = utilidadOperativa + entregadosSinLiquidar;
+    const simMargen = simIng > 0 ? (simUtil / simIng) * 100 : 0;
+    const simCore = evaluateCoreHealthServer({
+      ingresos: simIng,
+      egresosOperativos,
+      utilidadOperativa: simUtil,
+      margenOperativoPct: simMargen,
+      liquidezNeta: liquidezNeta + entregadosSinLiquidar,
+      liquidezPositiva: liquidezPositiva + entregadosSinLiquidar,
+      deudaTarjetaPauta,
+      entregadosSinLiquidar: 0,
+      inventarioCosto,
+      compromisos15dTotal,
+      compromisos15dCount,
+      pagosVencidosCount,
+      gastoDiarioPromedio,
+      budgetPct,
+      hasBudgets,
+    });
+    simulation = {
+      montoPorLiquidar: entregadosSinLiquidar,
+      nuevaLiquidezNeta: liquidezNeta + entregadosSinLiquidar,
+      nuevoScore: simCore.score,
+      nuevoEstado: simCore.estado,
+      mejoraPuntos: simCore.score - core.score,
+    };
+  }
+
+  const findings: string[] = [];
+  if (entregadosSinLiquidar > 0) {
+    findings.push(
+      `${entregadosList.length} pedido(s) entregado(s) sin depositar (${fmtMoney(entregadosSinLiquidar)}).`
+    );
+  }
+  if (pagosVencidosCount > 0 || compromisos15dTotal > liquidezPositiva) {
+    findings.push(
+      pagosVencidosCount > 0
+        ? `${pagosVencidosCount} pago(s) fijo(s) vencido(s) o por cubrir (${fmtMoney(compromisos15dTotal)} en 15d).`
+        : `Compromisos próximos 15d (${fmtMoney(compromisos15dTotal)}) superan tu caja positiva (${fmtMoney(liquidezPositiva)}).`
+    );
+  } else if (compromisos15dCount > 0) {
+    findings.push(
+      `${compromisos15dCount} pago(s) próximo(s) en 15d (${fmtMoney(compromisos15dTotal)}), cubiertos por tu liquidez.`
+    );
+  }
+  if (skusSinCostoCount > 0) {
+    findings.push(`${skusSinCostoCount} producto(s) con stock pero costo en $0.00 (subestima valor real).`);
+  }
+
+  const monthNamesShort = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  const mIdx = Math.max(0, Math.min(11, (Number(svTodayIso.slice(5, 7)) || 1) - 1));
+  const periodLabel = `Del 1 al ${daysInPeriod} de ${monthNamesShort[mIdx]} ${svTodayIso.slice(0, 4)}`;
+
+  return {
+    periodLabel,
+    cutoffIso,
+    ingresos,
+    egresosOperativos,
+    comprasInventario,
+    utilidadOperativa,
+    flujoNetoCaja,
+    margenOperativoPct,
+    valorTotalReal,
+    liquidezNeta,
+    liquidezPositiva,
+    deudaTarjetaPauta,
+    inventarioCosto,
+    unidadesFisicas,
+    skusActivosCount,
+    skusSinCostoCount,
+    entregadosSinLiquidar,
+    entregadosCount: entregadosList.length,
+    enRutaPotencial,
+    enRutaCount: enRutaList.length,
+    score: core.score,
+    estado: core.estado,
+    runwayDias: core.runwayDias,
+    gastoDiarioPromedio,
+    compromisos15dTotal,
+    compromisos15dCount,
+    pagosVencidosCount,
+    pctCapitalAtrapado: core.pctCapitalAtrapado,
+    budgetPct,
+    hasBudgets,
+    pillars: core.pillars,
+    findings: findings.slice(0, 3),
+    simulation,
+  };
+}
+
+async function handleFinancialHealthQuery(supabase: any, chatId: string | number) {
+  const svToday = getElSalvadorDate();
+  tgCall('sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
+
+  const h = await computeServerFinancialHealthSnapshot(supabase, svToday);
+  const badge = h.estado === 'Saludable' ? '🟢' : h.estado === 'Atención' ? '🟡' : '🔴';
+  const runwayTxt = h.runwayDias !== null ? `${h.runwayDias} días` : 'N/A';
+
+  const statusIcon = (s: 'ok' | 'warn' | 'risk') => (s === 'ok' ? '🟢' : s === 'warn' ? '🟡' : '🔴');
+
+  const lines: string[] = [
+    `🩺 <b>SALUD FINANCIERA · TODOENUNO OS</b>`,
+    `🗓 <i>${escapeHtml(h.periodLabel)}</i>`,
+    `━━━━━━━━━━━━━━`,
+    `${badge} <b>Puntaje: ${h.score}/100 (${h.estado})</b>`,
+    `• Oxígeno de caja: <b>${runwayTxt}</b> · Capital en bodega/calle: <b>${h.pctCapitalAtrapado.toFixed(0)}%</b>`,
+    `• Compromisos próximos 15d: <b>${fmtMoney(h.compromisos15dTotal)}</b> (${h.compromisos15dCount} pago${h.compromisos15dCount === 1 ? '' : 's'}${h.pagosVencidosCount > 0 ? ` · ⚠️ ${h.pagosVencidosCount} venc.` : ''})`,
+    '',
+    `📋 <b>PILARES DE SALUD</b>`,
+    ...h.pillars.map(
+      (p) =>
+        `• ${statusIcon(p.status)} <b>${escapeHtml(p.label)}: ${p.score}/${p.maxScore}</b> — ${escapeHtml(p.summary)}`
+    ),
+    '',
+    `💎 <b>VALOR TOTAL REAL DEL NEGOCIO: ${fmtMoney(h.valorTotalReal)}</b>`,
+    `• Liquidez neta en cuentas: <b>${fmtMoney(h.liquidezNeta)}</b>${h.deudaTarjetaPauta > 0 ? ` <i>(Tarjeta pauta -${fmtMoney(h.deudaTarjetaPauta)})</i>` : ''}`,
+    `• Inventario al costo: <b>${fmtMoney(h.inventarioCosto)}</b> <i>(${h.unidadesFisicas} uds en ${h.skusActivosCount} SKUs)</i>`,
+    `• Entregados sin liquidar: <b>${fmtMoney(h.entregadosSinLiquidar)}</b> <i>(${h.entregadosCount} guías)</i>`,
+    h.enRutaCount > 0
+      ? `• <i>Referencia en ruta: ${fmtMoney(h.enRutaPotencial)} (${h.enRutaCount} guías, no sumado)</i>`
+      : '',
+    '',
+    `📊 <b>FLUJO DEL MES ACTUAL</b>`,
+    `• Ingresos liquidados: <b>${fmtMoney(h.ingresos)}</b>`,
+    `• Egresos operativos: <b>${fmtMoney(h.egresosOperativos)}</b> → Neto op.: <b>${h.utilidadOperativa >= 0 ? '+' : ''}${fmtMoney(h.utilidadOperativa)}</b> (${h.margenOperativoPct.toFixed(1)}%)`,
+    `• Compras de inventario (stock): <b>${fmtMoney(h.comprasInventario)}</b> · Flujo caja: <b>${h.flujoNetoCaja >= 0 ? '+' : ''}${fmtMoney(h.flujoNetoCaja)}</b>`,
+  ].filter(Boolean);
+
+  if (h.simulation) {
+    lines.push('');
+    lines.push(
+      `<blockquote>⚡ <b>Simulador rápido:</b> Si liquidas hoy los <b>${fmtMoney(h.simulation.montoPorLiquidar)}</b> entregados, tu liquidez sube a <b>${fmtMoney(h.simulation.nuevaLiquidezNeta)}</b> y tu salud pasa a <b>${h.simulation.nuevoScore}/100 (${h.simulation.nuevoEstado})</b>${h.simulation.mejoraPuntos > 0 ? ` (+${h.simulation.mejoraPuntos} pts)` : ''}.</blockquote>`
+    );
+  }
+
+  if (h.findings.length > 0) {
+    lines.push('');
+    lines.push(`🔎 <b>HALLAZGOS PRIORITARIOS</b>`);
+    for (const f of h.findings) {
+      lines.push(`• ${escapeHtml(f)}`);
+    }
+  }
+
+  await sendTgMessage(chatId, lines.join('\n'), { reply_markup: AI_QUICK_KEYBOARD });
+}
 
 async function handleAiMemoryQuery(supabase: any, chatId: string | number, questionRaw: string) {
   const svToday = getElSalvadorDate();
@@ -3810,6 +4475,12 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
   );
   const inRouteList = unliqList.filter((o: any) => normalizeEstadoOrder(o.estado) === 'en_camino');
   const sumArr = (a: any[]) => a.reduce((s, x) => s + (Number(x.total) || 0), 0);
+
+  const finHealth = await computeServerFinancialHealthSnapshot(supabase, svToday, {
+    accounts,
+    deliveredUnliq,
+    inRouteList,
+  });
 
   // Agregaciones reales 30d + Stock Runway (días de inventario al ritmo 7d)
   const orders30 = Array.isArray(orders30Res?.data) ? orders30Res.data : [];
@@ -3916,12 +4587,13 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
         mem.roasGross7d !== null ? ` · ROAS venta: <b>${mem.roasGross7d.toFixed(2)}x</b>` : ''
       }`,
       '',
-      `💰 <b>PULSO EN VIVO</b>`,
+      `💰 <b>PULSO EN VIVO Y SALUD FINANCIERA</b>`,
+      `• Salud: <b>${finHealth.estado === 'Saludable' ? '🟢' : finHealth.estado === 'Atención' ? '🟡' : '🔴'} ${finHealth.score}/100 (${finHealth.estado})</b> · Valor real: <b>${fmtMoney(finHealth.valorTotalReal)}</b> · Oxígeno: <b>${finHealth.runwayDias !== null ? `${finHealth.runwayDias}d` : 'N/A'}</b>`,
       cashSummary.hasNegativeCard && cashSummary.cashAndBankTotal !== totalCash
         ? `• Liquidez neta: <b>${fmtMoney(totalCash)}</b> (Cajas/Bancos: <b>${fmtMoney(cashSummary.cashAndBankTotal)}</b>)`
         : `• Liquidez en cuentas: <b>${fmtMoney(totalCash)}</b>`,
       cashSummary.compactBreakdown ? `  <i>(${escapeHtml(cashSummary.compactBreakdown)})</i>` : '',
-      `• Calle hoy: <b>${deliveredUnliq.length} entregados sin depositar</b> (${fmtMoney(sumArr(deliveredUnliq))}) · <b>${inRouteList.length} en ruta</b> (${fmtMoney(sumArr(inRouteList))})`,
+      `• Stock al costo: <b>${fmtMoney(finHealth.inventarioCosto)}</b> (${finHealth.unidadesFisicas} uds) · Calle: <b>${deliveredUnliq.length} entr. sin depositar</b> (${fmtMoney(sumArr(deliveredUnliq))}) · <b>${inRouteList.length} en ruta</b> (${fmtMoney(sumArr(inRouteList))})`,
       runwayAlerts.length > 0
         ? `• 🚨 Stock en riesgo: <code>${escapeHtml(runwayAlerts[0])}</code>`
         : '',
@@ -3968,6 +4640,7 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
     `SEMANA ACTUAL (${mem.d7StartIso} a ${mem.svTodayIso}): pedidos=${mem.orders7d}, entregados=${mem.delivered7d}, en_proceso_o_ruta=${mem.inProgress7d}, cancelados=${mem.cancelled7d}, tasa_cancelacion_resueltos=${mem.cancelRate7d ?? 'N/A'}%, facturado_no_cancelado=$${mem.grossSales7d.toFixed(2)}, cobrado_entregado=$${mem.revenue7d.toFixed(2)}, pauta_meta=$${mem.adSpend7d.toFixed(2)}, roas_cobrado=${mem.roas7d ?? 'N/A'}, roas_facturado=${mem.roasGross7d ?? 'N/A'}, chats_in=${mem.chatsIn7d}, chats_out=${mem.chatsOut7d}`,
     `SEMANA ANTERIOR (${mem.d14StartIso} a ${mem.d14EndIso}): pedidos=${mem.ordersPrev7d}, entregados=${mem.deliveredPrev7d}, en_proceso_o_ruta=${mem.inProgressPrev7d}, cancelados=${mem.cancelledPrev7d}, tasa_cancelacion_resueltos=${mem.cancelRatePrev7d ?? 'N/A'}%, facturado_no_cancelado=$${mem.grossSalesPrev7d.toFixed(2)}, cobrado_entregado=$${mem.revenuePrev7d.toFixed(2)}, pauta_meta=$${mem.adSpendPrev7d.toFixed(2)}, roas_cobrado=${mem.roasPrev7d ?? 'N/A'}, roas_facturado=${mem.roasGrossPrev7d ?? 'N/A'}`,
     `ESTADO EN VIVO HOY: liquidez_neta=$${totalCash.toFixed(2)}, cajas_y_bancos=$${cashSummary.cashAndBankTotal.toFixed(2)}, desglose_cuentas="${cashSummary.compactBreakdown}", entregados_sin_depositar=${deliveredUnliq.length} ($${sumArr(deliveredUnliq).toFixed(2)}), en_ruta=${inRouteList.length} ($${sumArr(inRouteList).toFixed(2)})`,
+    `SALUD FINANCIERA Y VALOR REAL DEL NEGOCIO (${finHealth.periodLabel}): puntaje=${finHealth.score}/100 (${finHealth.estado}), valor_total_real=$${finHealth.valorTotalReal.toFixed(2)} (liquidez_neta=$${finHealth.liquidezNeta.toFixed(2)} + inventario_costo=$${finHealth.inventarioCosto.toFixed(2)} [${finHealth.unidadesFisicas} uds en ${finHealth.skusActivosCount} SKUs] + entregados_sin_liquidar=$${finHealth.entregadosSinLiquidar.toFixed(2)}), oxigeno_caja=${finHealth.runwayDias !== null ? `${finHealth.runwayDias} dias` : 'N/A'}, compromisos_15d=$${finHealth.compromisos15dTotal.toFixed(2)} (${finHealth.compromisos15dCount} pagos, ${finHealth.pagosVencidosCount} vencidos), capital_en_bodega_o_calle=${finHealth.pctCapitalAtrapado.toFixed(0)}%, ingresos_liquidados_mes=$${finHealth.ingresos.toFixed(2)}, egresos_operativos_mes=$${finHealth.egresosOperativos.toFixed(2)}, compras_stock_mes=$${finHealth.comprasInventario.toFixed(2)}, utilidad_operativa_mes=$${finHealth.utilidadOperativa.toFixed(2)}, margen_operativo=${finHealth.margenOperativoPct.toFixed(1)}%, pilares=${JSON.stringify(finHealth.pillars.map((p) => `${p.label}: ${p.score}/${p.maxScore} (${p.summary})`))}${finHealth.simulation ? `, simulador_liquidacion="Liquidar $${finHealth.simulation.montoPorLiquidar.toFixed(2)} sube liquidez a $${finHealth.simulation.nuevaLiquidezNeta.toFixed(2)} y salud a ${finHealth.simulation.nuevoScore}/100 (${finHealth.simulation.nuevoEstado})"` : ''}`,
     `STOCK EN RIESGO (ritmo 7d vs disponible): ${runwayAlerts.join(' | ') || 'ninguno en alerta'}`,
     `SIN STOCK ACTUALMENTE: ${zeroStock.join(', ') || 'ninguno'}`,
     `BRECHA BOT (consultas -> pedidos): ${JSON.stringify(mem.topInquiredNoClose)}`,
@@ -4098,6 +4771,7 @@ async function handleTelegramBotRequest(req: any, res: any) {
           { command: 'merma', description: 'Registrar daño o ajuste: /merma SKU CANT' },
           { command: 'stock', description: 'Ver inventario actual: /stock [producto]' },
           { command: 'cajas', description: 'Ver saldos de cajas y bancos' },
+          { command: 'salud', description: 'Ver salud financiera (0-100) y valor real del negocio' },
           { command: 'memoria', description: 'Resumen histórico 30d de OS Memory' },
           { command: 'ia', description: 'Preguntar a la IA sobre tu negocio: /ia PREGUNTA' },
           { command: 'brief', description: 'Pedir el brief operativo (AM/PM)' },
@@ -4159,6 +4833,8 @@ async function handleTelegramBotRequest(req: any, res: any) {
         });
         if (draftId === 'brief') {
           await handleBriefCommand(req, chatId, '');
+        } else if (draftId === 'salud') {
+          await handleFinancialHealthQuery(supabase, chatId);
         } else {
           const quickPrompts: Record<string, string> = {
             compare7d: 'Compárame esta semana (últimos 7 días) contra la semana anterior en pedidos, entregas, cancelaciones, cobrado, pauta y ROAS. Dime qué mejoró y qué empeoró.',
@@ -4664,8 +5340,9 @@ async function handleTelegramBotRequest(req: any, res: any) {
           `• <code>/pendientes</code> — Cola de empaque, ruta y cobros por liquidar`,
           `• <code>/stock [producto]</code> — Disponible en bodega`,
           `• <code>/cajas</code> — Saldos de cajas y bancos`,
+          `• <code>/salud</code> (o <code>/finanzas</code>) — Salud financiera (0-100), valor real y oxígeno de caja`,
           `• <code>/memoria</code> — Resumen histórico 30d de OS Memory`,
-          `• <code>/ia [pregunta]</code> — Analizar negocio, ventas, cancelaciones o ROAS con IA`,
+          `• <code>/ia [pregunta]</code> — Analizar negocio, finanzas, ventas, cancelaciones o ROAS con IA`,
           `• <code>/brief [am|pm]</code> — Brief operativo completo`,
         ].join('\n')
       );
@@ -4721,22 +5398,37 @@ async function handleTelegramBotRequest(req: any, res: any) {
       return res.status(200).json({ ok: true });
     }
 
+    if (lowerText.startsWith('/salud') || lowerText.startsWith('/finanzas')) {
+      await handleFinancialHealthQuery(supabase, chatId);
+      return res.status(200).json({ ok: true });
+    }
+
     if (lowerText.startsWith('/brief')) {
       const arg = rawText.replace(/^\/brief(@\S+)?/i, '').trim();
       await handleBriefCommand(req, chatId, arg);
       return res.status(200).json({ ok: true });
     }
 
-    // Fast-path: preguntas analíticas / comparativas van directo a Memoria IA sin doble llamada OpenAI
+    // Fast-path: preguntas analíticas / comparativas / financieras van directo a Memoria IA sin doble llamada OpenAI
     const isActionLike =
       /^\/|compr[eé]|gast[eé]|pagu[eé]|met[ií]|ingres[eé]|dañ[oóa]|merma|ajuste|marca|pasa\s+a|cambia\s+el|cu[aá]nto\s+stock|pendientes|pedido\s+de/i.test(
         rawText
       );
+    const isDirectHealthQuestion =
+      !hasPhoto &&
+      !isActionLike &&
+      /(salud\s+financiera|valor\s+(total\s+)?real|puntaje\s+financiero|estado\s+financiero|ox[ií]geno\s+de\s+caja)/i.test(
+        rawText
+      );
+    if (isDirectHealthQuestion) {
+      await handleFinancialHealthQuery(supabase, chatId);
+      return res.status(200).json({ ok: true });
+    }
     const isDirectMemoryQuestion =
       !hasPhoto &&
       !isActionLike &&
       rawText.length >= 10 &&
-      /(semana|compar|relaci[oó]n\s+a\s+la|roas|por\s*qu[eé]|tendencia|pauta|cancel|product|departament|ayer\b|recomiend|analiz|memoria|negocio|ventas|cierre|cerrando)/i.test(
+      /(semana|compar|relaci[oó]n\s+a\s+la|roas|por\s*qu[eé]|tendencia|pauta|cancel|product|departament|ayer\b|recomiend|analiz|memoria|negocio|ventas|cierre|cerrando|finanzas|liquidez|margen|patrimonio|ox[ií]geno|runway|compromisos|egresos)/i.test(
         rawText
       );
     if (isDirectMemoryQuestion) {
@@ -5195,6 +5887,11 @@ async function handleTelegramBotRequest(req: any, res: any) {
       return res.status(200).json({ ok: true });
     }
 
+    if (parsed.intent === 'consulta_salud_financiera') {
+      await handleFinancialHealthQuery(supabase, chatId);
+      return res.status(200).json({ ok: true });
+    }
+
     if (parsed.intent === 'consulta_memoria_ia') {
       await handleAiMemoryQuery(
         supabase,
@@ -5206,7 +5903,7 @@ async function handleTelegramBotRequest(req: any, res: any) {
 
     // Fallback inteligente si preguntó algo sobre el negocio en lenguaje natural
     const looksLikeBusinessQuestion =
-      /\?|por\s*qu[eé]|qu[eé]\s+pas[oó]|cu[aá]l|c[oó]mo\s+(va|est[aá]|cerr|rend)|tendencia|roas|pauta|cancel|product|semana|ayer|recomiend|analiz|memoria|negocio|ventas/i.test(
+      /\?|por\s*qu[eé]|qu[eé]\s+pas[oó]|cu[aá]l|c[oó]mo\s+(va|est[aá]|cerr|rend)|tendencia|roas|pauta|cancel|product|semana|ayer|recomiend|analiz|memoria|negocio|ventas|salud|finanzas|liquidez|margen|valor\s+real|ox[ií]geno/i.test(
         rawText
       );
     if (parsed.intent === 'otro' && rawText.length >= 10 && looksLikeBusinessQuestion) {
