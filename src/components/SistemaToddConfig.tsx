@@ -3,13 +3,16 @@ import {
   DEFAULT_TODD_BUSINESS_SETTINGS,
   buildBusinessRulesPromptBlock,
   fetchToddBusinessSettings,
+  formatSaturationDaysLabel,
   getSalvadorTodayISO,
   isHolidayCurrentlyActive,
   saveToddBusinessSettings,
+  type OperationalSaturationDays,
   type ToddBusinessSettings,
   type ToddCourierRule,
 } from '@/lib/toddSettings';
 import {
+  AlertTriangle,
   Bot,
   Calendar,
   Check,
@@ -120,6 +123,8 @@ export function SistemaToddConfig() {
     setNewCourierZones('');
   };
 
+  const [savingSaturation, setSavingSaturation] = useState(false);
+
   const handleSave = async () => {
     setSaving(true);
     const res = await saveToddBusinessSettings(settings);
@@ -138,9 +143,39 @@ export function SistemaToddConfig() {
     }
   };
 
+  const applySaturationPatch = async (
+    patch: Partial<Pick<ToddBusinessSettings, 'operationalSaturationEnabled' | 'operationalSaturationDays'>>
+  ) => {
+    const nextSettings: ToddBusinessSettings = { ...settings, ...patch };
+    setSettings(nextSettings);
+    setSavingSaturation(true);
+    const res = await saveToddBusinessSettings(nextSettings);
+    setSettings(res.settings);
+    setSource(res.source);
+    setSavingSaturation(false);
+    setHasUnsaved(false);
+
+    if (res.source === 'supabase') {
+      const label = formatSaturationDaysLabel(res.settings.operationalSaturationDays);
+      showNotice(
+        'ok',
+        res.settings.operationalSaturationEnabled
+          ? `Regla de saturación operativa activa (${label}) y guardada para Todd.`
+          : 'Regla de saturación operativa desactivada. Todd volvió a los tiempos normales.'
+      );
+    } else {
+      showNotice(
+        'err',
+        `Cambio guardado solo localmente (${res.error || 'revisa conexión con Supabase'}).`
+      );
+    }
+  };
+
   const handleResetDefaults = () => {
     setSettings({
       ...DEFAULT_TODD_BUSINESS_SETTINGS,
+      operationalSaturationEnabled: false,
+      operationalSaturationDays: '2-3',
       couriers: DEFAULT_TODD_BUSINESS_SETTINGS.couriers.map(c => ({ ...c })),
     });
     setHasUnsaved(true);
@@ -178,8 +213,104 @@ export function SistemaToddConfig() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        {/* COLUMNA IZQUIERDA (8/12): 4 BLOQUES EDITABLES */}
+        {/* COLUMNA IZQUIERDA (8/12): BLOQUES EDITABLES */}
         <div className="lg:col-span-8 flex flex-col gap-4">
+          {/* 0. MODO SATURACIÓN OPERATIVA (APLICA A TODO EL PAÍS) */}
+          <section
+            className="bg-cd bd rounded-xl p-5 space-y-4"
+            style={{
+              borderColor: settings.operationalSaturationEnabled ? 'var(--ac)' : undefined,
+            }}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-[var(--bd)]">
+              <div className="min-w-0 flex-1">
+                <h2 className="text-sm font-bold flex items-center gap-2">
+                  <AlertTriangle
+                    size={15}
+                    style={{
+                      color: settings.operationalSaturationEnabled ? 'var(--ac)' : 'var(--mu)',
+                    }}
+                  />
+                  Saturación operativa · Plazo global de entrega
+                </h2>
+                <p className="text-xs tx-mu mt-0.5 leading-relaxed">
+                  Aplica a <strong>cualquier pedido</strong> (San Salvador y todos los departamentos). Reemplaza temporalmente los tiempos normales sin borrarlos.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                disabled={savingSaturation || saving}
+                onClick={() =>
+                  void applySaturationPatch({
+                    operationalSaturationEnabled: !settings.operationalSaturationEnabled,
+                  })
+                }
+                className="px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 transition-opacity hover:opacity-90"
+                style={
+                  settings.operationalSaturationEnabled
+                    ? { background: 'var(--ac)', color: '#fff' }
+                    : { background: 'var(--sf)', color: 'var(--tx)', border: '1px solid var(--bd)' }
+                }
+              >
+                {savingSaturation && <Loader2 size={13} className="animate-spin" />}
+                {settings.operationalSaturationEnabled
+                  ? 'Regla activa · Desactivar'
+                  : 'Activar saturación operativa'}
+              </button>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="text-xs font-semibold">Plazo que informará Todd</div>
+                <p className="text-[11px] tx-mu">
+                  Cambia entre 2 - 3 días y 3 - 4 días en un clic (se guarda al instante).
+                </p>
+              </div>
+
+              <div className="inline-flex items-center p-1 rounded-lg bg-sf bd shrink-0">
+                {(['2-3', '3-4'] as OperationalSaturationDays[]).map(opt => {
+                  const selected = settings.operationalSaturationDays === opt;
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      disabled={savingSaturation || saving}
+                      onClick={() =>
+                        void applySaturationPatch({
+                          operationalSaturationDays: opt,
+                        })
+                      }
+                      className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 ${
+                        selected
+                          ? 'bg-[var(--tx)] text-[var(--cd)]'
+                          : 'tx-mu hover:text-[var(--tx)]'
+                      }`}
+                    >
+                      {formatSaturationDaysLabel(opt)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="px-3.5 py-2.5 rounded-lg bg-sf bd text-xs leading-relaxed">
+              {settings.operationalSaturationEnabled ? (
+                <span>
+                  <strong>Activo ahora:</strong> para cualquier pedido (San Salvador o departamento), Todd indicará que por saturación operativa el plazo de entrega es de{' '}
+                  <strong className="mono">
+                    {formatSaturationDaysLabel(settings.operationalSaturationDays)}
+                  </strong>{' '}
+                  después de haber realizado su pedido.
+                </span>
+              ) : (
+                <span className="tx-mu">
+                  Regla apagada. Todd está usando los tiempos normales de entrega configurados abajo.
+                </span>
+              )}
+            </div>
+          </section>
+
           {/* 1. TIEMPOS Y COBERTURA DE ENTREGA */}
           <section className="bg-cd bd rounded-xl p-5 space-y-4">
             <div className="flex items-start justify-between gap-3 pb-3 border-b border-[var(--bd)]">
@@ -189,7 +320,9 @@ export function SistemaToddConfig() {
                   Tiempos de entrega y horarios
                 </h2>
                 <p className="text-xs tx-mu mt-0.5">
-                  Información base que Todd usa cuando el cliente pregunta cuánto tarda en llegar su pedido.
+                  {settings.operationalSaturationEnabled
+                    ? 'Pausados temporalmente mientras Saturación operativa está activa; vuelven automáticamente al desactivarla.'
+                    : 'Información base que Todd usa cuando el cliente pregunta cuánto tarda en llegar su pedido.'}
                 </p>
               </div>
               <span className="text-[11px] tx-mu shrink-0">
@@ -197,7 +330,7 @@ export function SistemaToddConfig() {
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${settings.operationalSaturationEnabled ? 'opacity-65' : ''}`}>
               <div>
                 <label className="block text-xs font-medium mb-1">
                   San Salvador / Área Metropolitana

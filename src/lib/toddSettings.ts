@@ -14,6 +14,8 @@ export interface ToddCourierRule {
   active: boolean;
 }
 
+export type OperationalSaturationDays = '2-3' | '3-4';
+
 export interface ToddBusinessSettings {
   deliverySanSalvador: string;
   deliveryDepartments: string;
@@ -21,6 +23,8 @@ export interface ToddBusinessSettings {
   shippingCostNote: string;
   humanSupportHours: string;
   couriers: ToddCourierRule[];
+  operationalSaturationEnabled: boolean;
+  operationalSaturationDays: OperationalSaturationDays;
   holidayModeEnabled: boolean;
   holidayStartDate: string;
   holidayEndDate: string;
@@ -65,6 +69,8 @@ export const DEFAULT_TODD_BUSINESS_SETTINGS: ToddBusinessSettings = {
       active: true,
     },
   ],
+  operationalSaturationEnabled: true,
+  operationalSaturationDays: '2-3',
   holidayModeEnabled: false,
   holidayStartDate: '',
   holidayEndDate: '',
@@ -179,6 +185,8 @@ export function normalizeBusinessSettings(raw: any): ToddBusinessSettings {
     humanSupportHours:
       String(raw.humanSupportHours ?? DEFAULT_TODD_BUSINESS_SETTINGS.humanSupportHours).trim(),
     couriers,
+    operationalSaturationEnabled: raw.operationalSaturationEnabled !== false,
+    operationalSaturationDays: raw.operationalSaturationDays === '3-4' ? '3-4' : '2-3',
     holidayModeEnabled: Boolean(raw.holidayModeEnabled),
     holidayStartDate: String(raw.holidayStartDate || '').trim().slice(0, 10),
     holidayEndDate: String(raw.holidayEndDate || '').trim().slice(0, 10),
@@ -216,11 +224,22 @@ export function isHolidayCurrentlyActive(
   return true;
 }
 
+export function formatSaturationDaysLabel(days: OperationalSaturationDays): string {
+  return days === '3-4' ? '3 - 4 días' : '2 - 3 días';
+}
+
 export function buildBusinessRulesPromptBlock(
   cfg: ToddBusinessSettings,
   todayIso: string = getSalvadorTodayISO()
 ): string {
   const lines: string[] = [];
+
+  if (cfg.operationalSaturationEnabled) {
+    const daysLabel = formatSaturationDaysLabel(cfg.operationalSaturationDays);
+    lines.push(
+      `- REGLA OBLIGATORIA — SATURACIÓN OPERATIVA ACTIVA (APLICA A TODO EL SALVADOR SIN EXCEPCIÓN): Para CUALQUIER pedido —ya sea en San Salvador / Área Metropolitana o en cualquier otro departamento del país— informa claramente y con amabilidad que por saturación operativa el plazo de entrega es de ${daysLabel} después de haber realizado su pedido. PROHIBIDO prometer entrega el mismo día, en 24 horas o al día siguiente mientras esta regla esté activa, incluso para San Salvador. Al confirmar o cerrar el pedido, recuérdale siempre este plazo de ${daysLabel}.`
+    );
+  }
 
   if (isHolidayCurrentlyActive(cfg, todayIso)) {
     const range =
@@ -230,14 +249,20 @@ export function buildBusinessRulesPromptBlock(
     lines.push(`- AVISO TEMPORAL / DÍA FESTIVO ACTIVO${range}: ${cfg.holidayMessage.trim()}`);
   }
 
-  if (cfg.deliverySanSalvador) {
-    lines.push(`- Tiempos en San Salvador / AMSS: ${cfg.deliverySanSalvador}`);
-  }
-  if (cfg.deliveryDepartments) {
-    lines.push(`- Tiempos en Departamentos: ${cfg.deliveryDepartments}`);
-  }
-  if (cfg.cutoffTimeNote) {
-    lines.push(`- Hora de corte / despachos: ${cfg.cutoffTimeNote}`);
+  if (cfg.operationalSaturationEnabled) {
+    const daysLabel = formatSaturationDaysLabel(cfg.operationalSaturationDays);
+    lines.push(`- Tiempos en San Salvador / AMSS (por saturación operativa): ${daysLabel} después de haber realizado el pedido.`);
+    lines.push(`- Tiempos en Departamentos (por saturación operativa): ${daysLabel} después de haber realizado el pedido.`);
+  } else {
+    if (cfg.deliverySanSalvador) {
+      lines.push(`- Tiempos en San Salvador / AMSS: ${cfg.deliverySanSalvador}`);
+    }
+    if (cfg.deliveryDepartments) {
+      lines.push(`- Tiempos en Departamentos: ${cfg.deliveryDepartments}`);
+    }
+    if (cfg.cutoffTimeNote) {
+      lines.push(`- Hora de corte / despachos: ${cfg.cutoffTimeNote}`);
+    }
   }
   if (cfg.shippingCostNote) {
     lines.push(`- Costo / cobertura de envío: ${cfg.shippingCostNote}`);

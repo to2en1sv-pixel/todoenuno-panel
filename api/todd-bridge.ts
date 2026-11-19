@@ -185,7 +185,7 @@ REGLAS CRÍTICAS:
 - VARIANTES Y COLORES COMPLETOS: Cuando un producto tenga múltiples colores o tallas marcados como "Disponible" o "Disponible (bajo pedido)" en "Disponibilidad y Opciones", SIEMPRE enumera y ofrece TODAS las opciones disponibles al cliente (ej. Rosado y Amarillo). NUNCA omitas una variante disponible ni te limites solo a la que tiene stock físico.
 - VENTA SIN STOCK / BAJO PEDIDO: Si un producto o variante aparece marcado como "Disponible" o "Disponible (bajo pedido)", véndelo y cierra el pedido con normalidad. NUNCA pauses el bot ("escalate_to_human": false) ni rechaces la venta por stock 0 cuando aparezca disponible.
 - Si un producto aparece marcado como "Agotado" o "Agotado temporalmente", indica amablemente que por el momento no está disponible y sugiere opciones similares del catálogo.
-- Si existe un AVISO TEMPORAL / DÍA FESTIVO ACTIVO en las reglas operativas, respétalo y comunícalo con prioridad cuando aplique a fechas de entrega o despacho.
+- Si existe una REGLA DE SATURACIÓN OPERATIVA ACTIVA o un AVISO TEMPORAL / DÍA FESTIVO ACTIVO en las reglas operativas, respétalo con prioridad absoluta sobre los tiempos habituales y comunícalo claramente al cliente (sin hacer excepciones para San Salvador cuando la saturación operativa esté activa).
 - Si el cliente pide ver fotos o pregunta por un producto por primera vez y TieneFoto = SI, pon "send_product_image": true y "product_sku" con el SKU exacto.
 - VIDEO HOW-TO (YOUTUBE): Si un producto tiene TieneVideo = SI, el video tutorial se envía automáticamente junto con la foto al activar "send_product_image": true. Además, si el cliente pregunta cómo se usa, cómo funciona, cómo se arma o pide video, compártele el enlace de YouTube directamente en "reply_text".
 - Si el cliente te da su número real de 8 dígitos en el chat (útil cuando escribe desde @lid), guárdalo en "customer_phone".
@@ -742,6 +742,8 @@ export default async function handler(req: any, res: any) {
             active: true,
           },
         ],
+        operationalSaturationEnabled: true,
+        operationalSaturationDays: '2-3' as '2-3' | '3-4',
         holidayModeEnabled: false,
         holidayStartDate: '',
         holidayEndDate: '',
@@ -773,6 +775,8 @@ export default async function handler(req: any, res: any) {
                     }))
                     .filter((c: any) => c.name.length > 0)
                 : businessSettings.couriers,
+              operationalSaturationEnabled: b.operationalSaturationEnabled !== false,
+              operationalSaturationDays: b.operationalSaturationDays === '3-4' ? '3-4' : '2-3',
               holidayModeEnabled: Boolean(b.holidayModeEnabled),
               holidayStartDate: String(b.holidayStartDate || '').trim().slice(0, 10),
               holidayEndDate: String(b.holidayEndDate || '').trim().slice(0, 10),
@@ -806,6 +810,12 @@ export default async function handler(req: any, res: any) {
         (!businessSettings.holidayEndDate || svTodayIso <= businessSettings.holidayEndDate);
 
       const businessRuleLines: string[] = [];
+      if (businessSettings.operationalSaturationEnabled) {
+        const satDaysLabel = businessSettings.operationalSaturationDays === '3-4' ? '3 - 4 días' : '2 - 3 días';
+        businessRuleLines.push(
+          `- REGLA OBLIGATORIA — SATURACIÓN OPERATIVA ACTIVA (APLICA A TODO EL SALVADOR SIN EXCEPCIÓN): Para CUALQUIER pedido —ya sea en San Salvador / Área Metropolitana o en cualquier otro departamento del país— informa claramente y con amabilidad que por saturación operativa el plazo de entrega es de ${satDaysLabel} después de haber realizado su pedido. PROHIBIDO prometer entrega el mismo día, en 24 horas o al día siguiente mientras esta regla esté activa, incluso para San Salvador. Al confirmar o cerrar el pedido, recuérdale siempre este plazo de ${satDaysLabel}.`
+        );
+      }
       if (isHolidayActive) {
         const range =
           businessSettings.holidayStartDate || businessSettings.holidayEndDate
@@ -813,14 +823,20 @@ export default async function handler(req: any, res: any) {
             : '';
         businessRuleLines.push(`- AVISO TEMPORAL / DÍA FESTIVO ACTIVO${range}: ${businessSettings.holidayMessage}`);
       }
-      if (businessSettings.deliverySanSalvador) {
-        businessRuleLines.push(`- Tiempos en San Salvador / AMSS: ${businessSettings.deliverySanSalvador}`);
-      }
-      if (businessSettings.deliveryDepartments) {
-        businessRuleLines.push(`- Tiempos en Departamentos: ${businessSettings.deliveryDepartments}`);
-      }
-      if (businessSettings.cutoffTimeNote) {
-        businessRuleLines.push(`- Hora de corte / despachos: ${businessSettings.cutoffTimeNote}`);
+      if (businessSettings.operationalSaturationEnabled) {
+        const satDaysLabel = businessSettings.operationalSaturationDays === '3-4' ? '3 - 4 días' : '2 - 3 días';
+        businessRuleLines.push(`- Tiempos en San Salvador / AMSS (por saturación operativa): ${satDaysLabel} después de haber realizado el pedido.`);
+        businessRuleLines.push(`- Tiempos en Departamentos (por saturación operativa): ${satDaysLabel} después de haber realizado el pedido.`);
+      } else {
+        if (businessSettings.deliverySanSalvador) {
+          businessRuleLines.push(`- Tiempos en San Salvador / AMSS: ${businessSettings.deliverySanSalvador}`);
+        }
+        if (businessSettings.deliveryDepartments) {
+          businessRuleLines.push(`- Tiempos en Departamentos: ${businessSettings.deliveryDepartments}`);
+        }
+        if (businessSettings.cutoffTimeNote) {
+          businessRuleLines.push(`- Hora de corte / despachos: ${businessSettings.cutoffTimeNote}`);
+        }
       }
       if (businessSettings.shippingCostNote) {
         businessRuleLines.push(`- Costo / cobertura de envío: ${businessSettings.shippingCostNote}`);

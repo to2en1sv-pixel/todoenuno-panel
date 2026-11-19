@@ -1365,9 +1365,13 @@ export default async function handler(req: any, res: any) {
     } catch {}
 
     let activeHolidayNotice = '';
+    let activeSaturationLabel = '';
     try {
       if (bizDocRes.data?.contenido) {
         const b = JSON.parse(bizDocRes.data.contenido);
+        if (b?.operationalSaturationEnabled !== false) {
+          activeSaturationLabel = b?.operationalSaturationDays === '3-4' ? '3 - 4 días' : '2 - 3 días';
+        }
         const msg = String(b?.holidayMessage || '').trim();
         const start = String(b?.holidayStartDate || '').trim().slice(0, 10);
         const end = String(b?.holidayEndDate || '').trim().slice(0, 10);
@@ -1377,6 +1381,8 @@ export default async function handler(req: any, res: any) {
           (!start || dateInfo.svTodayIso >= start) &&
           (!end || dateInfo.svTodayIso <= end);
         if (activeToday) activeHolidayNotice = msg;
+      } else {
+        activeSaturationLabel = '2 - 3 días';
       }
     } catch {}
 
@@ -1388,6 +1394,11 @@ export default async function handler(req: any, res: any) {
     if (briefType === 'morning') {
       lines.push(`☀️ <b>BRIEF OPERATIVO (8:00 AM) — TODOENUNO</b>`);
       lines.push(`📅 <i>${escapeHtml(dateInfo.formattedDate)}</i>`);
+
+      if (activeSaturationLabel) {
+        lines.push('');
+        lines.push(`⏳ <b>Saturación operativa activa en Bot Todd:</b> plazo global de <b>${escapeHtml(activeSaturationLabel)}</b> (todo el país).`);
+      }
 
       if (activeHolidayNotice) {
         lines.push('');
