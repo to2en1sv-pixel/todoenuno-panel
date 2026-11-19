@@ -1411,6 +1411,36 @@ export default async function handler(req: any, res: any) {
       finHealth.estado === 'Saludable' ? '🟢' : finHealth.estado === 'Atención' ? '🟡' : '🔴';
     const runwayText = finHealth.runwayDias !== null ? `${finHealth.runwayDias}d` : 'N/A';
 
+    let radarBriefAlerts: string[] = [];
+    try {
+      const briefInference = await computeServerOperationalInference(supabase, dateInfo.svTodayIso, {
+        finHealth,
+        catalog: stockRows,
+        convs: rawConvs,
+      });
+      if (briefInference.highRiskPreDispatch.length > 0) {
+        const topRisk = briefInference.highRiskPreDispatch[0];
+        radarBriefAlerts.push(
+          `• ⚠️ Riesgo rechazo pre-despacho: <b>${briefInference.highRiskPreDispatch.length}</b> paq. (ej. ${escapeHtml(
+            topRisk.cliente
+          )} · ${topRisk.riskPct}% prob. — ${escapeHtml(topRisk.reasons[0] || 'patrón zona/courier')})`
+        );
+      }
+      if (briefInference.stockoutPredictions.length > 0) {
+        const topStk = briefInference.stockoutPredictions[0];
+        radarBriefAlerts.push(
+          `• ⏳ Quiebre proyectado: <b>${escapeHtml(topStk.nombre)}</b> en <b>~${topStk.daysLeft.toFixed(
+            1
+          )}d</b> (${topStk.stockDisponible}u disp · ritmo ${topStk.weightedDailyRate.toFixed(1)}/día)`
+        );
+      }
+      if (briefInference.dailyAnomaly.severity === 'alert' || briefInference.dailyAnomaly.severity === 'warn') {
+        radarBriefAlerts.push(
+          `• 📉 Pulso causal hoy: ${escapeHtml(briefInference.dailyAnomaly.verdict)}`
+        );
+      }
+    } catch {}
+
     /* 6. ARMAR MENSAJE SEGÚN TIPO ('morning' | 'evening' | 'full') */
     const lines: string[] = [];
 
@@ -1481,6 +1511,14 @@ export default async function handler(req: any, res: any) {
         lines.push(`📝 <b>NOTAS PENDIENTES (HOY)</b>`);
         for (const n of notasRows.slice(0, 3)) {
           lines.push(`• ${escapeHtml(String(n.contenido || '').slice(0, 110))}`);
+        }
+      }
+
+      if (radarBriefAlerts.length > 0) {
+        lines.push('');
+        lines.push(`📡 <b>RADAR PREDICTIVO</b> <i>(/radar)</i>`);
+        for (const alertLine of radarBriefAlerts.slice(0, 3)) {
+          lines.push(alertLine);
         }
       }
 
@@ -1615,6 +1653,14 @@ export default async function handler(req: any, res: any) {
               lowStock.length > 4 ? ` y ${lowStock.length - 4} más` : ''
             }`
           );
+        }
+      }
+
+      if (radarBriefAlerts.length > 0) {
+        lines.push('');
+        lines.push(`📡 <b>RADAR PREDICTIVO</b> <i>(/radar)</i>`);
+        for (const alertLine of radarBriefAlerts.slice(0, 3)) {
+          lines.push(alertLine);
         }
       }
 
@@ -1768,6 +1814,14 @@ export default async function handler(req: any, res: any) {
         lines.push(`📝 <b>NOTAS PENDIENTES (HOY)</b>`);
         for (const n of notasRows.slice(0, 3)) {
           lines.push(`• ${escapeHtml(String(n.contenido || '').slice(0, 110))}`);
+        }
+      }
+
+      if (radarBriefAlerts.length > 0) {
+        lines.push('');
+        lines.push(`📡 <b>RADAR PREDICTIVO</b> <i>(/radar)</i>`);
+        for (const alertLine of radarBriefAlerts.slice(0, 3)) {
+          lines.push(alertLine);
         }
       }
 
@@ -2791,7 +2845,9 @@ REGLAS ESTRICTAS:
    - "consulta_stock": pregunta cuánto stock hay de uno o más productos.
    - "consulta_brief": pide el brief / resumen de ventas del día.
    - "consulta_salud_financiera": pide específicamente el estado de salud financiera, puntaje financiero, valor total real del negocio, patrimonio, oxígeno de caja, compromisos próximos o resumen financiero del mes ("¿cómo está la salud financiera?", "¿cuál es el valor real del negocio?", "dame mi salud financiera", "estado financiero del mes").
-   - "consulta_memoria_ia": pregunta abierta de análisis, tendencias, comparación de días/semanas, por qué bajaron o subieron ventas, ROAS histórico, qué producto preguntan más, motivos de cancelación, recomendaciones o memoria del negocio ("¿qué pasó esta semana?", "¿por qué cancelan?", "¿qué producto preguntan y no compran?", "analiza los últimos días").
+   - "consulta_radar_inferencia": pide el radar predictivo, inferencia de datos, paquetes con riesgo de cancelación antes de despachar, predicción de quiebre de stock cruzada con caja, diagnóstico causal de hoy o ROAS real ajustado por entrega ("dame el radar", "qué paquetes tienen riesgo de cancelar", "cuándo se acaba el stock", "qué anuncio deja más ganancia real").
+   - "consulta_objeciones_chats": pide analizar chats no cerrados de WhatsApp / Todd para descubrir por qué no compran los leads, qué objeciones tienen o qué productos piden que no hay ("por qué no están comprando en WhatsApp", "qué objeciones tienen los clientes", "analiza chats no cerrados").
+   - "consulta_memoria_ia": pregunta abierta de análisis, simulación contrafactual ("¿qué pasa si duplico pauta?", "¿cuántos pedidos necesito para cerrar el mes?"), tendencias, comparación de días/semanas, motivos de cancelación, recomendaciones o memoria del negocio.
    - "otro": saludo simple sin pregunta operativa ni de negocio.
 ${params.intentHint ? `\nPISTA DE CONTEXTO: El usuario inició con el comando ${params.intentHint}.\n` : ''}
 2. Detalles por intent:
@@ -2806,7 +2862,7 @@ ${params.intentHint ? `\nPISTA DE CONTEXTO: El usuario inició con el comando ${
 
 3. Devuelve EXCLUSIVAMENTE JSON válido con esta estructura:
 {
-  "intent": "compra" | "gasto_operativo" | "gasto_pauta" | "ajuste_inventario" | "cambiar_estado_pedido" | "consulta_pedido" | "consulta_pendientes" | "consulta_stock" | "consulta_brief" | "consulta_salud_financiera" | "consulta_memoria_ia" | "otro",
+  "intent": "compra" | "gasto_operativo" | "gasto_pauta" | "ajuste_inventario" | "cambiar_estado_pedido" | "consulta_pedido" | "consulta_pendientes" | "consulta_stock" | "consulta_brief" | "consulta_salud_financiera" | "consulta_radar_inferencia" | "consulta_objeciones_chats" | "consulta_memoria_ia" | "otro",
   "search_query": "",
   "order_query": "",
   "next_status": "",
@@ -3816,15 +3872,15 @@ function formatDeltaBadge(curr: number, prev: number, isCurrency = false): strin
 const AI_QUICK_KEYBOARD = {
   inline_keyboard: [
     [
+      { text: '📡 Radar IA', callback_data: 'ia_quick:radar' },
       { text: '🩺 Salud Financiera', callback_data: 'ia_quick:salud' },
+    ],
+    [
+      { text: '🔍 Objeciones Chats', callback_data: 'ia_quick:objeciones' },
       { text: '📊 7d vs Anterior', callback_data: 'ia_quick:compare7d' },
     ],
     [
       { text: '📦 Riesgo Stock', callback_data: 'ia_quick:stock_risk' },
-      { text: '🎯 Brechas Bot', callback_data: 'ia_quick:bot_gaps' },
-    ],
-    [
-      { text: '📣 Top Anuncios', callback_data: 'ia_quick:top_ads' },
       { text: '☀️ Brief Operativo', callback_data: 'ia_quick:brief' },
     ],
   ],
@@ -4443,6 +4499,904 @@ async function handleFinancialHealthQuery(supabase: any, chatId: string | number
   await sendTgMessage(chatId, lines.join('\n'), { reply_markup: AI_QUICK_KEYBOARD });
 }
 
+/* ========================================================================== */
+/* MOTOR DE INFERENCIA DE DATOS IA (6 CAPACIDADES PREDICTIVAS Y CAUSALES)     */
+/* ========================================================================== */
+
+interface ServerOperationalInference {
+  svTodayIso: string;
+  roasStartCutoffIso: string;
+  sampleResolved60d: number;
+  globalDeliveryRatePct: number;
+  globalCancelRatePct: number;
+  dailyAnomaly: {
+    severity: 'ok' | 'positive' | 'warn' | 'alert';
+    weekdayName: string;
+    baselineDaysUsed: number;
+    pacingFactor: number;
+    chatsToday: number;
+    baselineChatsPaced: number;
+    ordersToday: number;
+    baselineOrdersPaced: number;
+    revenueToday: number;
+    baselineRevenuePaced: number;
+    verdict: string;
+  };
+  highRiskPreDispatch: Array<{
+    orderId: string;
+    cliente: string;
+    total: number;
+    estado: string;
+    departamento: string;
+    courier: string;
+    riskPct: number;
+    reasons: string[];
+  }>;
+  stockoutPredictions: Array<{
+    sku: string;
+    nombre: string;
+    stockDisponible: number;
+    encargosPendientes: number;
+    weightedDailyRate: number;
+    daysLeft: number;
+    suggestedReorderQty: number;
+    reorderCost: number;
+    cashVerdict: string;
+  }>;
+  adEffectiveRoas: Array<{
+    codigo: string;
+    orders: number;
+    delivered: number;
+    cancelled: number;
+    inProgress: number;
+    deliveryRatePct: number | null;
+    grossSales: number;
+    deliveredRevenue: number;
+    adSpend: number;
+    cogsDelivered: number;
+    grossRoas: number | null;
+    effectiveRoas: number | null;
+    netContribution: number;
+    flag: 'ganador' | 'engañoso' | 'normal' | 'muestra_pequena';
+  }>;
+  counterfactualParams: {
+    avgTicketDelivered: number;
+    avgCogsPerOrder: number;
+    avgGrossMarginPerOrder: number;
+    dailyOperatingBurn: number;
+    commitments15d: number;
+    breakEvenOrdersPerDay: number | null;
+    ordersPerDayFor25Net: number | null;
+  };
+}
+
+function getSvHourDecimal(): number {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'America/El_Salvador',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date());
+    const h = Number(parts.find((p) => p.type === 'hour')?.value || 12);
+    const m = Number(parts.find((p) => p.type === 'minute')?.value || 0);
+    return h + m / 60;
+  } catch {
+    return 12;
+  }
+}
+
+function getSvDayOfWeekName(isoYmd: string): { dow: number; name: string } {
+  const names = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  const dt = new Date(`${isoYmd}T12:00:00-06:00`);
+  const dow = Number.isNaN(dt.getTime()) ? 0 : dt.getDay();
+  return { dow, name: names[dow] || 'día' };
+}
+
+function extractUnitQtySimple(order: any): number {
+  const q = Number(order?.cantidad);
+  if (Number.isFinite(q) && q > 0) return Math.min(Math.round(q), 50);
+  if (Array.isArray(order?.items) && order.items.length > 0) {
+    const sum = order.items.reduce((acc: number, it: any) => {
+      const iq = Number(it?.cantidad ?? it?.qty ?? 1);
+      return acc + (Number.isFinite(iq) && iq > 0 ? Math.round(iq) : 1);
+    }, 0);
+    if (sum > 0) return Math.min(sum, 50);
+  }
+  const m = String(order?.sku || '').match(/(?:^|\s)(\d+)\s*x(?:\s|$)/i);
+  if (m?.[1]) {
+    const n = Number(m[1]);
+    if (n >= 1 && n <= 30) return n;
+  }
+  return 1;
+}
+
+async function computeServerOperationalInference(
+  supabase: any,
+  svTodayIso: string,
+  preloaded?: {
+    finHealth?: ServerFinancialHealthSnapshot;
+    catalog?: any[];
+    convs?: any[];
+  }
+): Promise<ServerOperationalInference> {
+  const d60CutoffUtc = new Date(Date.now() - 60 * 86400000).toISOString();
+  const d60DateIso = new Date(Date.now() - 60 * 86400000 - 6 * 3600000).toISOString().slice(0, 10);
+  const d14DateIso = new Date(Date.now() - 13 * 86400000 - 6 * 3600000).toISOString().slice(0, 10);
+  const d7DateIso = new Date(Date.now() - 6 * 86400000 - 6 * 3600000).toISOString().slice(0, 10);
+
+  const [ordersRes, adsRes, catalogRows, convRows, roasCutoffDoc, finHealth] = await Promise.all([
+    supabase
+      .from('whatsapp_orders')
+      .select(
+        'id,pedido_codigo,nombre_cliente,telefono,sku,catalogo_sku,cantidad,items,total,estado,departamento,courier,codigo_anuncio,motivo_cancelacion,liquidado,fecha_programada,created_at'
+      )
+      .gte('created_at', d60CutoffUtc)
+      .order('created_at', { ascending: false })
+      .limit(2500),
+    supabase
+      .from('gastos_publicidad')
+      .select('monto,fecha,codigo_anuncio')
+      .gte('fecha', d60DateIso)
+      .lte('fecha', svTodayIso)
+      .limit(1500),
+    preloaded?.catalog
+      ? Promise.resolve(preloaded.catalog)
+      : fetchActiveStockCatalog(supabase),
+    preloaded?.convs
+      ? Promise.resolve(preloaded.convs)
+      : supabase
+          .from('bb_conversations')
+          .select('id,contact_phone,updated_at')
+          .gte('updated_at', new Date(Date.now() - 30 * 86400000).toISOString())
+          .limit(600)
+          .then((r: any) => (Array.isArray(r?.data) ? r.data : []))
+          .catch(() => []),
+    supabase
+      .from('panel_docs')
+      .select('contenido')
+      .eq('titulo', '__SYSTEM_ROAS_START_V1__')
+      .maybeSingle()
+      .then((r: any) => r?.data?.contenido || null)
+      .catch(() => null),
+    preloaded?.finHealth
+      ? Promise.resolve(preloaded.finHealth)
+      : computeServerFinancialHealthSnapshot(supabase, svTodayIso),
+  ]);
+
+  let roasStartCutoffIso = '2026-11-19';
+  if (roasCutoffDoc) {
+    try {
+      const parsed = JSON.parse(roasCutoffDoc);
+      if (parsed?.startDate && /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.startDate))) {
+        roasStartCutoffIso = String(parsed.startDate);
+      }
+    } catch {}
+  }
+
+  const orders = Array.isArray(ordersRes?.data) ? ordersRes.data : [];
+  const ads = Array.isArray(adsRes?.data) ? adsRes.data : [];
+  const catalog = Array.isArray(catalogRows) ? catalogRows : [];
+  const convs = Array.isArray(convRows) ? convRows : [];
+
+  const catalogBySku = new Map<string, any>();
+  for (const c of catalog) {
+    const k = String(c.sku || '').trim().toUpperCase();
+    if (k) catalogBySku.set(k, c);
+  }
+
+  const resolveOrderSkuCost = (o: any): { skuKey: string; unitCost: number } => {
+    const rawCat = String(o.catalogo_sku || '').trim().toUpperCase();
+    if (rawCat && catalogBySku.has(rawCat)) {
+      return { skuKey: rawCat, unitCost: Number(catalogBySku.get(rawCat)?.costo_unitario || 0) };
+    }
+    const rawSku = String(o.sku || '').trim().toUpperCase();
+    if (rawSku && catalogBySku.has(rawSku)) {
+      return { skuKey: rawSku, unitCost: Number(catalogBySku.get(rawSku)?.costo_unitario || 0) };
+    }
+    for (const [k, item] of catalogBySku.entries()) {
+      const itemName = String(item.nombre || '').toUpperCase();
+      if (
+        (rawSku && (rawSku.includes(k) || (itemName && rawSku.includes(itemName.slice(0, 12))))) ||
+        (rawCat && k.startsWith(rawCat.split('-')[0]))
+      ) {
+        return { skuKey: k, unitCost: Number(item.costo_unitario || 0) };
+      }
+    }
+    return { skuKey: rawCat || rawSku.split(' ')[0] || '', unitCost: 0 };
+  };
+
+  /* ---------------------------------------------------------------------- */
+  /* A. ESTADÍSTICAS HISTÓRICAS 60D + SCORING DE RIESGO PRE-DESPACHO        */
+  /* ---------------------------------------------------------------------- */
+  let totalResolved = 0;
+  let totalDelivered = 0;
+  let totalCancelled = 0;
+  let sumTicketDelivered = 0;
+  let sumCogsDelivered = 0;
+  let countDeliveredWithCogs = 0;
+
+  const deptHist = new Map<string, { resolved: number; cancelled: number }>();
+  const courierHist = new Map<string, { resolved: number; cancelled: number }>();
+  const skuHist = new Map<string, { resolved: number; cancelled: number }>();
+  const phoneCancels = new Map<string, number>();
+
+  const dailyOrdersMap = new Map<string, { orders: number; revenue: number }>();
+  const skuUnits7d = new Map<string, number>();
+  const skuUnits14d = new Map<string, number>();
+  const skuScheduled = new Map<string, number>();
+
+  const adAgg = new Map<
+    string,
+    {
+      orders: number;
+      delivered: number;
+      cancelled: number;
+      inProgress: number;
+      grossSales: number;
+      deliveredRevenue: number;
+      cogsDelivered: number;
+      adSpend: number;
+    }
+  >();
+
+  for (const o of orders) {
+    const est = normalizeEstadoOrder(o.estado) || 'nuevo';
+    const svDay = o.created_at
+      ? new Date(new Date(o.created_at).getTime() - 6 * 3600000).toISOString().slice(0, 10)
+      : '';
+    const qty = extractUnitQtySimple(o);
+    const total = Number(o.total || 0);
+    const { skuKey, unitCost } = resolveOrderSkuCost(o);
+    const dept = String(o.departamento || '').trim();
+    const courier = String(o.courier || '').trim();
+    const phoneDigits = String(o.telefono || '').replace(/\D/g, '').slice(-8);
+
+    // Línea base diaria (no cancelados)
+    if (svDay && est !== 'cancelado') {
+      const dm = dailyOrdersMap.get(svDay) || { orders: 0, revenue: 0 };
+      dm.orders += 1;
+      dm.revenue += total;
+      dailyOrdersMap.set(svDay, dm);
+    }
+
+    // Velocidad de stock (7d / 14d) + encargos futuros
+    if (skuKey) {
+      if (est === 'programado') {
+        skuScheduled.set(skuKey, (skuScheduled.get(skuKey) || 0) + qty);
+      } else if (est !== 'cancelado') {
+        if (svDay >= d7DateIso) {
+          skuUnits7d.set(skuKey, (skuUnits7d.get(skuKey) || 0) + qty);
+        }
+        if (svDay >= d14DateIso) {
+          skuUnits14d.set(skuKey, (skuUnits14d.get(skuKey) || 0) + qty);
+        }
+      }
+    }
+
+    // Resueltos para probabilidades empíricas
+    if (est === 'entregado' || est === 'cancelado') {
+      totalResolved += 1;
+      const isCanc = est === 'cancelado';
+      if (isCanc) {
+        totalCancelled += 1;
+        if (phoneDigits.length >= 8) {
+          phoneCancels.set(phoneDigits, (phoneCancels.get(phoneDigits) || 0) + 1);
+        }
+      } else {
+        totalDelivered += 1;
+        sumTicketDelivered += total;
+        if (unitCost > 0) {
+          sumCogsDelivered += unitCost * qty;
+          countDeliveredWithCogs += 1;
+        }
+      }
+
+      if (dept) {
+        const dH = deptHist.get(dept) || { resolved: 0, cancelled: 0 };
+        dH.resolved += 1;
+        if (isCanc) dH.cancelled += 1;
+        deptHist.set(dept, dH);
+      }
+      if (courier) {
+        const cH = courierHist.get(courier) || { resolved: 0, cancelled: 0 };
+        cH.resolved += 1;
+        if (isCanc) cH.cancelled += 1;
+        courierHist.set(courier, cH);
+      }
+      if (skuKey) {
+        const sH = skuHist.get(skuKey) || { resolved: 0, cancelled: 0 };
+        sH.resolved += 1;
+        if (isCanc) sH.cancelled += 1;
+        skuHist.set(skuKey, sH);
+      }
+    }
+
+    // ROAS real ajustado por entrega (desde roasStartCutoffIso o últimos 30d si no hay aún post-corte)
+    const adCode = String(o.codigo_anuncio || '').trim().toUpperCase();
+    if (adCode && adCode !== 'ORGANICO' && adCode !== 'ORGÁNICO') {
+      const includeByDate = svDay >= roasStartCutoffIso || svDay >= d14DateIso;
+      if (includeByDate) {
+        const a = adAgg.get(adCode) || {
+          orders: 0,
+          delivered: 0,
+          cancelled: 0,
+          inProgress: 0,
+          grossSales: 0,
+          deliveredRevenue: 0,
+          cogsDelivered: 0,
+          adSpend: 0,
+        };
+        a.orders += 1;
+        if (est !== 'cancelado') a.grossSales += total;
+        if (est === 'entregado') {
+          a.delivered += 1;
+          a.deliveredRevenue += total;
+          a.cogsDelivered += unitCost * qty;
+        } else if (est === 'cancelado') {
+          a.cancelled += 1;
+        } else {
+          a.inProgress += 1;
+        }
+        adAgg.set(adCode, a);
+      }
+    }
+  }
+
+  for (const ad of ads) {
+    const f = String(ad.fecha || '').slice(0, 10);
+    if (f < roasStartCutoffIso) continue;
+    const code = String(ad.codigo_anuncio || 'GENERAL').trim().toUpperCase();
+    if (!code || code === 'GENERAL') continue;
+    const a = adAgg.get(code) || {
+      orders: 0,
+      delivered: 0,
+      cancelled: 0,
+      inProgress: 0,
+      grossSales: 0,
+      deliveredRevenue: 0,
+      cogsDelivered: 0,
+      adSpend: 0,
+    };
+    a.adSpend += Number(ad.monto || 0);
+    adAgg.set(code, a);
+  }
+
+  const globalCancelRate = totalResolved > 0 ? totalCancelled / totalResolved : 0.18;
+  const globalDeliveryRatePct = totalResolved > 0 ? (totalDelivered / totalResolved) * 100 : 82;
+  const globalCancelRatePct = 100 - globalDeliveryRatePct;
+
+  // Evaluar pedidos activos PRE-DESPACHO ('nuevo' y 'por_empacar') con suavizado Bayesiano
+  const PRIOR_WEIGHT = 5;
+  const smoothedRate = (h?: { resolved: number; cancelled: number }) => {
+    if (!h || h.resolved < 3) return null;
+    return (h.cancelled + PRIOR_WEIGHT * globalCancelRate) / (h.resolved + PRIOR_WEIGHT);
+  };
+
+  const highRiskPreDispatch: ServerOperationalInference['highRiskPreDispatch'] = [];
+  for (const o of orders) {
+    const est = normalizeEstadoOrder(o.estado) || 'nuevo';
+    if (est !== 'nuevo' && est !== 'por_empacar') continue;
+
+    const dept = String(o.departamento || '').trim();
+    const courier = String(o.courier || '').trim();
+    const { skuKey } = resolveOrderSkuCost(o);
+    const phoneDigits = String(o.telefono || '').replace(/\D/g, '').slice(-8);
+    const prevCanc = phoneDigits.length >= 8 ? phoneCancels.get(phoneDigits) || 0 : 0;
+
+    const signals: Array<{ rate: number; reason: string }> = [];
+    const dRate = smoothedRate(dept ? deptHist.get(dept) : undefined);
+    if (dRate !== null && dRate > globalCancelRate + 0.06) {
+      const h = deptHist.get(dept)!;
+      signals.push({
+        rate: dRate,
+        reason: `${dept} (${Math.round((h.cancelled / h.resolved) * 100)}% canc. en ${h.resolved} ped.)`,
+      });
+    }
+    const cRate = smoothedRate(courier ? courierHist.get(courier) : undefined);
+    if (cRate !== null && cRate > globalCancelRate + 0.06) {
+      const h = courierHist.get(courier)!;
+      signals.push({
+        rate: cRate,
+        reason: `${courier} (${Math.round((h.cancelled / h.resolved) * 100)}% canc. en ${h.resolved} ped.)`,
+      });
+    }
+    const sRate = smoothedRate(skuKey ? skuHist.get(skuKey) : undefined);
+    if (sRate !== null && sRate > globalCancelRate + 0.08) {
+      const h = skuHist.get(skuKey)!;
+      signals.push({
+        rate: sRate,
+        reason: `SKU ${skuKey} (${Math.round((h.cancelled / h.resolved) * 100)}% canc. en ${h.resolved} ped.)`,
+      });
+    }
+
+    let combinedRisk =
+      signals.length > 0
+        ? signals.reduce((acc, s) => acc + s.rate, 0) / signals.length
+        : globalCancelRate;
+
+    const reasons = signals.map((s) => s.reason);
+    if (prevCanc >= 1) {
+      combinedRisk = Math.min(0.92, Math.max(combinedRisk + 0.35, 0.65));
+      reasons.unshift(`Teléfono con ${prevCanc} cancelación(es) previa(s)`);
+    }
+
+    const riskPct = Math.round(combinedRisk * 100);
+    if (riskPct >= 30 || prevCanc >= 1) {
+      highRiskPreDispatch.push({
+        orderId: String(o.id),
+        cliente: String(o.nombre_cliente || 'Cliente'),
+        total: Number(o.total || 0),
+        estado: est,
+        departamento: dept || 'Sin depto',
+        courier: courier || 'Sin asignar',
+        riskPct,
+        reasons: reasons.slice(0, 2),
+      });
+    }
+  }
+  highRiskPreDispatch.sort((a, b) => b.riskPct - a.riskPct);
+
+  /* ---------------------------------------------------------------------- */
+  /* B. DIAGNÓSTICO CAUSAL DE ANOMALÍAS HOY (AJUSTADO A HORA ACTUAL SV)     */
+  /* ---------------------------------------------------------------------- */
+  const { dow: todayDow, name: weekdayName } = getSvDayOfWeekName(svTodayIso);
+  const svHour = getSvHourDecimal();
+  // Ventana comercial activa 8:00 AM - 9:00 PM (13h): escala proporcional para no dar falsas alarmas temprano
+  const pacingFactor = Math.min(1, Math.max(0.18, (svHour - 8) / 13));
+
+  const dailyChatsMap = new Map<string, number>();
+  for (const c of convs) {
+    const svDay = c.updated_at
+      ? new Date(new Date(c.updated_at).getTime() - 6 * 3600000).toISOString().slice(0, 10)
+      : '';
+    if (svDay) dailyChatsMap.set(svDay, (dailyChatsMap.get(svDay) || 0) + 1);
+  }
+
+  const sameWeekdayDays: string[] = [];
+  const last14Days: string[] = [];
+  for (let i = 1; i <= 28; i++) {
+    const iso = new Date(Date.now() - i * 86400000 - 6 * 3600000).toISOString().slice(0, 10);
+    if (i <= 14) last14Days.push(iso);
+    if (getSvDayOfWeekName(iso).dow === todayDow) sameWeekdayDays.push(iso);
+  }
+
+  const refDays = sameWeekdayDays.length >= 2 ? sameWeekdayDays : last14Days;
+  const baselineOrdersFull =
+    refDays.reduce((s, d) => s + (dailyOrdersMap.get(d)?.orders || 0), 0) / Math.max(1, refDays.length);
+  const baselineRevenueFull =
+    refDays.reduce((s, d) => s + (dailyOrdersMap.get(d)?.revenue || 0), 0) / Math.max(1, refDays.length);
+  const baselineChatsFull =
+    refDays.reduce((s, d) => s + (dailyChatsMap.get(d) || 0), 0) / Math.max(1, refDays.length);
+
+  const baselineOrdersPaced = Math.round(baselineOrdersFull * pacingFactor * 10) / 10;
+  const baselineRevenuePaced = Math.round(baselineRevenueFull * pacingFactor * 100) / 100;
+  const baselineChatsPaced = Math.round(baselineChatsFull * pacingFactor * 10) / 10;
+
+  const ordersToday = dailyOrdersMap.get(svTodayIso)?.orders || 0;
+  const revenueToday = dailyOrdersMap.get(svTodayIso)?.revenue || 0;
+  const chatsToday = dailyChatsMap.get(svTodayIso) || 0;
+
+  let anomalySeverity: 'ok' | 'positive' | 'warn' | 'alert' = 'ok';
+  let anomalyVerdict = '';
+  if (svHour < 10.5) {
+    anomalyVerdict = `Jornada arrancando (${ordersToday} ped. · ${chatsToday} chats activos). Aún temprano para diagnosticar desvío.`;
+  } else if (baselineOrdersPaced < 1.5) {
+    anomalyVerdict = `Muestra histórica pequeña para los ${weekdayName} (${ordersToday} ped. hoy vs prom. ${baselineOrdersPaced}).`;
+  } else {
+    const orderRatio = ordersToday / Math.max(0.5, baselineOrdersPaced);
+    const chatRatio = baselineChatsPaced >= 2 ? chatsToday / baselineChatsPaced : 1;
+
+    if (orderRatio >= 1.3) {
+      anomalySeverity = 'positive';
+      anomalyVerdict = `Ritmo fuerte (+${Math.round((orderRatio - 1) * 100)}% vs ${weekdayName} típico): ${ordersToday} ped. vs ${baselineOrdersPaced} esperados a esta hora.`;
+    } else if (orderRatio <= 0.65) {
+      anomalySeverity = orderRatio <= 0.45 ? 'alert' : 'warn';
+      if (chatRatio >= 0.85) {
+        anomalyVerdict = `Caída de cierre (-${Math.round((1 - orderRatio) * 100)}% pedidos), PERO chats en ritmo normal (${chatsToday} vs ${baselineChatsPaced}). El cuello de botella hoy está en conversión/objeciones, no en tráfico.`;
+      } else {
+        anomalyVerdict = `Caída de tráfico (-${Math.round((1 - chatRatio) * 100)}% chats y -${Math.round((1 - orderRatio) * 100)}% pedidos vs un ${weekdayName} normal). Revisa entrega de pauta en Meta Ads.`;
+      }
+    } else {
+      anomalyVerdict = `Ritmo normal para un ${weekdayName} a esta hora (${ordersToday} ped. vs ${baselineOrdersPaced} esperados · ${chatsToday} chats).`;
+    }
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* C. PREDICCIÓN DE QUIEBRE DE STOCK CRUZADA CON CAJA Y ENCARGOS          */
+  /* ---------------------------------------------------------------------- */
+  const stockoutPredictions: ServerOperationalInference['stockoutPredictions'] = [];
+  const availableCashNow = finHealth.liquidezNeta;
+  const cashAfterLiq = finHealth.liquidezNeta + finHealth.entregadosSinLiquidar;
+  const dailyBurn =
+    finHealth.runwayDias && finHealth.runwayDias > 0 && finHealth.liquidezNeta > 0
+      ? finHealth.liquidezNeta / finHealth.runwayDias
+      : finHealth.egresosOperativos / Math.max(1, new Date().getDate());
+
+  for (const c of catalog) {
+    if (c.activo === false) continue;
+    const skuKey = String(c.sku || '').trim().toUpperCase();
+    if (!skuKey) continue;
+    const u7 = skuUnits7d.get(skuKey) || 0;
+    const u14 = skuUnits14d.get(skuKey) || 0;
+    const weightedDailyRate = 0.65 * (u7 / 7) + 0.35 * (u14 / 14);
+    if (weightedDailyRate < 0.2) continue;
+
+    const disp = Number(c.stock_disponible ?? c.stock_fisico ?? 0);
+    const enc = skuScheduled.get(skuKey) || 0;
+    const netFree = Math.max(0, disp - enc);
+    const daysLeft = netFree / weightedDailyRate;
+
+    if (daysLeft <= 10) {
+      const suggestedReorderQty = Math.max(10, Math.ceil(weightedDailyRate * 14));
+      const unitCost = Number(c.costo_unitario || 0);
+      const reorderCost = Math.round(suggestedReorderQty * unitCost * 100) / 100;
+
+      let cashVerdict = 'Sin costo unitario cargado';
+      if (reorderCost > 0) {
+        const cashLeftNow = availableCashNow - reorderCost;
+        const runwayAfterNow = dailyBurn > 0 ? Math.round(cashLeftNow / dailyBurn) : 99;
+        const cashLeftAfterLiq = cashAfterLiq - reorderCost;
+        if (cashLeftNow >= 0 && runwayAfterNow >= 20) {
+          cashVerdict = `Financiable hoy ($${reorderCost.toFixed(2)} · oxígeno queda en ~${runwayAfterNow}d)`;
+        } else if (cashLeftAfterLiq >= 0 && finHealth.entregadosSinLiquidar > 0) {
+          cashVerdict = `Liquida primero ($${finHealth.entregadosSinLiquidar.toFixed(2)} en calle) para cubrir $${reorderCost.toFixed(2)}`;
+        } else {
+          cashVerdict = `Caja ajustada para $${reorderCost.toFixed(2)} — pedir lote parcial`;
+        }
+      }
+
+      stockoutPredictions.push({
+        sku: skuKey,
+        nombre: String(c.nombre || skuKey),
+        stockDisponible: disp,
+        encargosPendientes: enc,
+        weightedDailyRate,
+        daysLeft,
+        suggestedReorderQty,
+        reorderCost,
+        cashVerdict,
+      });
+    }
+  }
+  stockoutPredictions.sort((a, b) => a.daysLeft - b.daysLeft);
+
+  /* ---------------------------------------------------------------------- */
+  /* D. ROAS REAL AJUSTADO POR ENTREGA Y CONTRIBUCIÓN NETA POR ANUNCIO      */
+  /* ---------------------------------------------------------------------- */
+  const adEffectiveRoas: ServerOperationalInference['adEffectiveRoas'] = Array.from(adAgg.entries())
+    .map(([codigo, a]) => {
+      const resolved = a.delivered + a.cancelled;
+      const deliveryRatePct = resolved > 0 ? (a.delivered / resolved) * 100 : null;
+      const grossRoas = a.adSpend > 0 ? a.grossSales / a.adSpend : null;
+      const effectiveRoas = a.adSpend > 0 ? a.deliveredRevenue / a.adSpend : null;
+      const netContribution = a.deliveredRevenue - a.cogsDelivered - a.adSpend;
+
+      let flag: 'ganador' | 'engañoso' | 'normal' | 'muestra_pequena' = 'normal';
+      if (resolved < 4) {
+        flag = 'muestra_pequena';
+      } else if (deliveryRatePct !== null && deliveryRatePct < 65) {
+        flag = 'engañoso';
+      } else if (
+        deliveryRatePct !== null &&
+        deliveryRatePct >= 78 &&
+        (effectiveRoas === null || effectiveRoas >= 3)
+      ) {
+        flag = 'ganador';
+      }
+
+      return {
+        codigo,
+        orders: a.orders,
+        delivered: a.delivered,
+        cancelled: a.cancelled,
+        inProgress: a.inProgress,
+        deliveryRatePct,
+        grossSales: a.grossSales,
+        deliveredRevenue: a.deliveredRevenue,
+        adSpend: a.adSpend,
+        cogsDelivered: a.cogsDelivered,
+        grossRoas,
+        effectiveRoas,
+        netContribution,
+        flag,
+      };
+    })
+    .sort((a, b) => b.netContribution - a.netContribution || b.delivered - a.delivered)
+    .slice(0, 8);
+
+  /* ---------------------------------------------------------------------- */
+  /* E. PARÁMETROS BASE PARA SIMULACIÓN CONTRAFACTUAL ("¿QUÉ PASA SI...?")  */
+  /* ---------------------------------------------------------------------- */
+  const avgTicketDelivered = totalDelivered > 0 ? sumTicketDelivered / totalDelivered : 15;
+  const avgCogsPerOrder =
+    countDeliveredWithCogs > 0 ? sumCogsDelivered / countDeliveredWithCogs : avgTicketDelivered * 0.35;
+  const avgGrossMarginPerOrder = Math.max(1, avgTicketDelivered - avgCogsPerOrder);
+  const dailyOperatingBurn = Math.max(0, dailyBurn);
+  const breakEvenOrdersPerDay =
+    dailyOperatingBurn > 0 ? Math.round((dailyOperatingBurn / avgGrossMarginPerOrder) * 10) / 10 : null;
+  const ordersPerDayFor25Net =
+    dailyOperatingBurn > 0
+      ? Math.round(((dailyOperatingBurn / 0.75) / avgGrossMarginPerOrder) * 10) / 10
+      : null;
+
+  return {
+    svTodayIso,
+    roasStartCutoffIso,
+    sampleResolved60d: totalResolved,
+    globalDeliveryRatePct,
+    globalCancelRatePct,
+    dailyAnomaly: {
+      severity: anomalySeverity,
+      weekdayName,
+      baselineDaysUsed: refDays.length,
+      pacingFactor,
+      chatsToday,
+      baselineChatsPaced,
+      ordersToday,
+      baselineOrdersPaced,
+      revenueToday,
+      baselineRevenuePaced,
+      verdict: anomalyVerdict,
+    },
+    highRiskPreDispatch: highRiskPreDispatch.slice(0, 6),
+    stockoutPredictions: stockoutPredictions.slice(0, 6),
+    adEffectiveRoas,
+    counterfactualParams: {
+      avgTicketDelivered,
+      avgCogsPerOrder,
+      avgGrossMarginPerOrder,
+      dailyOperatingBurn,
+      commitments15d: finHealth.compromisos15dTotal,
+      breakEvenOrdersPerDay,
+      ordersPerDayFor25Net,
+    },
+  };
+}
+
+async function handleRadarInferenceQuery(supabase: any, chatId: string | number) {
+  tgCall('sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
+  const svToday = getElSalvadorDate();
+  const inf = await computeServerOperationalInference(supabase, svToday);
+
+  const anomalyIcon =
+    inf.dailyAnomaly.severity === 'positive'
+      ? '🚀'
+      : inf.dailyAnomaly.severity === 'alert'
+      ? '🔴'
+      : inf.dailyAnomaly.severity === 'warn'
+      ? '🟡'
+      : '🟢';
+
+  const lines: string[] = [
+    `📡 <b>RADAR PREDICTIVO E INFERENCIA · TODOENUNO</b>`,
+    `🗓 <i>${escapeHtml(svToday)} · Base: ${inf.sampleResolved60d} pedidos resueltos (60d · ${inf.globalDeliveryRatePct.toFixed(0)}% entrega global)</i>`,
+    `━━━━━━━━━━━━━━`,
+    ``,
+    `${anomalyIcon} <b>1. DIAGNÓSTICO CAUSAL DE HOY</b>`,
+    `• ${escapeHtml(inf.dailyAnomaly.verdict)}`,
+    `• Chats hoy: <b>${inf.dailyAnomaly.chatsToday}</b> (esp. ~${inf.dailyAnomaly.baselineChatsPaced}) · Pedidos: <b>${inf.dailyAnomaly.ordersToday}</b> (esp. ~${inf.dailyAnomaly.baselineOrdersPaced}) · Venta: <b>${fmtMoney(inf.dailyAnomaly.revenueToday)}</b>`,
+    ``,
+    `🛡 <b>2. RIESGO DE RECHAZO PRE-DESPACHO</b>`,
+  ];
+
+  if (inf.highRiskPreDispatch.length === 0) {
+    lines.push(`• Sin paquetes de riesgo alto en <i>Nuevo / Por empacar</i> ahora mismo ✅`);
+  } else {
+    for (const r of inf.highRiskPreDispatch.slice(0, 4)) {
+      lines.push(
+        `• <b>${escapeHtml(r.cliente)}</b> (${fmtMoney(r.total)}) → <b>${r.riskPct}% riesgo</b> · <i>${escapeHtml(
+          r.reasons.join(' + ') || `${r.departamento} / ${r.courier}`
+        )}</i>`
+      );
+    }
+  }
+
+  lines.push(``);
+  lines.push(`⏳ <b>3. QUIEBRE DE STOCK + CAJA</b>`);
+  if (inf.stockoutPredictions.length === 0) {
+    lines.push(`• Todos los SKUs activos tienen más de 10 días de cobertura al ritmo actual ✅`);
+  } else {
+    for (const s of inf.stockoutPredictions.slice(0, 4)) {
+      const encTxt = s.encargosPendientes > 0 ? ` (${s.encargosPendientes} en encargos)` : '';
+      lines.push(
+        `• <b>${escapeHtml(s.nombre)}</b> (<code>${escapeHtml(s.sku)}</code>): <b>~${s.daysLeft.toFixed(
+          1
+        )}d</b> · ${s.stockDisponible}u disp${encTxt} · ritmo ${s.weightedDailyRate.toFixed(1)}/día`
+      );
+      lines.push(`  <i>↳ Sugerido ${s.suggestedReorderQty}u: ${escapeHtml(s.cashVerdict)}</i>`);
+    }
+  }
+
+  lines.push(``);
+  lines.push(`📣 <b>4. ROAS REAL AJUSTADO POR ENTREGA</b>`);
+  if (inf.adEffectiveRoas.length === 0) {
+    lines.push(`• Sin anuncios con atribución reciente aún.`);
+  } else {
+    for (const a of inf.adEffectiveRoas.slice(0, 5)) {
+      const badge =
+        a.flag === 'ganador'
+          ? '🟢'
+          : a.flag === 'engañoso'
+          ? '🔴'
+          : a.flag === 'muestra_pequena'
+          ? '⚪'
+          : '🟡';
+      const delTxt =
+        a.deliveryRatePct !== null
+          ? `${a.deliveryRatePct.toFixed(0)}% entr. (${a.delivered}/${a.delivered + a.cancelled})`
+          : `${a.inProgress} en ruta`;
+      const roasTxt =
+        a.effectiveRoas !== null
+          ? ` · ROAS cobrado <b>${a.effectiveRoas.toFixed(2)}x</b>`
+          : a.adSpend > 0
+          ? ` · Pauta ${fmtMoney(a.adSpend)}`
+          : '';
+      lines.push(
+        `• ${badge} <code>${escapeHtml(a.codigo)}</code>: ${a.orders} ped · ${delTxt}${roasTxt} · Neto <b>${fmtMoney(
+          a.netContribution
+        )}</b>`
+      );
+    }
+  }
+
+  lines.push(``);
+  lines.push(
+    `<blockquote>⚡ <b>Siguiente nivel:</b> usa <code>/objeciones</code> para minar los chats no cerrados de Todd, o pregúntame cualquier escenario <i>"¿Qué pasa si...?"</i> por texto o nota de voz.</blockquote>`
+  );
+
+  await sendTgMessage(chatId, lines.join('\n'), { reply_markup: AI_QUICK_KEYBOARD });
+}
+
+async function handleObjectionsMiningQuery(supabase: any, chatId: string | number) {
+  tgCall('sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
+  const svToday = getElSalvadorDate();
+  const since48hIso = new Date(Date.now() - 48 * 3600000).toISOString();
+  const since14dIso = new Date(Date.now() - 14 * 86400000).toISOString();
+
+  const [convsRes, ordersRes] = await Promise.all([
+    supabase
+      .from('bb_conversations')
+      .select('id,contact_name,contact_phone,last_message,updated_at,status')
+      .gte('updated_at', since48hIso)
+      .order('updated_at', { ascending: false })
+      .limit(45),
+    supabase
+      .from('whatsapp_orders')
+      .select('telefono,estado')
+      .gte('created_at', since14dIso)
+      .limit(1000),
+  ]);
+
+  const convs = Array.isArray(convsRes?.data) ? convsRes.data : [];
+  const recentOrders = Array.isArray(ordersRes?.data) ? ordersRes.data : [];
+
+  const buyerPhones = new Set<string>();
+  for (const o of recentOrders) {
+    const est = normalizeEstadoOrder(o.estado);
+    if (est === 'cancelado') continue;
+    const d8 = String(o.telefono || '').replace(/\D/g, '').slice(-8);
+    if (d8.length === 8) buyerPhones.add(d8);
+  }
+
+  const unconverted = convs
+    .filter((c: any) => {
+      const d8 = String(c.contact_phone || '').replace(/\D/g, '').slice(-8);
+      if (!d8 || d8.length < 8) return true;
+      return !buyerPhones.has(d8);
+    })
+    .slice(0, 18);
+
+  if (unconverted.length === 0) {
+    await sendTgMessage(
+      chatId,
+      `🔍 <b>MINERÍA DE OBJECIONES (48H)</b>\n━━━━━━━━━━━━━━\n• No se encontraron conversaciones sin pedido en las últimas 48 horas ✅`,
+      { reply_markup: AI_QUICK_KEYBOARD }
+    );
+    return;
+  }
+
+  const convIds = unconverted.map((c: any) => c.id).filter(Boolean);
+  const { data: msgsData } = await supabase
+    .from('bb_messages')
+    .select('conversation_id,body,from_me,created_at')
+    .in('conversation_id', convIds)
+    .order('created_at', { ascending: false })
+    .limit(220);
+
+  const msgsByConv = new Map<string, Array<{ from_me: boolean; body: string }>>();
+  for (const m of Array.isArray(msgsData) ? msgsData : []) {
+    const cid = String(m.conversation_id || '');
+    const body = String(m.body || '').trim();
+    if (!cid || !body) continue;
+    const arr = msgsByConv.get(cid) || [];
+    if (arr.length < 6) {
+      arr.push({ from_me: Boolean(m.from_me), body: body.slice(0, 160) });
+      msgsByConv.set(cid, arr);
+    }
+  }
+
+  const transcriptBlocks: string[] = [];
+  let charBudget = 0;
+  let analyzedCount = 0;
+
+  for (const c of unconverted) {
+    const msgs = (msgsByConv.get(String(c.id)) || []).reverse();
+    if (msgs.length === 0 && !c.last_message) continue;
+    const snippet =
+      msgs.length > 0
+        ? msgs.map((m) => `${m.from_me ? 'TODD' : 'CLIENTE'}: ${m.body}`).join(' | ')
+        : `ULTIMO: ${String(c.last_message || '').slice(0, 160)}`;
+    const block = `[Chat #${analyzedCount + 1} · estado=${c.status || 'bot'}] ${snippet}`;
+    if (charBudget + block.length > 4800) break;
+    transcriptBlocks.push(block);
+    charBudget += block.length;
+    analyzedCount += 1;
+  }
+
+  const apiKey = (process.env.OPENAI_API_KEY || '').trim();
+  if (!apiKey || transcriptBlocks.length === 0) {
+    await sendTgMessage(
+      chatId,
+      [
+        `🔍 <b>CHATS SIN CIERRE (ÚLTIMAS 48H)</b>`,
+        `━━━━━━━━━━━━━━`,
+        `• Detectados <b>${unconverted.length}</b> chats sin pedido en 48h.`,
+        ...unconverted.slice(0, 6).map(
+          (c: any) =>
+            `• <b>${escapeHtml(c.contact_name || 'Lead')}</b>: <i>"${escapeHtml(
+              String(c.last_message || 'Sin texto').slice(0, 90)
+            )}"</i>`
+        ),
+      ].join('\n'),
+      { reply_markup: AI_QUICK_KEYBOARD }
+    );
+    return;
+  }
+
+  const aiRes = await fetchWithTimeoutLocal(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0.2,
+        max_tokens: 580,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Eres un analista de conversión WhatsApp para TODOENUNO (ecommerce COD en El Salvador). Analiza transcripciones reales de chats NO CERRADOS de las últimas 48h. Responde en español usando SOLO HTML básico de Telegram (<b>, <i>, <code>, <blockquote>) — NUNCA uses markdown (** o ###). Estructura EXACTAMENTE en 4 secciones breves: 1) 🚧 <b>Top objeciones reales</b> (máx 3 con conteo exacto de chats), 2) 💡 <b>Demanda oculta / oportunidades</b> (productos, colores o combos que pidieron), 3) ⚙️ <b>Fricción detectada en Todd / reglas</b> (plazos de entrega, falta de respuesta, precio o envío), 4) <blockquote>⚡ <b>Acción inmediata para subir cierre:</b> 1 recomendación concreta.</blockquote> No inventes nada que no aparezca en los chats.',
+          },
+          {
+            role: 'user',
+            content: `MUESTRA DE ${analyzedCount} CHATS NO CERRADOS (ÚLTIMAS 48H, ${svToday}):\n\n${transcriptBlocks.join('\n')}`,
+          },
+        ],
+      }),
+    },
+    9000
+  );
+
+  const aiJson: any = await aiRes.json().catch(() => ({}));
+  const rawAnswer = String(aiJson?.choices?.[0]?.message?.content || '').trim();
+  if (!aiRes.ok || !rawAnswer) {
+    throw new Error(aiJson?.error?.message || 'No se pudieron analizar los chats en este momento.');
+  }
+
+  await sendTgMessage(
+    chatId,
+    `🔍 <b>MINERÍA DE OBJECIONES · CHATS TODD</b>\n🗓 <i>${escapeHtml(svToday)} · Muestra: ${analyzedCount} chats no cerrados (48h)</i>\n━━━━━━━━━━━━━━\n\n${sanitizeTelegramHtml(
+      rawAnswer
+    )}`,
+    { reply_markup: AI_QUICK_KEYBOARD }
+  );
+}
+
 async function handleAiMemoryQuery(supabase: any, chatId: string | number, questionRaw: string) {
   const svToday = getElSalvadorDate();
   const d30CutoffUtc = new Date(Date.now() - 30 * 86400000).toISOString();
@@ -4481,6 +5435,11 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
     deliveredUnliq,
     inRouteList,
   });
+
+  const inference = await computeServerOperationalInference(supabase, svToday, {
+    finHealth,
+    catalog,
+  }).catch(() => null);
 
   // Agregaciones reales 30d + Stock Runway (días de inventario al ritmo 7d)
   const orders30 = Array.isArray(orders30Res?.data) ? orders30Res.data : [];
@@ -4641,6 +5600,9 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
     `SEMANA ANTERIOR (${mem.d14StartIso} a ${mem.d14EndIso}): pedidos=${mem.ordersPrev7d}, entregados=${mem.deliveredPrev7d}, en_proceso_o_ruta=${mem.inProgressPrev7d}, cancelados=${mem.cancelledPrev7d}, tasa_cancelacion_resueltos=${mem.cancelRatePrev7d ?? 'N/A'}%, facturado_no_cancelado=$${mem.grossSalesPrev7d.toFixed(2)}, cobrado_entregado=$${mem.revenuePrev7d.toFixed(2)}, pauta_meta=$${mem.adSpendPrev7d.toFixed(2)}, roas_cobrado=${mem.roasPrev7d ?? 'N/A'}, roas_facturado=${mem.roasGrossPrev7d ?? 'N/A'}`,
     `ESTADO EN VIVO HOY: liquidez_neta=$${totalCash.toFixed(2)}, cajas_y_bancos=$${cashSummary.cashAndBankTotal.toFixed(2)}, desglose_cuentas="${cashSummary.compactBreakdown}", entregados_sin_depositar=${deliveredUnliq.length} ($${sumArr(deliveredUnliq).toFixed(2)}), en_ruta=${inRouteList.length} ($${sumArr(inRouteList).toFixed(2)})`,
     `SALUD FINANCIERA Y VALOR REAL DEL NEGOCIO (${finHealth.periodLabel}): puntaje=${finHealth.score}/100 (${finHealth.estado}), valor_total_real=$${finHealth.valorTotalReal.toFixed(2)} (liquidez_neta=$${finHealth.liquidezNeta.toFixed(2)} + inventario_costo=$${finHealth.inventarioCosto.toFixed(2)} [${finHealth.unidadesFisicas} uds en ${finHealth.skusActivosCount} SKUs] + entregados_sin_liquidar=$${finHealth.entregadosSinLiquidar.toFixed(2)}), oxigeno_caja=${finHealth.runwayDias !== null ? `${finHealth.runwayDias} dias` : 'N/A'}, compromisos_15d=$${finHealth.compromisos15dTotal.toFixed(2)} (${finHealth.compromisos15dCount} pagos, ${finHealth.pagosVencidosCount} vencidos), capital_en_bodega_o_calle=${finHealth.pctCapitalAtrapado.toFixed(0)}%, ingresos_liquidados_mes=$${finHealth.ingresos.toFixed(2)}, egresos_operativos_mes=$${finHealth.egresosOperativos.toFixed(2)}, compras_stock_mes=$${finHealth.comprasInventario.toFixed(2)}, utilidad_operativa_mes=$${finHealth.utilidadOperativa.toFixed(2)}, margen_operativo=${finHealth.margenOperativoPct.toFixed(1)}%, pilares=${JSON.stringify(finHealth.pillars.map((p) => `${p.label}: ${p.score}/${p.maxScore} (${p.summary})`))}${finHealth.simulation ? `, simulador_liquidacion="Liquidar $${finHealth.simulation.montoPorLiquidar.toFixed(2)} sube liquidez a $${finHealth.simulation.nuevaLiquidezNeta.toFixed(2)} y salud a ${finHealth.simulation.nuevoScore}/100 (${finHealth.simulation.nuevoEstado})"` : ''}`,
+    inference
+      ? `INFERENCIA PREDICTIVA Y PARÁMETROS CONTRAFACTUALES (base ${inference.sampleResolved60d} ped. resueltos 60d, entrega_global=${inference.globalDeliveryRatePct.toFixed(1)}%): diagnostico_hoy="${inference.dailyAnomaly.verdict}"; riesgo_pre_despacho=${JSON.stringify(inference.highRiskPreDispatch.slice(0, 4).map((r) => `${r.cliente} ($${r.total}): ${r.riskPct}% [${r.reasons.join(', ')}]`))}; quiebre_stock_y_caja=${JSON.stringify(inference.stockoutPredictions.slice(0, 4).map((s) => `${s.sku}: ~${s.daysLeft.toFixed(1)}d (${s.stockDisponible}u, ritmo ${s.weightedDailyRate.toFixed(1)}/d, ${s.cashVerdict})`))}; roas_real_ajustado=${JSON.stringify(inference.adEffectiveRoas.slice(0, 5).map((a) => `${a.codigo}: ${a.orders}ped, entr=${a.deliveryRatePct?.toFixed(0) ?? 'N/A'}%, pauta=$${a.adSpend.toFixed(2)}, roas_cobrado=${a.effectiveRoas?.toFixed(2) ?? 'N/A'}, neto=$${a.netContribution.toFixed(2)} (${a.flag})`))}; constantes_simulacion={ticket_promedio_entregado:$${inference.counterfactualParams.avgTicketDelivered.toFixed(2)}, cogs_promedio:$${inference.counterfactualParams.avgCogsPerOrder.toFixed(2)}, margen_bruto_por_pedido:$${inference.counterfactualParams.avgGrossMarginPerOrder.toFixed(2)}, quema_operativa_diaria:$${inference.counterfactualParams.dailyOperatingBurn.toFixed(2)}, pedidos_entregados_dia_punto_equilibrio:${inference.counterfactualParams.breakEvenOrdersPerDay ?? 'N/A'}, pedidos_entregados_dia_meta_25_neto:${inference.counterfactualParams.ordersPerDayFor25Net ?? 'N/A'}, compromisos_15d:$${inference.counterfactualParams.commitments15d.toFixed(2)}}`
+      : '',
     `STOCK EN RIESGO (ritmo 7d vs disponible): ${runwayAlerts.join(' | ') || 'ninguno en alerta'}`,
     `SIN STOCK ACTUALMENTE: ${zeroStock.join(', ') || 'ninguno'}`,
     `BRECHA BOT (consultas -> pedidos): ${JSON.stringify(mem.topInquiredNoClose)}`,
@@ -4654,7 +5616,9 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
     ``,
     `EVENTOS RECIENTES (os_events últimos ${mem.recentEventLines.length}):`,
     mem.recentEventLines.slice(0, 75).join('\n'),
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const aiRes = await fetchWithTimeoutLocal(
     'https://api.openai.com/v1/chat/completions',
@@ -4672,7 +5636,7 @@ async function handleAiMemoryQuery(supabase: any, chatId: string | number, quest
           {
             role: 'system',
             content:
-              'Eres el Cerebro Analítico IA de TODOENUNO OS (tienda ecommerce contra entrega en El Salvador). Responde en español usando SOLO HTML básico de Telegram (<b>, <i>, <code>, <blockquote>) — PROHIBIDO usar markdown como ** o ###. Organiza la respuesta de forma visual y fácil de escanear en celular: usa emojis de sección (📊, 💰, 📦, 🎯, ⚡), viñetas (•) con cifras en <b>negrita</b> y termina con un <blockquote>⚡ <b>Conclusión / Acción:</b> ...</blockquote> breve y accionable. Cuando compares semanas, usa los bloques SEMANA ACTUAL vs SEMANA ANTERIOR (incluyendo pedidos en proceso/ruta y tanto facturado como cobrado para no distorsionar días recientes que aún están en entrega). Usa EXCLUSIVAMENTE los datos reales proporcionados; si un dato falta, dilo directo y nunca inventes cifras.',
+              'Eres el Cerebro Analítico e Inferencial IA de TODOENUNO OS (tienda ecommerce contra entrega en El Salvador). Responde en español usando SOLO HTML básico de Telegram (<b>, <i>, <code>, <blockquote>) — PROHIBIDO usar markdown como ** o ###. Organiza la respuesta de forma visual y fácil de escanear en celular: usa emojis de sección (📊, 💰, 📦, 📡, ⚡), viñetas (•) con cifras en <b>negrita</b> y termina con un <blockquote>⚡ <b>Conclusión / Acción:</b> ...</blockquote> breve y accionable. Si el dueño hace una pregunta contrafactual o hipotética ("¿qué pasa si duplico pauta?", "¿cuántos pedidos diarios necesito para...?", "¿me alcanza el stock/caja si...?"), usa las constantes reales del bloque INFERENCIA PREDICTIVA Y PARÁMETROS CONTRAFACTUALES para simular paso a paso el impacto en stock, flujo de caja y margen sin inventar tasas. Siempre menciona cuando una muestra sea pequeña. Usa EXCLUSIVAMENTE los datos reales proporcionados.',
           },
           {
             role: 'user',
@@ -4772,8 +5736,10 @@ async function handleTelegramBotRequest(req: any, res: any) {
           { command: 'stock', description: 'Ver inventario actual: /stock [producto]' },
           { command: 'cajas', description: 'Ver saldos de cajas y bancos' },
           { command: 'salud', description: 'Ver salud financiera (0-100) y valor real del negocio' },
+          { command: 'radar', description: 'Radar IA: anomalías, riesgo rechazo, stock+caja y ROAS real' },
+          { command: 'objeciones', description: 'Minar objeciones y demanda oculta en chats no cerrados (48h)' },
           { command: 'memoria', description: 'Resumen histórico 30d de OS Memory' },
-          { command: 'ia', description: 'Preguntar a la IA sobre tu negocio: /ia PREGUNTA' },
+          { command: 'ia', description: 'Preguntar o simular escenarios (¿qué pasa si...?) con IA' },
           { command: 'brief', description: 'Pedir el brief operativo (AM/PM)' },
           { command: 'ayuda', description: 'Ver guía de texto, notas de voz y fotos' },
         ],
@@ -4835,12 +5801,16 @@ async function handleTelegramBotRequest(req: any, res: any) {
           await handleBriefCommand(req, chatId, '');
         } else if (draftId === 'salud') {
           await handleFinancialHealthQuery(supabase, chatId);
+        } else if (draftId === 'radar') {
+          await handleRadarInferenceQuery(supabase, chatId);
+        } else if (draftId === 'objeciones') {
+          await handleObjectionsMiningQuery(supabase, chatId);
         } else {
           const quickPrompts: Record<string, string> = {
             compare7d: 'Compárame esta semana (últimos 7 días) contra la semana anterior en pedidos, entregas, cancelaciones, cobrado, pauta y ROAS. Dime qué mejoró y qué empeoró.',
-            stock_risk: '¿Qué productos tienen riesgo de quedarse sin stock en los próximos días al ritmo de venta actual de los últimos 7 días y cuáles ya están agotados?',
+            stock_risk: '¿Qué productos tienen riesgo de quedarse sin stock en los próximos días al ritmo de venta actual, cuánto cuesta reponerlos y me alcanza con la liquidez actual?',
             bot_gaps: '¿Qué productos están preguntando más en el bot sin cerrar pedido, por qué puede estar pasando y cómo mejoramos el cierre?',
-            top_ads: '¿Qué anuncios/códigos están generando más entregas reales y facturación últimos 30 días, y en qué departamentos compran o cancelan más?',
+            top_ads: '¿Qué anuncios/códigos están dejando más utilidad neta real ajustada por entrega y cuáles tienen cancelación alta?',
           };
           await handleAiMemoryQuery(
             supabase,
@@ -5341,8 +6311,10 @@ async function handleTelegramBotRequest(req: any, res: any) {
           `• <code>/stock [producto]</code> — Disponible en bodega`,
           `• <code>/cajas</code> — Saldos de cajas y bancos`,
           `• <code>/salud</code> (o <code>/finanzas</code>) — Salud financiera (0-100), valor real y oxígeno de caja`,
+          `• <code>/radar</code> (o <code>/inferencia</code>) — Diagnóstico causal hoy, riesgo rechazo, quiebre stock+caja y ROAS real`,
+          `• <code>/objeciones</code> — Minería IA de chats no cerrados de Todd (últimas 48h)`,
           `• <code>/memoria</code> — Resumen histórico 30d de OS Memory`,
-          `• <code>/ia [pregunta]</code> — Analizar negocio, finanzas, ventas, cancelaciones o ROAS con IA`,
+          `• <code>/ia [pregunta]</code> — Analizar o simular escenarios ("¿qué pasa si duplico pauta?")`,
           `• <code>/brief [am|pm]</code> — Brief operativo completo`,
         ].join('\n')
       );
@@ -5403,17 +6375,47 @@ async function handleTelegramBotRequest(req: any, res: any) {
       return res.status(200).json({ ok: true });
     }
 
+    if (lowerText.startsWith('/radar') || lowerText.startsWith('/inferencia')) {
+      await handleRadarInferenceQuery(supabase, chatId);
+      return res.status(200).json({ ok: true });
+    }
+
+    if (lowerText.startsWith('/objeciones')) {
+      await handleObjectionsMiningQuery(supabase, chatId);
+      return res.status(200).json({ ok: true });
+    }
+
     if (lowerText.startsWith('/brief')) {
       const arg = rawText.replace(/^\/brief(@\S+)?/i, '').trim();
       await handleBriefCommand(req, chatId, arg);
       return res.status(200).json({ ok: true });
     }
 
-    // Fast-path: preguntas analíticas / comparativas / financieras van directo a Memoria IA sin doble llamada OpenAI
+    // Fast-path: preguntas analíticas / predictivas / objeciones / financieras sin doble llamada OpenAI
     const isActionLike =
       /^\/|compr[eé]|gast[eé]|pagu[eé]|met[ií]|ingres[eé]|dañ[oóa]|merma|ajuste|marca|pasa\s+a|cambia\s+el|cu[aá]nto\s+stock|pendientes|pedido\s+de/i.test(
         rawText
       );
+    const isDirectRadarQuestion =
+      !hasPhoto &&
+      !isActionLike &&
+      /(radar\s*(predictivo|ia)?|inferencia|riesgo\s+de\s+(cancel|rechaz)|paquetes\s+con\s+riesgo|quiebre\s+de\s+stock|roas\s+real\s+ajustado)/i.test(
+        rawText
+      );
+    if (isDirectRadarQuestion) {
+      await handleRadarInferenceQuery(supabase, chatId);
+      return res.status(200).json({ ok: true });
+    }
+    const isDirectObjectionsQuestion =
+      !hasPhoto &&
+      !isActionLike &&
+      /(objeciones|por\s*qu[eé]\s+no\s+(compran|cierran|est[aá]n\s+comprando)|chats?\s+(no\s+cerrados|sin\s+cerrar|sin\s+pedido)|demanda\s+oculta)/i.test(
+        rawText
+      );
+    if (isDirectObjectionsQuestion) {
+      await handleObjectionsMiningQuery(supabase, chatId);
+      return res.status(200).json({ ok: true });
+    }
     const isDirectHealthQuestion =
       !hasPhoto &&
       !isActionLike &&
@@ -5428,7 +6430,7 @@ async function handleTelegramBotRequest(req: any, res: any) {
       !hasPhoto &&
       !isActionLike &&
       rawText.length >= 10 &&
-      /(semana|compar|relaci[oó]n\s+a\s+la|roas|por\s*qu[eé]|tendencia|pauta|cancel|product|departament|ayer\b|recomiend|analiz|memoria|negocio|ventas|cierre|cerrando|finanzas|liquidez|margen|patrimonio|ox[ií]geno|runway|compromisos|egresos)/i.test(
+      /(semana|compar|relaci[oó]n\s+a\s+la|roas|por\s*qu[eé]|qu[eé]\s+pasa\s+si|si\s+(duplic|subo|bajo|invierto|aumento)|cu[aá]ntos\s+pedidos\s+(diarios\s+)?necesito|tendencia|pauta|cancel|product|departament|ayer\b|recomiend|analiz|memoria|negocio|ventas|cierre|cerrando|finanzas|liquidez|margen|patrimonio|ox[ií]geno|runway|compromisos|egresos)/i.test(
         rawText
       );
     if (isDirectMemoryQuestion) {
@@ -5889,6 +6891,16 @@ async function handleTelegramBotRequest(req: any, res: any) {
 
     if (parsed.intent === 'consulta_salud_financiera') {
       await handleFinancialHealthQuery(supabase, chatId);
+      return res.status(200).json({ ok: true });
+    }
+
+    if (parsed.intent === 'consulta_radar_inferencia') {
+      await handleRadarInferenceQuery(supabase, chatId);
+      return res.status(200).json({ ok: true });
+    }
+
+    if (parsed.intent === 'consulta_objeciones_chats') {
+      await handleObjectionsMiningQuery(supabase, chatId);
       return res.status(200).json({ ok: true });
     }
 
