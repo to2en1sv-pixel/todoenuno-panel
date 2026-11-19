@@ -1367,6 +1367,20 @@ export function PedidosPage() {
           couriers={courierNames}
           onOpenPedido={(p) => setPedidoAEditar(p as Pedido)}
           onCambiarEstadoDirecto={(p, destino) => cambiarEstadoDirecto(p as Pedido, destino as Estado)}
+          onAssignCourierToOrders={async (orderIds, newCourier) => {
+            if (!orderIds || orderIds.length === 0) return;
+            const courierValue = newCourier.trim() ? newCourier.trim() : null;
+            const { error } = await supabase
+              .from('whatsapp_orders')
+              .update({ courier: courierValue })
+              .in('id', orderIds);
+            if (!error) {
+              const idSet = new Set(orderIds);
+              setPedidos((prev) =>
+                prev.map((p) => (idSet.has(p.id) ? { ...p, courier: courierValue } : p))
+              );
+            }
+          }}
         />
       ) : vista === 'despacho' ? (
         <DespachoGuiasView
