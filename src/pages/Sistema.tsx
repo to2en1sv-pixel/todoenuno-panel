@@ -27,6 +27,15 @@ import {
 import { ensureOrdersEvidenceBucket } from '@/lib/orderStorage';
 import { getDemoShareUrl, isDemoMode } from '@/lib/demoMode';
 import {
+  fetchPanelAccessConfig,
+  getCachedPanelAccessConfig,
+  getEnvOverridePin,
+  lockPanelSession,
+  sanitizePanelPin,
+  savePanelAccessConfig,
+  type PanelAccessConfig,
+} from '@/lib/panelAccess';
+import {
   Activity,
   AlertTriangle,
   Bot,
@@ -251,6 +260,13 @@ export function SistemaPage() {
     getCachedDriverAccessConfig()
   );
   const [savingDriverAccess, setSavingDriverAccess] = useState(false);
+  const [panelAccess, setPanelAccess] = useState<PanelAccessConfig>(() =>
+    getCachedPanelAccessConfig()
+  );
+  const [savingPanelAccess, setSavingPanelAccess] = useState(false);
+  const [showPinManager, setShowPinManager] = useState(false);
+  const [panelPinNotice, setPanelPinNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const envPinLocked = Boolean(getEnvOverridePin());
   const [bucketStatus, setBucketStatus] = useState<{
     checking: boolean;
     ok?: boolean;
@@ -260,12 +276,13 @@ export function SistemaPage() {
   useEffect(() => {
     let active = true;
     setLoadingCouriers(true);
-    Promise.all([fetchCouriers(), fetchDriverAccessConfig()])
-      .then(([{ couriers: loaded, source }, accessCfg]) => {
+    Promise.all([fetchCouriers(), fetchDriverAccessConfig(), fetchPanelAccessConfig()])
+      .then(([{ couriers: loaded, source }, accessCfg, panelCfg]) => {
         if (!active) return;
         setCouriersList(loaded);
         setCourierSource(source);
         setDriverAccess(accessCfg);
+        setPanelAccess(panelCfg);
       })
       .finally(() => {
         if (active) setLoadingCouriers(false);
@@ -340,6 +357,27 @@ export function SistemaPage() {
       });
     } finally {
       setSavingDriverAccess(false);
+    }
+  };
+
+  const handleSavePanelAccess = async () => {
+    if (panelAccess.requirePin && sanitizePanelPin(panelAccess.pin).length < 4) {
+      setPanelPinNotice({ type: 'err', text: 'El PIN del panel debe tener entre 4 y 8 dígitos.' });
+      return;
+    }
+    setSavingPanelAccess(true);
+    setPanelPinNotice(null);
+    try {
+      const res = await savePanelAccessConfig(panelAccess);
+      setPanelAccess(res.config);
+      setPanelPinNotice({
+        type: 'ok',
+        text: res.config.requirePin
+          ? `PIN del panel guardado (${res.savedToCloud ? 'sincronizado en nube' : 'local'}). La ruta /demo sigue siendo pública.`
+          : 'Protección con PIN desactivada para el panel real.',
+      });
+    } finally {
+      setSavingPanelAccess(false);
     }
   };
 
@@ -735,6 +773,19 @@ export function SistemaPage() {
             <>
               <button
                 type="button"
+                onClick={() => setShowPinManager((v) => !v)}
+                className={`px-3 py-2 border rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                  showPinManager
+                    ? 'border-[var(--tx)] bg-sf text-[var(--tx)]'
+                    : 'border-[var(--bd)] bg-cd hover:bg-sf text-[var(--tx)]'
+                }`}
+                title="Configurar PIN de acceso del panel real"
+              >
+                <KeyRound size={12} className="tx-mu" />
+                PIN Panel ({panelAccess.requirePin ? 'Activo' : 'Inactivo'})
+              </button>
+              <button
+                type="button"
                 onClick={() => {
                   const url = getDemoShareUrl();
                   void navigator.clipboard?.writeText(url);
@@ -765,6 +816,92 @@ export function SistemaPage() {
           </Link>
         </div>
       </header>
+
+      {!isDemoMode() && showPinManager && (
+        <section className="bg-cd bd rounded-xl p-5 flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-[var(--tx)]">
+                Protección con PIN del Panel Real
+              </h2>
+              <p className="text-xs tx-mu mt-0.5">
+                Si compartes el enlace <span className="mono">/demo</span> y alguien borra la ruta para entrar al inicio, el panel real pedirá este PIN antes de cargar cualquier dato.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                lockPanelSession();
+                window.location.reload();
+              }}
+              className="px-3 py-1.5 rounded-lg border border-[var(--bd)] bg-sf hover:border-[var(--tx)] text-xs font-semibold text-[var(--tx)] whitespace-nowrap self-start sm:self-auto"
+            >
+              Bloquear ahora
+            </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+            <label className="flex items-center gap-2 text-xs text-[var(--tx)] cursor-pointer select-none sm:pb-2">
+              <input
+                type="checkbox"
+                disabled={envPinLocked}
+                checked={panelAccess.requirePin}
+                onChange={(e) =>
+                  setPanelAccess((prev) => ({ ...prev, requirePin: e.target.checked }))
+                }
+              />
+              <span>Exigir PIN al abrir el panel real</span>
+            </label>
+
+            <div className="w-full sm:w-48">
+              <label className="block text-[11px] font-medium tx-mu mb-1">
+                PIN numérico (4 a 8 dígitos)
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={8}
+                disabled={envPinLocked}
+                value={panelAccess.pin}
+                onChange={(e) =>
+                  setPanelAccess((prev) => ({
+                    ...prev,
+                    pin: sanitizePanelPin(e.target.value),
+                  }))
+                }
+                placeholder="2026"
+                className="w-full px-3 py-2 rounded-lg bg-sf border border-[var(--bd)] text-xs mono font-semibold text-[var(--tx)] focus:outline-none focus:border-[var(--tx)] disabled:opacity-60"
+              />
+            </div>
+
+            {!envPinLocked && (
+              <button
+                type="button"
+                onClick={handleSavePanelAccess}
+                disabled={savingPanelAccess}
+                className="px-4 py-2 rounded-lg bg-[var(--tx)] text-[var(--cd)] text-xs font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 whitespace-nowrap"
+              >
+                {savingPanelAccess ? 'Guardando...' : 'Guardar PIN'}
+              </button>
+            )}
+          </div>
+
+          {envPinLocked && (
+            <p className="text-xs tx-mu">
+              El PIN está controlado actualmente por la variable de entorno <span className="mono">VITE_PANEL_PIN</span> en Vercel.
+            </p>
+          )}
+
+          {panelPinNotice && (
+            <div
+              className="text-xs font-medium"
+              style={{ color: panelPinNotice.type === 'ok' ? 'var(--ok)' : 'var(--er)' }}
+            >
+              {panelPinNotice.text}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Selector de Pestañas Underline */}
       <nav className="flex items-center gap-6 border-b border-[var(--bd)] overflow-x-auto">

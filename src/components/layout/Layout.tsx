@@ -27,6 +27,7 @@ import {
   Bot,
   RotateCcw,
   ExternalLink,
+  Lock,
 } from 'lucide-react';
 import { PWAInstallButton } from '@/components/pwa/PWAComponents';
 import {
@@ -37,6 +38,8 @@ import {
 import { isDemoMode } from '@/lib/demoMode';
 import { resetDemoStore } from '@/lib/demoSupabase';
 import { TelegramCopilotSimulator } from '@/components/demo/TelegramCopilotSimulator';
+import { PanelPinGate } from '@/components/auth/PanelPinGate';
+import { lockPanelSession } from '@/lib/panelAccess';
 
 type NavItem = {
   to: string;
@@ -98,11 +101,17 @@ const mobileQuickTabs = [
 ];
 
 export function Layout() {
-  return (
+  const demoActive = isDemoMode();
+  const shell = (
     <ChatNotificationProvider>
       <LayoutShell />
     </ChatNotificationProvider>
   );
+
+  if (!demoActive) {
+    return <PanelPinGate>{shell}</PanelPinGate>;
+  }
+  return shell;
 }
 
 function LayoutShell() {
@@ -272,6 +281,22 @@ function LayoutShell() {
         >
           <NotificationSettingsButton sidebarRow iconOnly={isCollapsed} />
           <PWAInstallButton iconOnly={isCollapsed} />
+          {!demoActive && (
+            <button
+              type="button"
+              onClick={() => {
+                lockPanelSession();
+                window.location.reload();
+              }}
+              title="Bloquear panel con PIN"
+              className={`rounded-lg text-xs font-medium text-[var(--mu)] hover:text-[var(--tx)] hover:bg-sf transition-colors flex items-center ${
+                isCollapsed ? 'p-2 justify-center' : 'px-2.5 py-1.5 gap-2.5'
+              }`}
+            >
+              <Lock size={14} className="shrink-0" />
+              {!isCollapsed && <span className="truncate">Bloquear panel</span>}
+            </button>
+          )}
         </div>
       </aside>
 
