@@ -25,6 +25,7 @@ import {
   type DriverAccessConfig,
 } from '@/lib/couriers';
 import { ensureOrdersEvidenceBucket } from '@/lib/orderStorage';
+import { getDemoShareUrl, isDemoMode } from '@/lib/demoMode';
 import {
   Activity,
   AlertTriangle,
@@ -729,10 +730,36 @@ export function SistemaPage() {
             Plantillas WhatsApp · Couriers y PIN QR · Reglas Bot Todd · Salud de tablas, Meta y Crons
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {!isDemoMode() && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  const url = getDemoShareUrl();
+                  void navigator.clipboard?.writeText(url);
+                  setTplNotice({ type: 'ok', text: `Enlace Demo copiado: ${url}` });
+                  window.setTimeout(() => setTplNotice(null), 4000);
+                }}
+                className="px-3 py-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                title="Copia la URL pública del entorno Demo con datos ficticios"
+              >
+                <Copy size={12} className="tx-mu" />
+                Copiar URL Demo
+              </button>
+              <a
+                href="/demo"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-2 bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-opacity whitespace-nowrap"
+              >
+                Abrir Demo <ExternalLink size={12} />
+              </a>
+            </>
+          )}
           <Link
             to="/repartidor"
-            className="px-3 py-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
+            className="px-3 py-2 border border-[var(--bd)] bg-cd hover:bg-sf rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
           >
             Portal Repartidor <ExternalLink size={12} className="tx-mu" />
           </Link>

@@ -24,6 +24,9 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Truck,
+  Bot,
+  RotateCcw,
+  ExternalLink,
 } from 'lucide-react';
 import { PWAInstallButton } from '@/components/pwa/PWAComponents';
 import {
@@ -31,6 +34,9 @@ import {
   NotificationSettingsButton,
   useChatNotifications,
 } from '@/components/notifications/ChatNotificationCenter';
+import { isDemoMode } from '@/lib/demoMode';
+import { resetDemoStore } from '@/lib/demoSupabase';
+import { TelegramCopilotSimulator } from '@/components/demo/TelegramCopilotSimulator';
 
 type NavItem = {
   to: string;
@@ -102,6 +108,9 @@ export function Layout() {
 function LayoutShell() {
   const { pathname } = useLocation();
   const { unreadCount } = useChatNotifications();
+  const demoActive = isDemoMode();
+  const brandLabel = demoActive ? 'NEXO COD OS' : 'TODOENUNO OS';
+  const [copilotOpen, setCopilotOpen] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === 'true');
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
@@ -130,7 +139,7 @@ function LayoutShell() {
       <div className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-cd/95 backdrop-blur-md border-b border-[var(--bd)] flex items-center justify-between px-4 z-50">
         <Link to="/" className="font-bold text-sm tracking-tight text-[var(--tx)] flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-[var(--ac)]" aria-hidden="true" />
-          TODOENUNO OS
+          {brandLabel}
         </Link>
         <div className="flex items-center gap-1.5">
           <PWAInstallButton compact />
@@ -174,7 +183,7 @@ function LayoutShell() {
           {!isCollapsed && (
             <Link to="/" className="font-bold text-[13px] tracking-tight text-[var(--tx)] truncate flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[var(--ac)] shrink-0" aria-hidden="true" />
-              TODOENUNO OS
+              {brandLabel}
             </Link>
           )}
 
@@ -275,8 +284,50 @@ function LayoutShell() {
 
       {/* Contenido Principal */}
       <main className="flex-1 min-w-0 overflow-y-auto px-4 py-5 lg:px-8 lg:py-6 pt-20 pb-24 lg:pt-6 lg:pb-8 w-full text-[var(--tx)]">
+        {demoActive && (
+          <div className="mb-5 px-4 py-2.5 rounded-xl bg-cd border border-[var(--bd)] flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs text-[var(--tx)] flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
+              <span className="font-semibold">Entorno Demo Sandbox</span>
+              <span className="tx-mu" aria-hidden="true">·</span>
+              <span className="tx-mu truncate">Nexo Store LATAM (datos sintéticos aislados)</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setCopilotOpen(true)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--tx)] text-[var(--cd)] hover:opacity-90 transition-opacity inline-flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <Bot size={13} />
+                Copiloto Telegram IA
+              </button>
+              <Link
+                to="/demo"
+                className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-sf border border-[var(--bd)] text-[var(--tx)] hover:border-[var(--tx)] transition-colors inline-flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <ExternalLink size={12} />
+                Presentación
+              </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  resetDemoStore();
+                  window.location.reload();
+                }}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-sf border border-[var(--bd)] text-[var(--tx)] hover:border-[var(--tx)] transition-colors inline-flex items-center gap-1.5 whitespace-nowrap"
+                title="Restaurar datos iniciales de la demo"
+              >
+                <RotateCcw size={12} />
+                Reiniciar
+              </button>
+            </div>
+          </div>
+        )}
         <Outlet />
       </main>
+
+      {demoActive && (
+        <TelegramCopilotSimulator open={copilotOpen} onClose={() => setCopilotOpen(false)} />
+      )}
 
       {/* Barra Inferior Rápida para Móvil / PWA */}
       <nav

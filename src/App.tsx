@@ -18,6 +18,7 @@ import { ConfirmarEntregaPage } from "@/pages/ConfirmarEntrega";
 import { EventStreamPage } from '@/pages/EventStreamPage';
 import { FinanzasPage } from '@/pages/FinanzasPage';
 import { LtvPage } from '@/pages/LtvPage';
+import { DemoLandingPage } from '@/pages/DemoLanding';
 import { OfflineIndicator } from '@/components/pwa/PWAComponents';
 
 export default function App() {
@@ -25,6 +26,9 @@ export default function App() {
     <>
       <OfflineIndicator />
       <Routes>
+      {/* 👇 PRESENTACIÓN Y SANDBOX DEMO PARA INVERSIONISTAS / ACELERADORAS */}
+      <Route path="/demo" element={<DemoLandingPage />} />
+
       {/* 👇 RUTAS PARA REPARTIDORES MÓVILES (SIN SIDEBAR) */}
       <Route path="/entregar/:id" element={<ConfirmarEntregaPage />} />
       <Route path="/entregar" element={<ConfirmarEntregaPage />} />
